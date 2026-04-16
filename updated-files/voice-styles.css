@@ -1,0 +1,256 @@
+/* Voice Mode Styles */
+/* ADD THIS TO THE BOTTOM OF YOUR App.css FILE */
+
+.voice-page {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* Voice Picker */
+.voice-picker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.voice-picker-label {
+  font-size: 14px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.voice-pick-btn {
+  padding: 8px 20px;
+  border: 2px solid #e2e8f0;
+  background: white;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  color: #64748b;
+  transition: all 0.2s;
+}
+
+.voice-pick-btn:hover {
+  border-color: #7c3aed;
+  color: #7c3aed;
+}
+
+.voice-pick-btn.active {
+  background: #7c3aed;
+  border-color: #7c3aed;
+  color: white;
+}
+
+.voice-interface {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 20px;
+}
+
+/* Mic Button */
+.voice-mic-btn {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 4px solid #e2e8f0;
+  background: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.voice-mic-btn:hover {
+  border-color: #7c3aed;
+  box-shadow: 0 4px 20px rgba(124,58,237,0.2);
+}
+
+.voice-mic-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.mic-icon {
+  font-size: 48px;
+}
+
+.mic-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Listening State - pulsing red */
+.voice-status-listening {
+  border-color: #dc2626;
+  background: #fef2f2;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.4); }
+  70% { box-shadow: 0 0 0 20px rgba(220, 38, 38, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+}
+
+/* Processing State */
+.voice-status-processing {
+  border-color: #7c3aed;
+  background: #f5f3ff;
+}
+
+/* Speaking State */
+.voice-status-speaking {
+  border-color: #16a34a;
+  background: #dcfce7;
+  animation: pulse-green 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-green {
+  0% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.4); }
+  70% { box-shadow: 0 0 0 20px rgba(22, 163, 74, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
+}
+
+.voice-status-text {
+  margin-top: 16px;
+  color: #64748b;
+  font-size: 16px;
+  text-align: center;
+}
+
+.voice-stop-btn {
+  margin-top: 12px;
+  padding: 8px 20px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.voice-stop-btn:hover {
+  background: #e2e8f0;
+}
+
+.voice-error {
+  color: #dc2626;
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+/* Current Response */
+.voice-current {
+  width: 100%;
+  margin-top: 32px;
+}
+
+.voice-you {
+  background: #f1f5f9;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.voice-ai {
+  background: linear-gradient(135deg, #f5f3ff, #ede9fe);
+  border: 1px solid #c4b5fd;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.voice-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #7c3aed;
+  letter-spacing: 0.5px;
+}
+
+.voice-you .voice-label {
+  color: #64748b;
+}
+
+.voice-you p,
+.voice-ai p {
+  margin: 8px 0 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #1e293b;
+}
+
+/* Quick Commands */
+.voice-quick-commands {
+  margin-top: 32px;
+  padding: 20px;
+  background: #f8fafc;
+  border-radius: 12px;
+}
+
+.voice-quick-commands h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: #64748b;
+}
+
+.quick-command-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quick-cmd {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: #334155;
+}
+
+/* Conversation History */
+.voice-history {
+  margin-top: 32px;
+}
+
+.voice-history h3 {
+  font-size: 16px;
+  color: #334155;
+  margin: 0 0 16px;
+}
+
+.voice-history-item {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+}
+
+.voice-history-time {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+
+.voice-history-q {
+  font-size: 13px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.voice-history-a {
+  font-size: 14px;
+  color: #1e293b;
+  font-weight: 500;
+}

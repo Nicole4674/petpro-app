@@ -1,0 +1,208 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const body = await req.json()
+    console.log('Received booking check request')
+
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
+
+    // Fetch full pet profile
+    const { data: pet, error: petError } = await supabaseAdmin
+      .from('pets')
+      .select('*, clients(first_name, last_name, phone)')
+      .eq('id', body.pet_id)
+      .single()
+
+    if (petError || !pet) {
+      console.log('Pet not found:', petError?.message)
+      return new Response(JSON.stringify({
+        approved: false,
+        flags: [{ level: 'warning', message: 'Could not find pet profile.' }],
+        summary: 'Pet not found in database.'
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    console.log('Found pet:', pet.name, pet.breed)
+
+    // Fetch service if provided
+    let service = null
+    if (body.service_id) {
+      const { data } = await supabaseAdmin
+        .from('services')
+        .select('*')
+        .eq('id', body.service_id)
+        .single()
+      service = data
+    }
+
+    // Check for existing appointments that day
+    const { data: existingAppts } = await supabaseAdmin
+      .from('appointments')
+      .select('id, start_time, end_time, pets(name)')
+      .eq('appointment_date', body.appointment_date)
+      .eq('groomer_id', pet.groomer_id)
+      .neq('status', 'cancelled')
+
+    // Get Claude API key
+    const claudeApiKey = Deno.env.get('CLAUDE_API_KEY')
+
+    if (!claudeApiKey) {
+      console.log('No Claude API key found')
+      return new Response(JSON.stringify({
+        approved: false,
+        flags: [{ level: 'danger', message: 'AI safety system not configured.' }],
+        summary: 'Missing API key.'
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Build the system prompt
+    const systemPrompt = "You are PetPro's AI Safety Brain for a professional dog grooming shop. Your job is to review every booking and flag safety concerns BEFORE the appointment is confirmed.\n\nDANGER FLAGS (serious - require groomer approval):\n- Dog aggressive pets booked when other dogs may be present\n- People aggressive or bite history without muzzle required\n- Collapsed trachea - MUST note SHOULDER WRAP ONLY nothing around neck\n- Missing or expired vaccinations\n- Allergies that could be triggered by grooming products\n- Medications groomer needs to know about\n- Senior dogs with hip/joint issues needing gentle handling\n- Front leg sensitivity requiring extra care\n\nWARNING FLAGS (important - groomer should review):\n- Severe matting on ANY breed - groomer must assess in person before final price\n- Matted doodles poodles or curly coats - NEVER confirm final price without groomer seeing dog\n- Time slot too short for breed size and coat type\n- Puppy age suggesting adult pricing needed\n- Incomplete safety profiles\n- Overlapping appointments\n\nINFO FLAGS (good to know):\n- Anxiety level medium or high\n- Not good with dryer\n- Handling fee applies\n- Grooming notes or special notes\n- Behavior notes\n- Long time since last groom\n\nRESPOND IN THIS EXACT JSON FORMAT ONLY:\n{\"approved\": true or false, \"flags\": [{\"level\": \"danger\" or \"warning\" or \"info\", \"message\": \"specific message\"}], \"summary\": \"one sentence for groomer\"}\n\nRULES:\n- approved false ONLY for danger flags\n- Be specific with pet name and concern\n- Keep messages concise\n- Empty profiles should be flagged as warning"
+
+    // Build pet profile message
+    const petInfo = [
+      "PET: " + pet.name,
+      "Breed: " + (pet.breed || "NOT SPECIFIED"),
+      "Weight: " + (pet.weight ? pet.weight + " lbs" : "NOT SPECIFIED"),
+      "Age: " + (pet.age || "NOT SPECIFIED"),
+      "Spayed/Neutered: " + (pet.is_spayed_neutered ? "Yes" : "Unknown"),
+      "",
+      "SAFETY:",
+      "Allergies: " + (pet.allergies || "None"),
+      "Medications: " + (pet.medications || "None"),
+      "Vaccination Status: " + (pet.vaccination_status || "NOT SPECIFIED"),
+      "Vaccination Expiry: " + (pet.vaccination_expiry || "NOT SPECIFIED"),
+      "Senior: " + (pet.is_senior ? "YES" : "No"),
+      "Hip/Joint Issues: " + (pet.hip_joint_issues ? "YES" : "No"),
+      "Front Leg Sensitivity: " + (pet.front_leg_sensitivity ? "YES" : "No"),
+      "Collapsed Trachea: " + (pet.collapsed_trachea ? "YES SHOULDER WRAP ONLY" : "No"),
+      "",
+      "BEHAVIOR:",
+      "Behavior Notes: " + (pet.behavior_notes || "None"),
+      "Anxiety Level: " + (pet.anxiety_level || "Not specified"),
+      "Dog Aggressive: " + (pet.dog_aggressive ? "YES" : "No"),
+      "People Aggressive: " + (pet.people_aggressive ? "YES" : "No"),
+      "Bite History: " + (pet.bite_history ? "YES" : "No"),
+      "Muzzle Required: " + (pet.muzzle_required ? "YES" : "No"),
+      "Good With Dryer: " + (pet.good_with_dryer === false ? "NO" : pet.good_with_dryer === true ? "Yes" : "Not specified"),
+      "Handling Fee: " + (pet.handling_fee ? "YES" : "No"),
+      "",
+      "COAT:",
+      "Coat Type: " + (pet.coat_type || "Not specified"),
+      "Matting Level: " + (pet.matting_level || "none"),
+      "Matting Notes: " + (pet.matting_notes || "None"),
+      "Last Groom Date: " + (pet.last_groom_date || "Unknown"),
+      "",
+      "NOTES:",
+      "Grooming Notes: " + (pet.grooming_notes || "None"),
+      "Special Notes: " + (pet.special_notes || "None"),
+      "",
+      "SERVICE: " + (service ? service.service_name : "Not selected"),
+      "Category: " + (service ? service.category : "N/A"),
+      "Time Block: " + (service ? service.time_block_minutes + " min" : "N/A"),
+      "Price: " + (service ? "$" + service.price : "N/A"),
+      "",
+      "APPOINTMENT: " + body.appointment_date + " " + body.start_time + " to " + body.end_time,
+      "Client: " + (pet.clients ? pet.clients.first_name + " " + pet.clients.last_name : "Unknown"),
+      "",
+      "OTHER APPOINTMENTS TODAY:"
+    ]
+
+    if (existingAppts && existingAppts.length > 0) {
+      for (const a of existingAppts) {
+        petInfo.push("- " + (a.pets ? a.pets.name : "Unknown") + ": " + a.start_time + " to " + a.end_time)
+      }
+    } else {
+      petInfo.push("None scheduled")
+    }
+
+    const userMessage = petInfo.join("\n")
+    console.log('Calling Claude API...')
+
+    // Call Claude API
+    const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: "Review this booking request:\n\n" + userMessage }
+        ],
+      }),
+    })
+
+    console.log('Claude response status:', claudeResponse.status)
+
+    if (!claudeResponse.ok) {
+      const errText = await claudeResponse.text()
+      console.error('Claude API error:', errText)
+      return new Response(JSON.stringify({
+        approved: false,
+        flags: [{ level: 'warning', message: 'AI safety check temporarily unavailable.' }],
+        summary: 'Could not reach Claude API.'
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const claudeData = await claudeResponse.json()
+    const responseText = claudeData.content[0].text
+    console.log('Claude response:', responseText)
+
+    // Parse the JSON response
+    let safetyCheck
+    try {
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/)
+      safetyCheck = JSON.parse(jsonMatch[0])
+    } catch (parseErr) {
+      console.error('Parse error:', parseErr.message)
+      safetyCheck = {
+        approved: false,
+        flags: [{ level: 'warning', message: 'Could not parse safety response. Manual review needed.' }],
+        summary: 'Safety check response unclear.'
+      }
+    }
+
+    console.log('Returning safety check result')
+    return new Response(JSON.stringify(safetyCheck), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+
+  } catch (err) {
+    console.error('Function error:', err.message)
+    return new Response(JSON.stringify({
+      approved: false,
+      flags: [{ level: 'warning', message: 'Safety check error: ' + err.message }],
+      summary: 'Error during safety check.'
+    }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+})

@@ -1,0 +1,322 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const body = await req.json()
+    console.log('Voice command request received')
+
+    const openaiKey = Deno.env.get('OPENAI_API_KEY')
+    const claudeKey = Deno.env.get('CLAUDE_API_KEY')
+
+    if (!openaiKey || !claudeKey) {
+      console.log('Missing API keys')
+      return new Response(JSON.stringify({ text: 'Voice system not configured.', transcript: '' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Step 1: Transcribe audio with Whisper
+    console.log('Transcribing audio with Whisper...')
+    const audioBytes = Uint8Array.from(atob(body.audio), function(c) { return c.charCodeAt(0) })
+    const audioBlob = new Blob([audioBytes], { type: 'audio/webm' })
+
+    const formData = new FormData()
+    formData.append('file', audioBlob, 'recording.webm')
+    formData.append('model', 'whisper-1')
+
+    const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + openaiKey,
+      },
+      body: formData,
+    })
+
+    if (!whisperResponse.ok) {
+      const errText = await whisperResponse.text()
+      console.error('Whisper error:', errText)
+      return new Response(JSON.stringify({ text: 'Could not understand the audio. Try again.', transcript: '' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const whisperData = await whisperResponse.json()
+    const transcript = whisperData.text
+    console.log('Transcript:', transcript)
+
+    if (!transcript || transcript.trim().length === 0) {
+      return new Response(JSON.stringify({ text: 'I didn\'t catch that. Try again.', transcript: '' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Step 2: Get context from database
+    console.log('Fetching schedule context...')
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
+
+    // Get today's date in local time
+    const now = new Date()
+    const today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0')
+
+    // Get tomorrow
+    const tomorrow = new Date(now)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const tomorrowStr = tomorrow.getFullYear() + '-' + String(tomorrow.getMonth() + 1).padStart(2, '0') + '-' + String(tomorrow.getDate()).padStart(2, '0')
+
+    // Get this week (next 7 days)
+    const weekEnd = new Date(now)
+    weekEnd.setDate(weekEnd.getDate() + 7)
+    const weekEndStr = weekEnd.getFullYear() + '-' + String(weekEnd.getMonth() + 1).padStart(2, '0') + '-' + String(weekEnd.getDate()).padStart(2, '0')
+
+    // Fetch today's appointments
+    const { data: todayAppts } = await supabaseAdmin
+      .from('appointments')
+      .select('*, clients(first_name, last_name, phone), pets(name, breed, weight, grooming_notes, special_notes, allergies, medications, dog_aggressive, matting_level, anxiety_level), services(service_name, price, time_block_minutes)')
+      .eq('groomer_id', body.groomer_id)
+      .eq('appointment_date', today)
+      .neq('status', 'cancelled')
+      .order('start_time')
+
+    // Fetch this week's appointments
+    const { data: weekAppts } = await supabaseAdmin
+      .from('appointments')
+      .select('*, clients(first_name, last_name), pets(name, breed), services(service_name)')
+      .eq('groomer_id', body.groomer_id)
+      .gte('appointment_date', today)
+      .lte('appointment_date', weekEndStr)
+      .neq('status', 'cancelled')
+      .order('appointment_date')
+      .order('start_time')
+
+    // Fetch all clients
+    const { data: allClients } = await supabaseAdmin
+      .from('clients')
+      .select('id, first_name, last_name, phone, email')
+      .eq('groomer_id', body.groomer_id)
+      .order('last_name')
+
+    // Fetch all pets
+    const { data: allPets } = await supabaseAdmin
+      .from('pets')
+      .select('id, name, breed, weight, client_id, grooming_notes, special_notes, allergies, medications, dog_aggressive, matting_level, anxiety_level, last_groom_date')
+      .eq('groomer_id', body.groomer_id)
+
+    // Fetch services
+    const { data: services } = await supabaseAdmin
+      .from('services')
+      .select('id, service_name, price, time_block_minutes, category')
+      .eq('groomer_id', body.groomer_id)
+      .eq('is_active', true)
+
+    // Fetch cancelled appointments today (for "did anyone cancel" questions)
+    const { data: cancelledToday } = await supabaseAdmin
+      .from('appointments')
+      .select('*, clients(first_name, last_name), pets(name)')
+      .eq('groomer_id', body.groomer_id)
+      .eq('appointment_date', today)
+      .eq('status', 'cancelled')
+
+    // Build context string
+    function formatTime(timeStr) {
+      if (!timeStr) return ''
+      var parts = timeStr.split(':')
+      var h = parseInt(parts[0])
+      var m = parseInt(parts[1])
+      var ampm = h >= 12 ? 'PM' : 'AM'
+      var hr = h === 0 ? 12 : (h > 12 ? h - 12 : h)
+      return m === 0 ? hr + ' ' + ampm : hr + ':' + String(m).padStart(2, '0') + ' ' + ampm
+    }
+
+    var contextParts = []
+    contextParts.push('TODAY: ' + today)
+    contextParts.push('')
+
+    // Today's schedule
+    contextParts.push('=== TODAY\'S APPOINTMENTS ===')
+    if (todayAppts && todayAppts.length > 0) {
+      for (var a of todayAppts) {
+        var line = formatTime(a.start_time) + ' - ' + formatTime(a.end_time)
+        line = line + ' | ' + (a.pets ? a.pets.name : 'Unknown pet')
+        line = line + ' (' + (a.pets ? a.pets.breed : 'Unknown breed') + ')'
+        line = line + ' | Client: ' + (a.clients ? a.clients.first_name + ' ' + a.clients.last_name : 'Unknown')
+        line = line + ' | Service: ' + (a.services ? a.services.service_name : 'Not set')
+        line = line + ' | Status: ' + a.status
+        if (a.pets && a.pets.grooming_notes) line = line + ' | Notes: ' + a.pets.grooming_notes
+        if (a.pets && a.pets.special_notes) line = line + ' | Special: ' + a.pets.special_notes
+        if (a.service_notes) line = line + ' | Appt Notes: ' + a.service_notes
+        contextParts.push(line)
+      }
+    } else {
+      contextParts.push('No appointments scheduled today.')
+    }
+
+    // Cancellations today
+    contextParts.push('')
+    contextParts.push('=== CANCELLATIONS TODAY ===')
+    if (cancelledToday && cancelledToday.length > 0) {
+      for (var c of cancelledToday) {
+        contextParts.push(formatTime(c.start_time) + ' - ' + (c.pets ? c.pets.name : 'Unknown') + ' (' + (c.clients ? c.clients.first_name + ' ' + c.clients.last_name : 'Unknown') + ') - CANCELLED')
+      }
+    } else {
+      contextParts.push('No cancellations today.')
+    }
+
+    // This week
+    contextParts.push('')
+    contextParts.push('=== THIS WEEK\'S APPOINTMENTS ===')
+    if (weekAppts && weekAppts.length > 0) {
+      for (var w of weekAppts) {
+        contextParts.push(w.appointment_date + ' ' + formatTime(w.start_time) + ' | ' + (w.pets ? w.pets.name : 'Unknown') + ' | ' + (w.clients ? w.clients.first_name + ' ' + w.clients.last_name : 'Unknown') + ' | ' + (w.services ? w.services.service_name : 'Not set'))
+      }
+    } else {
+      contextParts.push('No appointments this week.')
+    }
+
+    // Client list
+    contextParts.push('')
+    contextParts.push('=== ALL CLIENTS ===')
+    if (allClients && allClients.length > 0) {
+      for (var cl of allClients) {
+        contextParts.push(cl.first_name + ' ' + cl.last_name + (cl.phone ? ' | ' + cl.phone : ''))
+      }
+    }
+
+    // Pet list
+    contextParts.push('')
+    contextParts.push('=== ALL PETS ===')
+    if (allPets && allPets.length > 0) {
+      for (var p of allPets) {
+        var petLine = p.name + ' (' + (p.breed || 'Unknown breed') + ')'
+        if (p.weight) petLine = petLine + ' ' + p.weight + 'lbs'
+        if (p.grooming_notes) petLine = petLine + ' | Notes: ' + p.grooming_notes
+        if (p.allergies) petLine = petLine + ' | Allergies: ' + p.allergies
+        if (p.dog_aggressive) petLine = petLine + ' | DOG AGGRESSIVE'
+        contextParts.push(petLine)
+      }
+    }
+
+    // Services
+    contextParts.push('')
+    contextParts.push('=== SERVICES ===')
+    if (services && services.length > 0) {
+      for (var s of services) {
+        contextParts.push(s.service_name + ' | $' + s.price + ' | ' + s.time_block_minutes + ' min')
+      }
+    }
+
+    var contextString = contextParts.join('\n')
+
+    // Step 3: Send to Claude
+    console.log('Sending to Claude...')
+    var systemPrompt = [
+      'You are PetPro AI, a voice assistant for a professional dog groomer. The groomer is talking to you hands-free while working.',
+      '',
+      'RULES:',
+      '- Keep responses SHORT and conversational - this will be read aloud',
+      '- Answer questions about the schedule, clients, and pets using the data provided',
+      '- If asked to book an appointment, provide the details but say you have noted it (actual booking happens in the app)',
+      '- If asked about a specific time, check the schedule data',
+      '- If asked about a pet, look up their profile info',
+      '- Be helpful, friendly, and concise',
+      '- Use the groomer\'s actual data to answer - never make up appointments or clients',
+      '- If you don\'t have enough info, say so',
+      '- When mentioning times, use 12-hour format (2 PM not 14:00)',
+      '- Refer to yourself as PetPro AI',
+      '',
+      'CURRENT SCHEDULE AND DATA:',
+      contextString,
+    ].join('\n')
+
+    var claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 500,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: transcript }
+        ],
+      }),
+    })
+
+    if (!claudeResponse.ok) {
+      var errText = await claudeResponse.text()
+      console.error('Claude error:', errText)
+      return new Response(JSON.stringify({ text: 'PetPro AI is having trouble right now. Try again in a moment.', transcript: transcript }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    var claudeData = await claudeResponse.json()
+    var responseText = claudeData.content[0].text
+    console.log('Claude response:', responseText)
+
+    // Step 4: Generate speech with OpenAI TTS
+    var speechAudio = null
+    var voiceChoice = body.voice || 'echo'
+    try {
+      console.log('Generating speech with voice:', voiceChoice)
+      var ttsResponse = await fetch('https://api.openai.com/v1/audio/speech', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + openaiKey,
+        },
+        body: JSON.stringify({
+          model: 'tts-1',
+          input: responseText,
+          voice: voiceChoice,
+          response_format: 'mp3',
+        }),
+      })
+
+      if (ttsResponse.ok) {
+        var audioBuffer = await ttsResponse.arrayBuffer()
+        var audioArray = new Uint8Array(audioBuffer)
+        var binaryStr = ''
+        for (var i = 0; i < audioArray.length; i++) {
+          binaryStr += String.fromCharCode(audioArray[i])
+        }
+        speechAudio = btoa(binaryStr)
+        console.log('Speech generated successfully')
+      } else {
+        console.error('TTS error:', await ttsResponse.text())
+      }
+    } catch (ttsErr) {
+      console.error('TTS failed:', ttsErr.message)
+    }
+
+    return new Response(JSON.stringify({ text: responseText, transcript: transcript, audio: speechAudio }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+
+  } catch (err) {
+    console.error('Function error:', err.message)
+    return new Response(JSON.stringify({ text: 'Something went wrong. Try again.', transcript: '', error: err.message }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+})

@@ -1,0 +1,839 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+// Tools Claude can use - search first, then act
+var toolDefinitions = [
+  {
+    name: 'search_clients',
+    description: 'Search for clients by name, phone, or partial match. ALWAYS use this first when the user mentions a client by name, before taking any action. Returns client IDs, names, phones, and their pets.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Name or phone to search for (partial match OK)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'get_client_details',
+    description: 'Get full details about a specific client and all their pets. Use after search_clients to get complete info.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'The UUID of the client' },
+      },
+      required: ['client_id'],
+    },
+  },
+  {
+    name: 'edit_client',
+    description: 'Edit a client\'s information. You must search for the client first to get their ID.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'The UUID of the client to edit' },
+        first_name: { type: 'string', description: 'New first name' },
+        last_name: { type: 'string', description: 'New last name' },
+        phone: { type: 'string', description: 'New phone number' },
+        email: { type: 'string', description: 'New email address' },
+        address: { type: 'string', description: 'New address' },
+        notes: { type: 'string', description: 'New notes (replaces existing notes)' },
+      },
+      required: ['client_id'],
+    },
+  },
+  {
+    name: 'delete_client',
+    description: 'Delete a client, their pets, and appointments permanently. Search first to get the ID.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'The UUID of the client to delete' },
+        client_name: { type: 'string', description: 'The name of the client for confirmation' },
+      },
+      required: ['client_id', 'client_name'],
+    },
+  },
+  {
+    name: 'add_client',
+    description: 'Add a new client to the system.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        first_name: { type: 'string', description: 'Client first name' },
+        last_name: { type: 'string', description: 'Client last name' },
+        phone: { type: 'string', description: 'Phone number' },
+        email: { type: 'string', description: 'Email address' },
+        address: { type: 'string', description: 'Address' },
+        notes: { type: 'string', description: 'Notes about the client' },
+      },
+      required: ['first_name', 'last_name', 'phone'],
+    },
+  },
+  {
+    name: 'edit_pet',
+    description: 'Edit a pet\'s information. Search for the client first to find the pet ID.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pet_id: { type: 'string', description: 'The UUID of the pet to edit' },
+        name: { type: 'string', description: 'New pet name' },
+        breed: { type: 'string', description: 'New breed' },
+        weight: { type: 'number', description: 'New weight in pounds' },
+        grooming_notes: { type: 'string', description: 'Grooming notes' },
+        special_notes: { type: 'string', description: 'Special handling notes' },
+        allergies: { type: 'string', description: 'Known allergies' },
+        medications: { type: 'string', description: 'Current medications' },
+        dog_aggressive: { type: 'boolean', description: 'Dog aggressive toward other dogs' },
+        people_aggressive: { type: 'boolean', description: 'People aggressive' },
+        bite_history: { type: 'boolean', description: 'Has bite history' },
+        collapsed_trachea: { type: 'boolean', description: 'Has collapsed trachea' },
+        hip_joint_issues: { type: 'boolean', description: 'Has hip or joint issues' },
+        matting_level: { type: 'string', description: 'none, mild, moderate, severe' },
+        anxiety_level: { type: 'string', description: 'none, mild, moderate, severe' },
+      },
+      required: ['pet_id'],
+    },
+  },
+  {
+    name: 'delete_pet',
+    description: 'Delete a pet and their appointments permanently.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pet_id: { type: 'string', description: 'The UUID of the pet to delete' },
+        pet_name: { type: 'string', description: 'Name of the pet for confirmation' },
+      },
+      required: ['pet_id', 'pet_name'],
+    },
+  },
+  {
+    name: 'add_pet',
+    description: 'Add a new pet to an existing client. Search for the client first to get their ID.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'The UUID of the client who owns the pet' },
+        name: { type: 'string', description: 'Pet name' },
+        breed: { type: 'string', description: 'Breed' },
+        weight: { type: 'number', description: 'Weight in pounds' },
+        grooming_notes: { type: 'string', description: 'Grooming notes' },
+        special_notes: { type: 'string', description: 'Special handling notes' },
+        allergies: { type: 'string', description: 'Known allergies' },
+        medications: { type: 'string', description: 'Current medications' },
+        dog_aggressive: { type: 'boolean', description: 'Dog aggressive' },
+        people_aggressive: { type: 'boolean', description: 'People aggressive' },
+      },
+      required: ['client_id', 'name'],
+    },
+  },
+  {
+    name: 'mark_pet_deceased',
+    description: 'Mark a pet as deceased/passed away. Keeps the record but marks it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pet_id: { type: 'string', description: 'The UUID of the pet' },
+        pet_name: { type: 'string', description: 'Name of the pet for confirmation' },
+      },
+      required: ['pet_id', 'pet_name'],
+    },
+  },
+  {
+    name: 'book_appointment',
+    description: 'Book a new appointment. Search for the client and their pet first.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'The UUID of the client' },
+        pet_id: { type: 'string', description: 'The UUID of the pet' },
+        service_id: { type: 'string', description: 'The UUID of the service' },
+        appointment_date: { type: 'string', description: 'Date in YYYY-MM-DD format' },
+        start_time: { type: 'string', description: 'Start time in HH:MM format (24-hour)' },
+        end_time: { type: 'string', description: 'End time in HH:MM format (24-hour)' },
+        quoted_price: { type: 'number', description: 'Quoted price' },
+        service_notes: { type: 'string', description: 'Notes for this appointment' },
+        duration_minutes: { type: 'number', description: 'Duration in minutes. Use weight rules: under 70lbs=60, 70-89lbs=90, 90+lbs=120, bath=30' },
+      },
+      required: ['client_id', 'pet_id', 'appointment_date', 'start_time'],
+    },
+  },
+  {
+    name: 'cancel_appointment',
+    description: 'Cancel an existing appointment.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        appointment_id: { type: 'string', description: 'The UUID of the appointment to cancel' },
+      },
+      required: ['appointment_id'],
+    },
+  },
+  {
+    name: 'reschedule_appointment',
+    description: 'Reschedule an appointment to a new date/time.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        appointment_id: { type: 'string', description: 'The UUID of the appointment' },
+        new_date: { type: 'string', description: 'New date YYYY-MM-DD' },
+        new_start_time: { type: 'string', description: 'New start time HH:MM (24-hour)' },
+        new_end_time: { type: 'string', description: 'New end time HH:MM (24-hour)' },
+      },
+      required: ['appointment_id'],
+    },
+  },
+  {
+    name: 'mark_do_not_book',
+    description: 'Mark a client as Do Not Book.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'The UUID of the client' },
+        reason: { type: 'string', description: 'Reason for do-not-book' },
+      },
+      required: ['client_id'],
+    },
+  },
+  {
+    name: 'get_last_appointment',
+    description: 'Get a pet\'s most recent completed appointment. Use this for SALT (Same As Last Time) pricing - check what the pet was last charged before booking. If the pet has been here before, offer the same price as last time.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pet_id: { type: 'string', description: 'The UUID of the pet' },
+      },
+      required: ['pet_id'],
+    },
+  },
+  {
+    name: 'get_schedule',
+    description: 'Get appointments for a specific date or date range. Use when the user asks about their schedule, what\'s booked, or what\'s coming up.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'Date in YYYY-MM-DD format. Defaults to today.' },
+        end_date: { type: 'string', description: 'Optional end date for a range' },
+      },
+      required: [],
+    },
+  },
+]
+
+// Execute tool calls
+async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
+  try {
+    switch (toolName) {
+
+      case 'search_clients': {
+        var query = toolInput.query.trim()
+        // Split query into words to handle "first last" searches
+        var words = query.split(/\s+/)
+        var byName = []
+
+        if (words.length >= 2) {
+          // Multi-word search: try first word as first_name AND second word as last_name
+          var { data: exactMatch } = await supabaseAdmin
+            .from('clients')
+            .select('id, first_name, last_name, phone, email, notes')
+            .eq('groomer_id', groomerId)
+            .ilike('first_name', '%' + words[0] + '%')
+            .ilike('last_name', '%' + words[1] + '%')
+            .limit(10)
+          byName = exactMatch || []
+        }
+
+        // Also do broad search on each word against both fields
+        if (byName.length === 0) {
+          var orParts = []
+          for (var w of words) {
+            orParts.push('first_name.ilike.%' + w + '%')
+            orParts.push('last_name.ilike.%' + w + '%')
+          }
+          var { data: broadMatch } = await supabaseAdmin
+            .from('clients')
+            .select('id, first_name, last_name, phone, email, notes')
+            .eq('groomer_id', groomerId)
+            .or(orParts.join(','))
+            .limit(10)
+          byName = broadMatch || []
+        }
+
+        // Also search by phone if query looks like a number
+        var results = byName || []
+        if (/\d{3,}/.test(query)) {
+          var { data: byPhone } = await supabaseAdmin
+            .from('clients')
+            .select('id, first_name, last_name, phone, email, notes')
+            .eq('groomer_id', groomerId)
+            .ilike('phone', '%' + query + '%')
+            .limit(5)
+          if (byPhone) {
+            for (var p of byPhone) {
+              var found = false
+              for (var r of results) { if (r.id === p.id) found = true }
+              if (!found) results.push(p)
+            }
+          }
+        }
+
+        // Get pets for each matched client
+        var clientIds = results.map(function(c) { return c.id })
+        var pets = []
+        if (clientIds.length > 0) {
+          var { data: petData } = await supabaseAdmin
+            .from('pets')
+            .select('id, client_id, name, breed, weight, grooming_notes, special_notes, allergies, medications, dog_aggressive, people_aggressive, collapsed_trachea')
+            .eq('groomer_id', groomerId)
+            .in('client_id', clientIds)
+          pets = petData || []
+        }
+
+        // Attach pets to clients
+        var output = results.map(function(c) {
+          var clientPets = pets.filter(function(p) { return p.client_id === c.id })
+          return {
+            id: c.id,
+            name: c.first_name + ' ' + c.last_name,
+            phone: c.phone,
+            email: c.email,
+            notes: c.notes,
+            pets: clientPets,
+          }
+        })
+
+        if (output.length === 0) return { success: true, message: 'No clients found matching "' + query + '"', results: [] }
+        return { success: true, results: output }
+      }
+
+      case 'get_client_details': {
+        var { data: clientInfo } = await supabaseAdmin
+          .from('clients')
+          .select('*')
+          .eq('id', toolInput.client_id)
+          .eq('groomer_id', groomerId)
+          .single()
+
+        var { data: clientPets } = await supabaseAdmin
+          .from('pets')
+          .select('*')
+          .eq('client_id', toolInput.client_id)
+          .eq('groomer_id', groomerId)
+
+        if (!clientInfo) return { success: false, error: 'Client not found' }
+        return { success: true, client: clientInfo, pets: clientPets || [] }
+      }
+
+      case 'edit_client': {
+        var updates = {}
+        if (toolInput.first_name) updates.first_name = toolInput.first_name
+        if (toolInput.last_name) updates.last_name = toolInput.last_name
+        if (toolInput.phone !== undefined) {
+          var ph = (toolInput.phone || '').replace(/\D/g, '')
+          if (ph.length === 10) ph = '1' + ph
+          if (ph.length === 11 && ph[0] === '1') ph = '+' + ph
+          if (ph && ph[0] !== '+') ph = '+' + ph
+          updates.phone = ph || ''
+        }
+        if (toolInput.email !== undefined) updates.email = toolInput.email || null
+        if (toolInput.address !== undefined) updates.address = toolInput.address || null
+        if (toolInput.notes !== undefined) updates.notes = toolInput.notes || null
+        if (Object.keys(updates).length === 0) return { success: false, error: 'No fields to update' }
+
+        var { error } = await supabaseAdmin
+          .from('clients')
+          .update(updates)
+          .eq('id', toolInput.client_id)
+          .eq('groomer_id', groomerId)
+
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Client updated successfully', updated_fields: Object.keys(updates) }
+      }
+
+      case 'delete_client': {
+        await supabaseAdmin.from('appointments').delete().eq('client_id', toolInput.client_id).eq('groomer_id', groomerId)
+        await supabaseAdmin.from('pets').delete().eq('client_id', toolInput.client_id).eq('groomer_id', groomerId)
+        var { error } = await supabaseAdmin.from('clients').delete().eq('id', toolInput.client_id).eq('groomer_id', groomerId)
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Client "' + toolInput.client_name + '" and all their pets and appointments have been deleted' }
+      }
+
+      case 'add_client': {
+        var phone = ''
+        if (toolInput.phone) {
+          phone = toolInput.phone.replace(/\D/g, '')
+          if (phone.length === 10) phone = '1' + phone
+          if (phone.length === 11 && phone[0] === '1') phone = '+' + phone
+          if (phone && phone[0] !== '+') phone = '+' + phone
+        }
+        var { data: newClient, error } = await supabaseAdmin
+          .from('clients')
+          .insert({
+            groomer_id: groomerId,
+            first_name: toolInput.first_name,
+            last_name: toolInput.last_name || '',
+            phone: phone || '',
+            email: toolInput.email || null,
+            address: toolInput.address || null,
+            notes: toolInput.notes || null,
+          })
+          .select('id, first_name, last_name')
+          .single()
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Client added successfully', client: newClient }
+      }
+
+      case 'edit_pet': {
+        var updates = {}
+        if (toolInput.name) updates.name = toolInput.name
+        if (toolInput.breed !== undefined) updates.breed = toolInput.breed || null
+        if (toolInput.weight !== undefined) updates.weight = toolInput.weight
+        if (toolInput.grooming_notes !== undefined) updates.grooming_notes = toolInput.grooming_notes || null
+        if (toolInput.special_notes !== undefined) updates.special_notes = toolInput.special_notes || null
+        if (toolInput.allergies !== undefined) updates.allergies = toolInput.allergies || null
+        if (toolInput.medications !== undefined) updates.medications = toolInput.medications || null
+        if (toolInput.dog_aggressive !== undefined) updates.dog_aggressive = toolInput.dog_aggressive
+        if (toolInput.people_aggressive !== undefined) updates.people_aggressive = toolInput.people_aggressive
+        if (toolInput.bite_history !== undefined) updates.bite_history = toolInput.bite_history
+        if (toolInput.collapsed_trachea !== undefined) updates.collapsed_trachea = toolInput.collapsed_trachea
+        if (toolInput.hip_joint_issues !== undefined) updates.hip_joint_issues = toolInput.hip_joint_issues
+        if (toolInput.matting_level !== undefined) updates.matting_level = toolInput.matting_level
+        if (toolInput.anxiety_level !== undefined) updates.anxiety_level = toolInput.anxiety_level
+        if (Object.keys(updates).length === 0) return { success: false, error: 'No fields to update' }
+
+        var { error } = await supabaseAdmin.from('pets').update(updates).eq('id', toolInput.pet_id).eq('groomer_id', groomerId)
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Pet updated successfully', updated_fields: Object.keys(updates) }
+      }
+
+      case 'delete_pet': {
+        await supabaseAdmin.from('appointments').delete().eq('pet_id', toolInput.pet_id).eq('groomer_id', groomerId)
+        var { error } = await supabaseAdmin.from('pets').delete().eq('id', toolInput.pet_id).eq('groomer_id', groomerId)
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Pet "' + toolInput.pet_name + '" and their appointments have been deleted' }
+      }
+
+      case 'add_pet': {
+        var { data: newPet, error } = await supabaseAdmin
+          .from('pets')
+          .insert({
+            groomer_id: groomerId,
+            client_id: toolInput.client_id,
+            name: toolInput.name,
+            breed: toolInput.breed || null,
+            weight: toolInput.weight || null,
+            grooming_notes: toolInput.grooming_notes || null,
+            special_notes: toolInput.special_notes || null,
+            allergies: toolInput.allergies || null,
+            medications: toolInput.medications || null,
+            dog_aggressive: toolInput.dog_aggressive || false,
+            people_aggressive: toolInput.people_aggressive || false,
+          })
+          .select('id, name, breed')
+          .single()
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Pet "' + newPet.name + '" added', pet: newPet }
+      }
+
+      case 'mark_pet_deceased': {
+        var { error } = await supabaseAdmin
+          .from('pets')
+          .update({ special_notes: 'DECEASED - Pet has passed away' })
+          .eq('id', toolInput.pet_id)
+          .eq('groomer_id', groomerId)
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Pet "' + toolInput.pet_name + '" has been marked as deceased. Record preserved.' }
+      }
+
+      case 'book_appointment': {
+        var endTime = toolInput.end_time
+        if (!endTime) {
+          // Default to 1 hour, but Claude should pass end_time based on weight rules
+          var startParts = toolInput.start_time.split(':')
+          var startMinutes = parseInt(startParts[0]) * 60 + parseInt(startParts[1])
+          var duration = toolInput.duration_minutes || 60
+          var endMinutes = startMinutes + duration
+          var endH = Math.floor(endMinutes / 60)
+          var endM = endMinutes % 60
+          endTime = String(endH).padStart(2, '0') + ':' + String(endM).padStart(2, '0')
+        }
+        var apptData = {
+          groomer_id: groomerId,
+          client_id: toolInput.client_id,
+          pet_id: toolInput.pet_id,
+          appointment_date: toolInput.appointment_date,
+          start_time: toolInput.start_time,
+          end_time: endTime,
+          status: 'confirmed',
+        }
+        if (toolInput.service_id) apptData.service_id = toolInput.service_id
+        if (toolInput.quoted_price) apptData.quoted_price = toolInput.quoted_price
+        if (toolInput.service_notes) apptData.service_notes = toolInput.service_notes
+
+        var { data: newAppt, error } = await supabaseAdmin
+          .from('appointments')
+          .insert(apptData)
+          .select('id, appointment_date, start_time, end_time')
+          .single()
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Appointment booked for ' + toolInput.appointment_date + ' at ' + toolInput.start_time, appointment: newAppt }
+      }
+
+      case 'cancel_appointment': {
+        var { error } = await supabaseAdmin
+          .from('appointments')
+          .update({ status: 'cancelled' })
+          .eq('id', toolInput.appointment_id)
+          .eq('groomer_id', groomerId)
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Appointment cancelled successfully' }
+      }
+
+      case 'reschedule_appointment': {
+        var updates = {}
+        if (toolInput.new_date) updates.appointment_date = toolInput.new_date
+        if (toolInput.new_start_time) updates.start_time = toolInput.new_start_time
+        if (toolInput.new_end_time) updates.end_time = toolInput.new_end_time
+        if (Object.keys(updates).length === 0) return { success: false, error: 'No new date or time provided' }
+
+        var { error } = await supabaseAdmin
+          .from('appointments')
+          .update(updates)
+          .eq('id', toolInput.appointment_id)
+          .eq('groomer_id', groomerId)
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Appointment rescheduled successfully' }
+      }
+
+      case 'mark_do_not_book': {
+        var { data: clientData } = await supabaseAdmin
+          .from('clients')
+          .select('notes')
+          .eq('id', toolInput.client_id)
+          .eq('groomer_id', groomerId)
+          .single()
+
+        var currentNotes = (clientData && clientData.notes) || ''
+        var dnbNote = 'DO NOT BOOK'
+        if (toolInput.reason) dnbNote = dnbNote + ' - ' + toolInput.reason
+        var newNotes = currentNotes ? currentNotes + ' | ' + dnbNote : dnbNote
+
+        var { error } = await supabaseAdmin.from('clients').update({ notes: newNotes }).eq('id', toolInput.client_id).eq('groomer_id', groomerId)
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Client marked as Do Not Book' }
+      }
+
+      case 'get_last_appointment': {
+        var { data: lastAppt } = await supabaseAdmin
+          .from('appointments')
+          .select('id, appointment_date, start_time, end_time, status, quoted_price, service_notes, services(service_name)')
+          .eq('pet_id', toolInput.pet_id)
+          .eq('groomer_id', groomerId)
+          .in('status', ['confirmed', 'completed'])
+          .order('appointment_date', { ascending: false })
+          .order('start_time', { ascending: false })
+          .limit(1)
+          .single()
+
+        if (!lastAppt) return { success: true, message: 'No previous appointments found for this pet. Use standard pricing.', has_history: false }
+        return {
+          success: true,
+          has_history: true,
+          last_appointment: {
+            date: lastAppt.appointment_date,
+            service: lastAppt.services ? lastAppt.services.service_name : 'Unknown',
+            price: lastAppt.quoted_price,
+            notes: lastAppt.service_notes,
+          },
+        }
+      }
+
+      case 'get_schedule': {
+        var now = new Date()
+        var targetDate = toolInput.date || (now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0'))
+        var endDate = toolInput.end_date || targetDate
+
+        var { data: appts } = await supabaseAdmin
+          .from('appointments')
+          .select('id, appointment_date, start_time, end_time, status, quoted_price, service_notes, clients(first_name, last_name, phone), pets(name, breed, grooming_notes, special_notes, allergies, dog_aggressive, people_aggressive, collapsed_trachea), services(service_name, price, time_block_minutes)')
+          .eq('groomer_id', groomerId)
+          .gte('appointment_date', targetDate)
+          .lte('appointment_date', endDate)
+          .neq('status', 'cancelled')
+          .order('appointment_date')
+          .order('start_time')
+
+        if (!appts || appts.length === 0) return { success: true, message: 'No appointments found for ' + targetDate + (endDate !== targetDate ? ' to ' + endDate : ''), appointments: [] }
+
+        return { success: true, date: targetDate, end_date: endDate, appointments: appts }
+      }
+
+      default:
+        return { success: false, error: 'Unknown tool: ' + toolName }
+    }
+  } catch (err) {
+    return { success: false, error: 'Tool error: ' + err.message }
+  }
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    var body = await req.json()
+    console.log('Chat command received:', body.message)
+
+    var claudeKey = Deno.env.get('CLAUDE_API_KEY')
+    if (!claudeKey) {
+      return new Response(JSON.stringify({ text: 'PetPro AI is not configured yet.' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    var supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
+
+    // Use shop timezone (default Central for now - will be per-shop setting later)
+    var shopTimezone = 'America/Chicago'
+    var now = new Date(new Date().toLocaleString('en-US', { timeZone: shopTimezone }))
+    var today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0')
+
+    // Only fetch TODAY's appointments and services for context (small amount of data)
+    var { data: todayAppts } = await supabaseAdmin
+      .from('appointments')
+      .select('id, appointment_date, start_time, end_time, status, quoted_price, service_notes, clients(first_name, last_name), pets(name, breed), services(service_name)')
+      .eq('groomer_id', body.groomer_id)
+      .eq('appointment_date', today)
+      .neq('status', 'cancelled')
+      .order('start_time')
+
+    var { data: services } = await supabaseAdmin
+      .from('services')
+      .select('id, service_name, price, time_block_minutes')
+      .eq('groomer_id', body.groomer_id)
+      .eq('is_active', true)
+
+    // Get total client count for context
+    var { count: clientCount } = await supabaseAdmin
+      .from('clients')
+      .select('id', { count: 'exact', head: true })
+      .eq('groomer_id', body.groomer_id)
+
+    function formatTime(timeStr) {
+      if (!timeStr) return ''
+      var parts = timeStr.split(':')
+      var h = parseInt(parts[0])
+      var m = parseInt(parts[1])
+      var ampm = h >= 12 ? 'PM' : 'AM'
+      var hr = h === 0 ? 12 : (h > 12 ? h - 12 : h)
+      return m === 0 ? hr + ' ' + ampm : hr + ':' + String(m).padStart(2, '0') + ' ' + ampm
+    }
+
+    var contextParts = []
+    var dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    contextParts.push('TODAY: ' + dayNames[now.getDay()] + ' ' + today + ' (Timezone: Central Time)')
+    contextParts.push('Total clients in system: ' + (clientCount || 0))
+    contextParts.push('')
+
+    contextParts.push('=== TODAY\'S SCHEDULE ===')
+    if (todayAppts && todayAppts.length > 0) {
+      for (var a of todayAppts) {
+        var line = 'ID:' + a.id + ' | ' + formatTime(a.start_time) + '-' + formatTime(a.end_time)
+        line += ' | ' + (a.pets ? a.pets.name : '?') + ' (' + (a.pets ? a.pets.breed : '') + ')'
+        line += ' | ' + (a.clients ? a.clients.first_name + ' ' + a.clients.last_name : '?')
+        line += ' | ' + (a.services ? a.services.service_name : 'No service')
+        line += ' | ' + a.status
+        if (a.quoted_price) line += ' | $' + a.quoted_price
+        if (a.service_notes) line += ' | ' + a.service_notes
+        contextParts.push(line)
+      }
+    } else {
+      contextParts.push('No appointments today.')
+    }
+
+    contextParts.push('')
+    contextParts.push('=== SERVICES ===')
+    if (services && services.length > 0) {
+      for (var s of services) {
+        contextParts.push(s.id + ' | ' + s.service_name + ' | $' + s.price + ' | ' + s.time_block_minutes + 'min')
+      }
+    }
+
+    var systemPrompt = [
+      'You are PetPro AI, a helpful assistant for a pet grooming and boarding management app.',
+      '',
+      'IDENTITY: You are PetPro AI. NEVER say Sonnet, Claude, Anthropic, or any AI model name.',
+      '',
+      'YOU HAVE TOOLS TO TAKE REAL ACTIONS:',
+      '- Use search_clients to find any client by name or phone BEFORE editing or deleting',
+      '- Use get_client_details to see full info about a client and their pets',
+      '- Use get_schedule to check appointments for any date',
+      '- You can edit, delete, add clients and pets, book/cancel/reschedule appointments',
+      '- When the user asks you to DO something, actually DO it using tools. Don\'t just explain how.',
+      '- Always search first to get the correct IDs, then take the action.',
+      '- Confirm what you did after completing an action.',
+      '',
+      'PRICING & BOOKING RULES:',
+      '',
+      'FULL GROOM (by weight):',
+      '- Under 10 lbs: $55 (Yorkies: $50)',
+      '- 10-15 lbs: $55',
+      '- 15-20 lbs: $60',
+      '- 25-35 lbs: $65',
+      '- 35-45 lbs: $70',
+      '- 50-60 lbs: $75',
+      '- 60-70 lbs: $80',
+      '- 80-95 lbs: $95',
+      '- 95-100 lbs: $105',
+      '- 100-110 lbs: $130 (large breed)',
+      '- 110-120 lbs: $150',
+      '',
+      'TIME BLOCKS FOR GROOMING:',
+      '- Under 70 lbs: book 1 hour',
+      '- 70-89 lbs: book 1.5 hours',
+      '- 90+ lbs: book 2 hours',
+      '',
+      'MAINTENANCE (bath/tidy - includes nails, ears, anal glands, bathing, blow dry, face/feet/pads/sani trim):',
+      '- Under 25 lbs: $25',
+      '- 30-40 lbs: $40',
+      '- 50-70 lbs: $60',
+      '- Golden Retrievers (deshed + outline trim): flat $75',
+      '- Huskies (deshed): flat $65',
+      '- Doodle tidies: $45 (over 60 lbs: $55)',
+      '- Adding pads or sani to a trim: no extra fee',
+      '- No matting fee',
+      '',
+      'BATH ONLY (30 min time block):',
+      '- Chihuahuas & Boston Terriers: $25',
+      '- All other dogs: $35',
+      '',
+      'NAILS (walk-in):',
+      '- Regular nail trim: $10',
+      '- Nail trim with dremel: $15',
+      '',
+      'ADD-ONS (must have bath or groom to qualify):',
+      '- Dremel: $10',
+      '- Teeth brushing: $10',
+      '- Pampered Package (teeth + dremel together): $15',
+      '',
+      'BOOKING RULES:',
+      '- When booking, ALWAYS use get_last_appointment first to check if the pet has been here before',
+      '- SALT (Same As Last Time): If the pet has a previous appointment with a price, ask the groomer "Last time [pet] was $XX for [service] - same price?" The groomer can say yes or give a new price',
+      '- Do NOT flag or question a price that differs from the weight chart if it came from a previous appointment - groomers give discounts and that is normal',
+      '- If no previous appointment exists, use the weight/breed pricing chart above',
+      '- If you don\'t know the pet\'s weight, ASK before booking',
+      '- Always quote the price when confirming a booking',
+      '- Nails are walk-in only, no appointment needed',
+      '',
+      'RULES:',
+      '- Be friendly, helpful, and concise',
+      '- Never give veterinary medical advice - say "consult your vet"',
+      '- Never share one client\'s info when asked about a different client',
+      '- Use 12-hour time format when talking to the user',
+      '- If you can\'t find something, say so honestly',
+      '- When adding a new client, first name, last name, AND phone number are ALL required',
+      '',
+      'CURRENT DATA:',
+      contextParts.join('\n'),
+    ].join('\n')
+
+    // Build conversation history
+    var messages = []
+    if (body.history && body.history.length > 0) {
+      for (var h of body.history) {
+        messages.push({ role: 'user', content: h.user })
+        messages.push({ role: 'assistant', content: h.assistant })
+      }
+    }
+    messages.push({ role: 'user', content: body.message })
+
+    // Tool loop - Claude may use multiple tools
+    var maxLoops = 8
+    var finalText = ''
+
+    for (var loop = 0; loop < maxLoops; loop++) {
+      console.log('Sending to Claude (loop ' + loop + ')...')
+
+      var claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': claudeKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1500,
+          system: systemPrompt,
+          messages: messages,
+          tools: toolDefinitions,
+        }),
+      })
+
+      if (!claudeResponse.ok) {
+        var errText = await claudeResponse.text()
+        console.error('Claude error:', errText)
+        return new Response(JSON.stringify({ text: 'PetPro AI is having trouble right now. Try again in a moment.' }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+
+      var claudeData = await claudeResponse.json()
+      console.log('Claude response stop_reason:', claudeData.stop_reason)
+
+      if (claudeData.stop_reason === 'tool_use') {
+        var toolUseBlocks = []
+        for (var block of claudeData.content) {
+          if (block.type === 'tool_use') toolUseBlocks.push(block)
+        }
+
+        messages.push({ role: 'assistant', content: claudeData.content })
+
+        var toolResults = []
+        for (var toolBlock of toolUseBlocks) {
+          console.log('Executing tool:', toolBlock.name, JSON.stringify(toolBlock.input))
+          var result = await executeTool(toolBlock.name, toolBlock.input, body.groomer_id, supabaseAdmin)
+          console.log('Tool result:', JSON.stringify(result).substring(0, 200))
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolBlock.id,
+            content: JSON.stringify(result),
+          })
+        }
+
+        messages.push({ role: 'user', content: toolResults })
+        continue
+      }
+
+      // Done - extract text
+      for (var block of claudeData.content) {
+        if (block.type === 'text') finalText += block.text
+      }
+      break
+    }
+
+    console.log('Final response:', finalText.substring(0, 200))
+
+    return new Response(JSON.stringify({ text: finalText || 'Done!' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+
+  } catch (err) {
+    console.error('Function error:', err.message)
+    return new Response(JSON.stringify({ text: 'Something went wrong. Try again.' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+})

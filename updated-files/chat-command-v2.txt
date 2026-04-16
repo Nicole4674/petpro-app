@@ -1,0 +1,804 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+// Define tools that Claude can use to take actions
+var toolDefinitions = [
+  {
+    name: 'edit_client',
+    description: 'Edit a client\'s information. Use this when the user asks to update a client\'s phone, email, address, name, or notes. You must provide the client_id and at least one field to update.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'The UUID of the client to edit' },
+        first_name: { type: 'string', description: 'New first name' },
+        last_name: { type: 'string', description: 'New last name' },
+        phone: { type: 'string', description: 'New phone number' },
+        email: { type: 'string', description: 'New email address' },
+        address: { type: 'string', description: 'New address' },
+        notes: { type: 'string', description: 'New notes (replaces existing notes)' },
+      },
+      required: ['client_id'],
+    },
+  },
+  {
+    name: 'delete_client',
+    description: 'Delete a client and all their pets from the system. Use this when the user asks to remove/delete a client. This is permanent.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'The UUID of the client to delete' },
+        client_name: { type: 'string', description: 'The name of the client for confirmation' },
+      },
+      required: ['client_id', 'client_name'],
+    },
+  },
+  {
+    name: 'add_client',
+    description: 'Add a new client to the system. Use this when the user asks to create/add a new client.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        first_name: { type: 'string', description: 'Client first name' },
+        last_name: { type: 'string', description: 'Client last name' },
+        phone: { type: 'string', description: 'Phone number' },
+        email: { type: 'string', description: 'Email address' },
+        address: { type: 'string', description: 'Address' },
+        notes: { type: 'string', description: 'Notes about the client' },
+      },
+      required: ['first_name'],
+    },
+  },
+  {
+    name: 'edit_pet',
+    description: 'Edit a pet\'s information. Use this to update breed, weight, grooming notes, special notes, allergies, medications, aggression flags, or any pet field.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pet_id: { type: 'string', description: 'The UUID of the pet to edit' },
+        name: { type: 'string', description: 'New pet name' },
+        breed: { type: 'string', description: 'New breed' },
+        weight: { type: 'number', description: 'New weight in pounds' },
+        grooming_notes: { type: 'string', description: 'Grooming notes (blade lengths, styles, preferences)' },
+        special_notes: { type: 'string', description: 'Special handling notes' },
+        allergies: { type: 'string', description: 'Known allergies' },
+        medications: { type: 'string', description: 'Current medications' },
+        dog_aggressive: { type: 'boolean', description: 'Is this dog aggressive toward other dogs' },
+        people_aggressive: { type: 'boolean', description: 'Is this dog aggressive toward people' },
+        bite_history: { type: 'boolean', description: 'Does this dog have a bite history' },
+        collapsed_trachea: { type: 'boolean', description: 'Does this dog have a collapsed trachea' },
+        hip_joint_issues: { type: 'boolean', description: 'Does this dog have hip or joint issues' },
+        matting_level: { type: 'string', description: 'Matting level: none, mild, moderate, severe' },
+        anxiety_level: { type: 'string', description: 'Anxiety level: none, mild, moderate, severe' },
+      },
+      required: ['pet_id'],
+    },
+  },
+  {
+    name: 'delete_pet',
+    description: 'Delete a pet from the system. Use when the user asks to remove a pet.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pet_id: { type: 'string', description: 'The UUID of the pet to delete' },
+        pet_name: { type: 'string', description: 'The name of the pet for confirmation' },
+      },
+      required: ['pet_id', 'pet_name'],
+    },
+  },
+  {
+    name: 'add_pet',
+    description: 'Add a new pet to an existing client. Use when the user says a client got a new dog/cat/pet.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'The UUID of the client who owns the pet' },
+        name: { type: 'string', description: 'Pet name' },
+        breed: { type: 'string', description: 'Breed' },
+        weight: { type: 'number', description: 'Weight in pounds' },
+        grooming_notes: { type: 'string', description: 'Grooming notes' },
+        special_notes: { type: 'string', description: 'Special handling notes' },
+        allergies: { type: 'string', description: 'Known allergies' },
+        medications: { type: 'string', description: 'Current medications' },
+        dog_aggressive: { type: 'boolean', description: 'Dog aggressive' },
+        people_aggressive: { type: 'boolean', description: 'People aggressive' },
+      },
+      required: ['client_id', 'name'],
+    },
+  },
+  {
+    name: 'mark_pet_deceased',
+    description: 'Mark a pet as deceased/passed away. Use when the user says a pet has died or passed. This keeps the record but marks the pet as no longer active.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pet_id: { type: 'string', description: 'The UUID of the pet' },
+        pet_name: { type: 'string', description: 'The name of the pet for confirmation' },
+      },
+      required: ['pet_id', 'pet_name'],
+    },
+  },
+  {
+    name: 'book_appointment',
+    description: 'Book a new appointment. Use when the user asks to schedule/book a grooming appointment.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'The UUID of the client' },
+        pet_id: { type: 'string', description: 'The UUID of the pet' },
+        service_id: { type: 'string', description: 'The UUID of the service' },
+        appointment_date: { type: 'string', description: 'Date in YYYY-MM-DD format' },
+        start_time: { type: 'string', description: 'Start time in HH:MM format (24-hour)' },
+        end_time: { type: 'string', description: 'End time in HH:MM format (24-hour)' },
+        quoted_price: { type: 'number', description: 'Quoted price for the appointment' },
+        service_notes: { type: 'string', description: 'Notes for this specific appointment' },
+      },
+      required: ['client_id', 'pet_id', 'appointment_date', 'start_time'],
+    },
+  },
+  {
+    name: 'cancel_appointment',
+    description: 'Cancel an existing appointment. Use when the user asks to cancel an appointment.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        appointment_id: { type: 'string', description: 'The UUID of the appointment to cancel' },
+      },
+      required: ['appointment_id'],
+    },
+  },
+  {
+    name: 'reschedule_appointment',
+    description: 'Reschedule an existing appointment to a new date and/or time.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        appointment_id: { type: 'string', description: 'The UUID of the appointment to reschedule' },
+        new_date: { type: 'string', description: 'New date in YYYY-MM-DD format' },
+        new_start_time: { type: 'string', description: 'New start time in HH:MM format (24-hour)' },
+        new_end_time: { type: 'string', description: 'New end time in HH:MM format (24-hour)' },
+      },
+      required: ['appointment_id'],
+    },
+  },
+  {
+    name: 'lookup_client_details',
+    description: 'Get full details about a client and their pets including grooming notes, allergies, medications, special notes, and all other fields. Use this when the user asks about a specific client or pet\'s details.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'The UUID of the client to look up' },
+      },
+      required: ['client_id'],
+    },
+  },
+  {
+    name: 'mark_do_not_book',
+    description: 'Mark a client as Do Not Book. Adds "DO NOT BOOK" to their notes.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'The UUID of the client' },
+        reason: { type: 'string', description: 'Reason for do-not-book status' },
+      },
+      required: ['client_id'],
+    },
+  },
+]
+
+// Execute a tool call and return the result
+async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
+  try {
+    switch (toolName) {
+
+      case 'edit_client': {
+        var updates = {}
+        if (toolInput.first_name) updates.first_name = toolInput.first_name
+        if (toolInput.last_name) updates.last_name = toolInput.last_name
+        if (toolInput.phone !== undefined) {
+          var ph = (toolInput.phone || '').replace(/\D/g, '')
+          if (ph.length === 10) ph = '1' + ph
+          if (ph.length === 11 && ph[0] === '1') ph = '+' + ph
+          if (ph && ph[0] !== '+') ph = '+' + ph
+          updates.phone = ph || ''
+        }
+        if (toolInput.email !== undefined) updates.email = toolInput.email || null
+        if (toolInput.address !== undefined) updates.address = toolInput.address || null
+        if (toolInput.notes !== undefined) updates.notes = toolInput.notes || null
+        if (Object.keys(updates).length === 0) return { success: false, error: 'No fields to update' }
+
+        var { error } = await supabaseAdmin
+          .from('clients')
+          .update(updates)
+          .eq('id', toolInput.client_id)
+          .eq('groomer_id', groomerId)
+
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Client updated successfully', updated_fields: Object.keys(updates) }
+      }
+
+      case 'delete_client': {
+        // First delete all appointments for this client
+        await supabaseAdmin
+          .from('appointments')
+          .delete()
+          .eq('client_id', toolInput.client_id)
+          .eq('groomer_id', groomerId)
+
+        // Then delete all pets belonging to this client
+        await supabaseAdmin
+          .from('pets')
+          .delete()
+          .eq('client_id', toolInput.client_id)
+          .eq('groomer_id', groomerId)
+
+        // Then delete the client
+        var { error } = await supabaseAdmin
+          .from('clients')
+          .delete()
+          .eq('id', toolInput.client_id)
+          .eq('groomer_id', groomerId)
+
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Client "' + toolInput.client_name + '" and all their pets and appointments have been deleted' }
+      }
+
+      case 'add_client': {
+        var phone = ''
+        if (toolInput.phone) {
+          phone = toolInput.phone.replace(/\D/g, '')
+          if (phone.length === 10) phone = '1' + phone
+          if (phone.length === 11 && phone[0] === '1') phone = '+' + phone
+          if (phone && phone[0] !== '+') phone = '+' + phone
+        }
+
+        var { data: newClient, error } = await supabaseAdmin
+          .from('clients')
+          .insert({
+            groomer_id: groomerId,
+            first_name: toolInput.first_name,
+            last_name: toolInput.last_name || '',
+            phone: phone || '',
+            email: toolInput.email || null,
+            address: toolInput.address || null,
+            notes: toolInput.notes || null,
+          })
+          .select('id, first_name, last_name')
+          .single()
+
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Client added successfully', client: newClient }
+      }
+
+      case 'edit_pet': {
+        var updates = {}
+        if (toolInput.name) updates.name = toolInput.name
+        if (toolInput.breed !== undefined) updates.breed = toolInput.breed || null
+        if (toolInput.weight !== undefined) updates.weight = toolInput.weight
+        if (toolInput.grooming_notes !== undefined) updates.grooming_notes = toolInput.grooming_notes || null
+        if (toolInput.special_notes !== undefined) updates.special_notes = toolInput.special_notes || null
+        if (toolInput.allergies !== undefined) updates.allergies = toolInput.allergies || null
+        if (toolInput.medications !== undefined) updates.medications = toolInput.medications || null
+        if (toolInput.dog_aggressive !== undefined) updates.dog_aggressive = toolInput.dog_aggressive
+        if (toolInput.people_aggressive !== undefined) updates.people_aggressive = toolInput.people_aggressive
+        if (toolInput.bite_history !== undefined) updates.bite_history = toolInput.bite_history
+        if (toolInput.collapsed_trachea !== undefined) updates.collapsed_trachea = toolInput.collapsed_trachea
+        if (toolInput.hip_joint_issues !== undefined) updates.hip_joint_issues = toolInput.hip_joint_issues
+        if (toolInput.matting_level !== undefined) updates.matting_level = toolInput.matting_level
+        if (toolInput.anxiety_level !== undefined) updates.anxiety_level = toolInput.anxiety_level
+        if (Object.keys(updates).length === 0) return { success: false, error: 'No fields to update' }
+
+        var { error } = await supabaseAdmin
+          .from('pets')
+          .update(updates)
+          .eq('id', toolInput.pet_id)
+          .eq('groomer_id', groomerId)
+
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Pet updated successfully', updated_fields: Object.keys(updates) }
+      }
+
+      case 'delete_pet': {
+        // First delete appointments linked to this pet
+        await supabaseAdmin
+          .from('appointments')
+          .delete()
+          .eq('pet_id', toolInput.pet_id)
+          .eq('groomer_id', groomerId)
+
+        var { error } = await supabaseAdmin
+          .from('pets')
+          .delete()
+          .eq('id', toolInput.pet_id)
+          .eq('groomer_id', groomerId)
+
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Pet "' + toolInput.pet_name + '" and their appointments have been deleted' }
+      }
+
+      case 'add_pet': {
+        var petData = {
+          groomer_id: groomerId,
+          client_id: toolInput.client_id,
+          name: toolInput.name,
+          breed: toolInput.breed || null,
+          weight: toolInput.weight || null,
+          grooming_notes: toolInput.grooming_notes || null,
+          special_notes: toolInput.special_notes || null,
+          allergies: toolInput.allergies || null,
+          medications: toolInput.medications || null,
+          dog_aggressive: toolInput.dog_aggressive || false,
+          people_aggressive: toolInput.people_aggressive || false,
+        }
+
+        var { data: newPet, error } = await supabaseAdmin
+          .from('pets')
+          .insert(petData)
+          .select('id, name, breed')
+          .single()
+
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Pet "' + newPet.name + '" added successfully', pet: newPet }
+      }
+
+      case 'mark_pet_deceased': {
+        var { error } = await supabaseAdmin
+          .from('pets')
+          .update({ special_notes: 'DECEASED - Pet has passed away', is_active: false })
+          .eq('id', toolInput.pet_id)
+          .eq('groomer_id', groomerId)
+
+        if (error) {
+          // If is_active column doesn't exist yet, just update special_notes
+          var { error: error2 } = await supabaseAdmin
+            .from('pets')
+            .update({ special_notes: 'DECEASED - Pet has passed away' })
+            .eq('id', toolInput.pet_id)
+            .eq('groomer_id', groomerId)
+
+          if (error2) return { success: false, error: error2.message }
+        }
+        return { success: true, message: 'Pet "' + toolInput.pet_name + '" has been marked as deceased. Record preserved.' }
+      }
+
+      case 'book_appointment': {
+        // Calculate end time if not provided (default 1 hour)
+        var endTime = toolInput.end_time
+        if (!endTime) {
+          var startParts = toolInput.start_time.split(':')
+          var endHour = parseInt(startParts[0]) + 1
+          endTime = String(endHour).padStart(2, '0') + ':' + startParts[1]
+        }
+
+        var apptData = {
+          groomer_id: groomerId,
+          client_id: toolInput.client_id,
+          pet_id: toolInput.pet_id,
+          appointment_date: toolInput.appointment_date,
+          start_time: toolInput.start_time,
+          end_time: endTime,
+          status: 'confirmed',
+        }
+        if (toolInput.service_id) apptData.service_id = toolInput.service_id
+        if (toolInput.quoted_price) apptData.quoted_price = toolInput.quoted_price
+        if (toolInput.service_notes) apptData.service_notes = toolInput.service_notes
+
+        var { data: newAppt, error } = await supabaseAdmin
+          .from('appointments')
+          .insert(apptData)
+          .select('id, appointment_date, start_time, end_time')
+          .single()
+
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Appointment booked for ' + toolInput.appointment_date + ' at ' + toolInput.start_time, appointment: newAppt }
+      }
+
+      case 'cancel_appointment': {
+        var { error } = await supabaseAdmin
+          .from('appointments')
+          .update({ status: 'cancelled' })
+          .eq('id', toolInput.appointment_id)
+          .eq('groomer_id', groomerId)
+
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Appointment cancelled successfully' }
+      }
+
+      case 'reschedule_appointment': {
+        var updates = {}
+        if (toolInput.new_date) updates.appointment_date = toolInput.new_date
+        if (toolInput.new_start_time) updates.start_time = toolInput.new_start_time
+        if (toolInput.new_end_time) updates.end_time = toolInput.new_end_time
+        if (Object.keys(updates).length === 0) return { success: false, error: 'No new date or time provided' }
+
+        var { error } = await supabaseAdmin
+          .from('appointments')
+          .update(updates)
+          .eq('id', toolInput.appointment_id)
+          .eq('groomer_id', groomerId)
+
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Appointment rescheduled successfully' }
+      }
+
+      case 'lookup_client_details': {
+        var { data: clientInfo } = await supabaseAdmin
+          .from('clients')
+          .select('*')
+          .eq('id', toolInput.client_id)
+          .eq('groomer_id', groomerId)
+          .single()
+
+        var { data: clientPets } = await supabaseAdmin
+          .from('pets')
+          .select('*')
+          .eq('client_id', toolInput.client_id)
+          .eq('groomer_id', groomerId)
+
+        if (!clientInfo) return { success: false, error: 'Client not found' }
+        return { success: true, client: clientInfo, pets: clientPets || [] }
+      }
+
+      case 'mark_do_not_book': {
+        // Get current notes first
+        var { data: clientData } = await supabaseAdmin
+          .from('clients')
+          .select('notes')
+          .eq('id', toolInput.client_id)
+          .eq('groomer_id', groomerId)
+          .single()
+
+        var currentNotes = (clientData && clientData.notes) || ''
+        var dnbNote = 'DO NOT BOOK'
+        if (toolInput.reason) dnbNote = dnbNote + ' - ' + toolInput.reason
+        var newNotes = currentNotes ? currentNotes + ' | ' + dnbNote : dnbNote
+
+        var { error } = await supabaseAdmin
+          .from('clients')
+          .update({ notes: newNotes })
+          .eq('id', toolInput.client_id)
+          .eq('groomer_id', groomerId)
+
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Client marked as Do Not Book' }
+      }
+
+      default:
+        return { success: false, error: 'Unknown tool: ' + toolName }
+    }
+  } catch (err) {
+    return { success: false, error: 'Tool execution error: ' + err.message }
+  }
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    var body = await req.json()
+    console.log('Chat command received:', body.message)
+
+    var claudeKey = Deno.env.get('CLAUDE_API_KEY')
+
+    if (!claudeKey) {
+      return new Response(JSON.stringify({ text: 'PetPro AI is not configured yet.' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Get context from database
+    var supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
+
+    var now = new Date()
+    var today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0')
+
+    var weekEnd = new Date(now)
+    weekEnd.setDate(weekEnd.getDate() + 7)
+    var weekEndStr = weekEnd.getFullYear() + '-' + String(weekEnd.getMonth() + 1).padStart(2, '0') + '-' + String(weekEnd.getDate()).padStart(2, '0')
+
+    // Fetch today's appointments
+    var { data: todayAppts } = await supabaseAdmin
+      .from('appointments')
+      .select('id, *, clients(first_name, last_name, phone), pets(name, breed, weight, grooming_notes, special_notes, allergies, medications, dog_aggressive, matting_level, anxiety_level), services(service_name, price, time_block_minutes)')
+      .eq('groomer_id', body.groomer_id)
+      .eq('appointment_date', today)
+      .neq('status', 'cancelled')
+      .order('start_time')
+
+    // Fetch this week
+    var { data: weekAppts } = await supabaseAdmin
+      .from('appointments')
+      .select('id, *, clients(first_name, last_name), pets(name, breed), services(service_name)')
+      .eq('groomer_id', body.groomer_id)
+      .gte('appointment_date', today)
+      .lte('appointment_date', weekEndStr)
+      .neq('status', 'cancelled')
+      .order('appointment_date')
+      .order('start_time')
+
+    // Fetch all clients with IDs
+    var { data: allClients } = await supabaseAdmin
+      .from('clients')
+      .select('id, first_name, last_name, phone, email')
+      .eq('groomer_id', body.groomer_id)
+      .order('last_name')
+
+    // Fetch all pets with IDs and client_id
+    var { data: allPets } = await supabaseAdmin
+      .from('pets')
+      .select('id, name, breed, weight, client_id, grooming_notes, special_notes, allergies, medications, dog_aggressive, people_aggressive, bite_history, matting_level, anxiety_level, last_groom_date, collapsed_trachea, hip_joint_issues')
+      .eq('groomer_id', body.groomer_id)
+
+    // Fetch services
+    var { data: services } = await supabaseAdmin
+      .from('services')
+      .select('id, service_name, price, time_block_minutes, category')
+      .eq('groomer_id', body.groomer_id)
+      .eq('is_active', true)
+
+    // Fetch cancelled today
+    var { data: cancelledToday } = await supabaseAdmin
+      .from('appointments')
+      .select('id, *, clients(first_name, last_name), pets(name)')
+      .eq('groomer_id', body.groomer_id)
+      .eq('appointment_date', today)
+      .eq('status', 'cancelled')
+
+    // Fetch flagged bookings
+    var { data: flaggedAppts } = await supabaseAdmin
+      .from('appointments')
+      .select('id, *, clients(first_name, last_name), pets(name, breed), services(service_name)')
+      .eq('groomer_id', body.groomer_id)
+      .eq('has_flags', true)
+      .eq('flag_status', 'pending')
+
+    function formatTime(timeStr) {
+      if (!timeStr) return ''
+      var parts = timeStr.split(':')
+      var h = parseInt(parts[0])
+      var m = parseInt(parts[1])
+      var ampm = h >= 12 ? 'PM' : 'AM'
+      var hr = h === 0 ? 12 : (h > 12 ? h - 12 : h)
+      return m === 0 ? hr + ' ' + ampm : hr + ':' + String(m).padStart(2, '0') + ' ' + ampm
+    }
+
+    // Build COMPACT client list - just ID, name, phone (saves tokens)
+    var clientLookup = ''
+    if (allClients && allClients.length > 0) {
+      var lookupLines = []
+      for (var cl of allClients) {
+        lookupLines.push(cl.id + '|' + cl.first_name + ' ' + cl.last_name + '|' + (cl.phone || ''))
+      }
+      clientLookup = lookupLines.join('\n')
+    }
+
+    // Build COMPACT pet list - just ID, clientID, name, breed (saves tokens)
+    var petLookup = ''
+    if (allPets && allPets.length > 0) {
+      var petLines = []
+      for (var p of allPets) {
+        var flags = ''
+        if (p.dog_aggressive) flags = flags + ' DA'
+        if (p.people_aggressive) flags = flags + ' PA'
+        if (p.collapsed_trachea) flags = flags + ' CT'
+        petLines.push(p.id + '|' + p.client_id + '|' + p.name + '|' + (p.breed || '') + flags)
+      }
+      petLookup = petLines.join('\n')
+    }
+
+    var contextParts = []
+    contextParts.push('TODAY: ' + today)
+    contextParts.push('')
+
+    contextParts.push('=== TODAY\'S APPOINTMENTS ===')
+    if (todayAppts && todayAppts.length > 0) {
+      for (var a of todayAppts) {
+        var line = 'ApptID:' + a.id + ' | ' + formatTime(a.start_time) + ' - ' + formatTime(a.end_time)
+        line = line + ' | ' + (a.pets ? a.pets.name : 'Unknown pet')
+        line = line + ' (' + (a.pets ? a.pets.breed : '') + ')'
+        line = line + ' | Client: ' + (a.clients ? a.clients.first_name + ' ' + a.clients.last_name : 'Unknown')
+        line = line + ' | Service: ' + (a.services ? a.services.service_name : 'Not set')
+        line = line + ' | Status: ' + a.status
+        if (a.quoted_price) line = line + ' | Price: $' + a.quoted_price
+        if (a.pets && a.pets.grooming_notes) line = line + ' | Notes: ' + a.pets.grooming_notes
+        if (a.pets && a.pets.special_notes) line = line + ' | Special: ' + a.pets.special_notes
+        if (a.service_notes) line = line + ' | Appt Notes: ' + a.service_notes
+        contextParts.push(line)
+      }
+    } else {
+      contextParts.push('No appointments scheduled today.')
+    }
+
+    contextParts.push('')
+    contextParts.push('=== CANCELLATIONS TODAY ===')
+    if (cancelledToday && cancelledToday.length > 0) {
+      for (var c of cancelledToday) {
+        contextParts.push('ApptID:' + c.id + ' | ' + formatTime(c.start_time) + ' - ' + (c.pets ? c.pets.name : 'Unknown') + ' (' + (c.clients ? c.clients.first_name + ' ' + c.clients.last_name : 'Unknown') + ') - CANCELLED')
+      }
+    } else {
+      contextParts.push('No cancellations today.')
+    }
+
+    contextParts.push('')
+    contextParts.push('=== THIS WEEK ===')
+    if (weekAppts && weekAppts.length > 0) {
+      for (var w of weekAppts) {
+        contextParts.push('ApptID:' + w.id + ' | ' + w.appointment_date + ' ' + formatTime(w.start_time) + ' | ' + (w.pets ? w.pets.name : 'Unknown') + ' | ' + (w.clients ? w.clients.first_name + ' ' + w.clients.last_name : 'Unknown') + ' | ' + (w.services ? w.services.service_name : 'Not set'))
+      }
+    } else {
+      contextParts.push('No appointments this week.')
+    }
+
+    contextParts.push('')
+    contextParts.push('=== FLAGGED BOOKINGS NEEDING REVIEW ===')
+    if (flaggedAppts && flaggedAppts.length > 0) {
+      for (var f of flaggedAppts) {
+        contextParts.push('ApptID:' + f.id + ' | ' + (f.pets ? f.pets.name : 'Unknown') + ' | ' + f.appointment_date + ' ' + formatTime(f.start_time) + ' | ' + (f.clients ? f.clients.first_name + ' ' + f.clients.last_name : 'Unknown') + ' | NEEDS REVIEW')
+      }
+    } else {
+      contextParts.push('No flagged bookings pending.')
+    }
+
+    contextParts.push('')
+    contextParts.push('=== ALL CLIENTS (' + (allClients ? allClients.length : 0) + ') === Format: ID|Name|Phone')
+    contextParts.push(clientLookup)
+
+    contextParts.push('')
+    contextParts.push('=== ALL PETS (' + (allPets ? allPets.length : 0) + ') === Format: ID|ClientID|Name|Breed (DA=dog aggressive, PA=people aggressive, CT=collapsed trachea)')
+    contextParts.push(petLookup)
+
+    contextParts.push('')
+    contextParts.push('=== SERVICES ===')
+    if (services && services.length > 0) {
+      for (var s of services) {
+        contextParts.push(s.id + '|' + s.service_name + '|$' + s.price + '|' + s.time_block_minutes + 'min')
+      }
+    }
+
+    var contextString = contextParts.join('\n')
+
+    // Build system prompt
+    var systemPrompt = [
+      'You are PetPro AI, a helpful assistant built into a pet grooming and boarding management app. You are chatting with the groomer/owner through a text chat widget.',
+      '',
+      'IDENTITY RULES:',
+      '- ALWAYS refer to yourself as PetPro AI. NEVER say Sonnet, Claude, Anthropic, or any AI model name. You are PetPro AI and nothing else.',
+      '- Never give veterinary medical advice - say "consult your vet"',
+      '- Never share one client\'s information when asked about a different client',
+      '',
+      'ACTION RULES:',
+      '- You have tools to take REAL actions: edit clients, delete clients, add pets, edit pets, book appointments, cancel appointments, and more.',
+      '- When the user asks you to do something (delete, edit, book, cancel, update, add, etc.), USE THE APPROPRIATE TOOL to actually do it. Do NOT just explain how - actually DO it.',
+      '- The client and pet lists below are COMPACT (ID|Name|Phone). Use the lookup_client_details tool to get full details about a specific client and their pets when needed.',
+      '- Use the IDs from the data below to perform actions. Every client, pet, appointment, and service has an ID listed.',
+      '- When deleting or making major changes, confirm what you did clearly so the user knows it happened.',
+      '- If the user asks to delete or edit something and you cannot find a matching record, tell them honestly.',
+      '- For booking appointments, check for time conflicts with existing appointments before booking.',
+      '- When the user mentions a client or pet by name, find the matching ID from the compact list below. If multiple matches, ask which one.',
+      '',
+      'GENERAL RULES:',
+      '- Be friendly, helpful, and professional',
+      '- Keep responses concise but thorough',
+      '- Use the groomer\'s actual data - NEVER make up clients, pets, or appointments',
+      '- When mentioning times, use 12-hour format',
+      '- If the groomer asks something you don\'t have data for, say so honestly',
+      '- You can help with grooming advice, breed-specific tips, and general business questions too',
+      '',
+      'CURRENT DATA:',
+      contextString,
+    ].join('\n')
+
+    // Build conversation history for Claude
+    var messages = []
+    if (body.history && body.history.length > 0) {
+      for (var h of body.history) {
+        messages.push({ role: 'user', content: h.user })
+        messages.push({ role: 'assistant', content: h.assistant })
+      }
+    }
+    messages.push({ role: 'user', content: body.message })
+
+    // Call Claude with tools
+    console.log('Sending to Claude with tools...')
+
+    var maxToolLoops = 5
+    var finalText = ''
+
+    for (var loop = 0; loop < maxToolLoops; loop++) {
+      var claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': claudeKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1500,
+          system: systemPrompt,
+          messages: messages,
+          tools: toolDefinitions,
+        }),
+      })
+
+      if (!claudeResponse.ok) {
+        var errText = await claudeResponse.text()
+        console.error('Claude error:', errText)
+        return new Response(JSON.stringify({ text: 'PetPro AI is having trouble right now. Try again in a moment.' }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+
+      var claudeData = await claudeResponse.json()
+      console.log('Claude response stop_reason:', claudeData.stop_reason)
+
+      // Check if Claude wants to use a tool
+      if (claudeData.stop_reason === 'tool_use') {
+        // Find all tool use blocks
+        var toolUseBlocks = []
+        var textParts = []
+        for (var block of claudeData.content) {
+          if (block.type === 'tool_use') {
+            toolUseBlocks.push(block)
+          } else if (block.type === 'text') {
+            textParts.push(block.text)
+          }
+        }
+
+        // Add assistant message with full content to conversation
+        messages.push({ role: 'assistant', content: claudeData.content })
+
+        // Execute each tool and collect results
+        var toolResults = []
+        for (var toolBlock of toolUseBlocks) {
+          console.log('Executing tool:', toolBlock.name, toolBlock.input)
+          var result = await executeTool(toolBlock.name, toolBlock.input, body.groomer_id, supabaseAdmin)
+          console.log('Tool result:', result)
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolBlock.id,
+            content: JSON.stringify(result),
+          })
+        }
+
+        // Add tool results to conversation
+        messages.push({ role: 'user', content: toolResults })
+
+        // Continue the loop so Claude can respond after seeing the tool results
+        continue
+      }
+
+      // Claude finished (end_turn) - extract the final text
+      for (var block of claudeData.content) {
+        if (block.type === 'text') {
+          finalText = finalText + block.text
+        }
+      }
+      break
+    }
+
+    console.log('Final response:', finalText)
+
+    return new Response(JSON.stringify({ text: finalText || 'Action completed.' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+
+  } catch (err) {
+    console.error('Function error:', err.message)
+    return new Response(JSON.stringify({ text: 'Something went wrong. Try again.' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+})

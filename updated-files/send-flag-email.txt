@@ -1,0 +1,160 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const body = await req.json()
+    console.log('Send flag email request received')
+
+    // body should have: appointment_id, pet_name, client_name, flags, appointment_date, start_time, end_time, service_name, groomer_email
+    const sendgridKey = Deno.env.get('SENDGRID_API_KEY')
+
+    if (!sendgridKey) {
+      console.log('No SendGrid API key found')
+      return new Response(JSON.stringify({ success: false, error: 'Email not configured' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Build flag rows for the email
+    let flagRows = ''
+    if (body.flags && body.flags.length > 0) {
+      for (const flag of body.flags) {
+        let color = '#2563eb'
+        let label = 'INFO'
+        let bgColor = '#eff6ff'
+        if (flag.level === 'danger') {
+          color = '#dc2626'
+          label = 'DANGER'
+          bgColor = '#fef2f2'
+        } else if (flag.level === 'warning') {
+          color = '#d97706'
+          label = 'WARNING'
+          bgColor = '#fffbeb'
+        }
+        flagRows = flagRows + '<tr><td style="padding:8px 12px;background:' + bgColor + ';border-left:4px solid ' + color + ';margin-bottom:4px;border-radius:4px;"><strong style="color:' + color + ';">' + label + ':</strong> ' + flag.message + '</td></tr><tr><td style="height:4px;"></td></tr>'
+      }
+    }
+
+    // Format date nicely
+    let displayDate = body.appointment_date || 'Not set'
+    if (body.appointment_date) {
+      const parts = body.appointment_date.split('-')
+      displayDate = parseInt(parts[1]) + '/' + parseInt(parts[2]) + '/' + parts[0]
+    }
+
+    // Format time
+    function formatTime(timeStr) {
+      if (!timeStr) return ''
+      const parts = timeStr.split(':')
+      const h = parseInt(parts[0])
+      const m = parseInt(parts[1])
+      const ampm = h >= 12 ? 'PM' : 'AM'
+      const hr = h === 0 ? 12 : (h > 12 ? h - 12 : h)
+      return m === 0 ? hr + ' ' + ampm : hr + ':' + String(m).padStart(2, '0') + ' ' + ampm
+    }
+
+    const timeDisplay = formatTime(body.start_time) + ' - ' + formatTime(body.end_time)
+
+    // Count flags by level
+    let dangerCount = 0
+    let warningCount = 0
+    let infoCount = 0
+    if (body.flags) {
+      for (const f of body.flags) {
+        if (f.level === 'danger') dangerCount++
+        if (f.level === 'warning') warningCount++
+        if (f.level === 'info') infoCount++
+      }
+    }
+
+    let summaryLine = ''
+    if (dangerCount > 0) summaryLine = summaryLine + dangerCount + ' Danger  '
+    if (warningCount > 0) summaryLine = summaryLine + warningCount + ' Warning  '
+    if (infoCount > 0) summaryLine = summaryLine + infoCount + ' Info'
+
+    // Build the email HTML
+    const emailHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="font-family:Arial,sans-serif;background:#f8fafc;padding:20px;">'
+      + '<div style="max-width:600px;margin:0 auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">'
+      + '<div style="background:linear-gradient(135deg,#7c3aed,#6d28d9);padding:24px 32px;color:white;">'
+      + '<h1 style="margin:0;font-size:22px;">PetPro AI Flagged Booking</h1>'
+      + '<p style="margin:8px 0 0;opacity:0.9;font-size:14px;">A booking needs your review</p>'
+      + '</div>'
+      + '<div style="padding:24px 32px;">'
+      + '<div style="background:#f8fafc;border-radius:8px;padding:16px;margin-bottom:20px;">'
+      + '<h2 style="margin:0 0 8px;font-size:18px;color:#1e293b;">' + (body.pet_name || 'Unknown Pet') + '</h2>'
+      + '<p style="margin:0;color:#64748b;font-size:14px;">'
+      + 'Client: ' + (body.client_name || 'Unknown') + '<br>'
+      + 'Service: ' + (body.service_name || 'Not specified') + '<br>'
+      + 'Date: ' + displayDate + '<br>'
+      + 'Time: ' + timeDisplay
+      + '</p>'
+      + '</div>'
+      + '<h3 style="margin:0 0 12px;font-size:16px;color:#1e293b;">Flags Found: ' + summaryLine + '</h3>'
+      + '<table style="width:100%;border-collapse:collapse;">' + flagRows + '</table>'
+      + '<div style="margin-top:24px;text-align:center;">'
+      + '<p style="color:#64748b;font-size:14px;margin-bottom:16px;">Review this booking in your PetPro dashboard:</p>'
+      + '<a href="https://localhost:5173/flagged" style="display:inline-block;background:#7c3aed;color:white;padding:12px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:16px;">Review Flagged Bookings</a>'
+      + '</div>'
+      + '<p style="color:#94a3b8;font-size:12px;margin-top:24px;text-align:center;">This is an automated notification from PetPro AI.</p>'
+      + '</div>'
+      + '</div>'
+      + '</body></html>'
+
+    // Send via SendGrid
+    const sendgridResponse = await fetch('https://api.sendgrid.com/v3/mail/send', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + sendgridKey,
+      },
+      body: JSON.stringify({
+        personalizations: [{
+          to: [{ email: body.groomer_email }],
+        }],
+        from: {
+          email: 'treadwell4674@gmail.com',
+          name: 'PetPro AI',
+        },
+        subject: 'Flagged Booking: ' + (body.pet_name || 'Unknown Pet') + ' - ' + displayDate,
+        content: [{
+          type: 'text/html',
+          value: emailHtml,
+        }],
+      }),
+    })
+
+    console.log('SendGrid response status:', sendgridResponse.status)
+
+    if (sendgridResponse.status === 202 || sendgridResponse.status === 200) {
+      console.log('Email sent successfully')
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    } else {
+      const errText = await sendgridResponse.text()
+      console.error('SendGrid error:', errText)
+      return new Response(JSON.stringify({ success: false, error: 'Email send failed' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+  } catch (err) {
+    console.error('Function error:', err.message)
+    return new Response(JSON.stringify({ success: false, error: err.message }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+})

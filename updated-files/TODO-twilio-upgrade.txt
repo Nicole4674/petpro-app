@@ -1,0 +1,19 @@
+TWILIO SMS - TODO BEFORE LAUNCH
+================================
+
+The SMS notification code is fully built and deployed:
+- send-flag-sms Edge Function is on Supabase
+- Calendar.jsx sends both email AND text when a flagged booking is saved
+- All Twilio secrets are saved (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, GROOMER_PHONE)
+
+WHAT NEEDS TO HAPPEN:
+1. Upgrade Twilio from free trial to paid account (~$20)
+2. Register for A2P 10DLC as Sole Proprietor
+   - Go to Regulatory Compliance > A2P 10DLC Overview
+   - Choose "Sole Proprietor"
+   - Fees: $4.50 brand registration + $15 campaign vetting + $2/month
+   - Fill in: name, address, phone, describe messaging as "appointment reminders and booking notifications for pet grooming clients"
+3. Wait for approval (can take a few days)
+4. Once approved, texts will start working automatically - no code changes needed!
+
+STATUS: Code complete, waiting on Twilio account upgrade and A2P registration

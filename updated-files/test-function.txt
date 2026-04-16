@@ -1,0 +1,95 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const body = await req.json()
+    console.log('Received request:', JSON.stringify(body))
+
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
+
+    const { data: pet, error: petError } = await supabaseAdmin
+      .from('pets')
+      .select('*, clients(first_name, last_name)')
+      .eq('id', body.pet_id)
+      .single()
+
+    if (petError) {
+      console.log('Pet query error:', petError.message)
+      return new Response(JSON.stringify({ error: petError.message }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    console.log('Found pet:', pet.name, pet.breed)
+    console.log('Dog aggressive:', pet.dog_aggressive)
+    console.log('Matting level:', pet.matting_level)
+
+    // Test response - hardcoded flags based on pet profile
+    const flags = []
+
+    if (pet.dog_aggressive) {
+      flags.push({ level: 'danger', message: pet.name + ' is DOG AGGRESSIVE. Ensure no other dogs are present during appointment.' })
+    }
+
+    if (pet.matting_level === 'severe' || pet.matting_level === 'moderate') {
+      flags.push({ level: 'warning', message: pet.name + ' has ' + pet.matting_level + ' matting. Groomer must assess in person before confirming final price.' })
+    }
+
+    if (pet.handling_fee) {
+      flags.push({ level: 'info', message: 'Handling fee applies for ' + pet.name + '.' })
+    }
+
+    if (pet.collapsed_trachea) {
+      flags.push({ level: 'danger', message: pet.name + ' has collapsed trachea. SHOULDER WRAP ONLY - nothing around neck!' })
+    }
+
+    if (pet.muzzle_required) {
+      flags.push({ level: 'danger', message: 'Muzzle REQUIRED for ' + pet.name + '.' })
+    }
+
+    if (pet.anxiety_level === 'high' || pet.anxiety_level === 'medium') {
+      flags.push({ level: 'info', message: pet.name + ' has ' + pet.anxiety_level + ' anxiety. Use calming approach.' })
+    }
+
+    const hasDanger = flags.some(f => f.level === 'danger')
+
+    const result = {
+      approved: !hasDanger,
+      flags: flags,
+      summary: flags.length === 0
+        ? pet.name + ' is all clear for this appointment!'
+        : (hasDanger ? 'ATTENTION: ' + pet.name + ' has safety flags that need groomer review.' : pet.name + ' has some notes to review but is OK to book.')
+    }
+
+    console.log('Returning result:', JSON.stringify(result))
+
+    return new Response(JSON.stringify(result), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+
+  } catch (err) {
+    console.error('Function error:', err.message)
+    return new Response(JSON.stringify({
+      error: err.message,
+      approved: false,
+      flags: [{ level: 'warning', message: 'Safety check error: ' + err.message }],
+      summary: 'Error during safety check.',
+    }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+})

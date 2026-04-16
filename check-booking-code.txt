@@ -1,0 +1,242 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+Deno.serve(async (req) => {
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const { pet_id, service_id, appointment_date, start_time, end_time } = await req.json()
+
+    // Create Supabase admin client to fetch pet data
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
+
+    // Fetch the FULL pet profile with ALL safety fields
+    const { data: pet, error: petError } = await supabaseAdmin
+      .from('pets')
+      .select('*, clients(first_name, last_name, phone)')
+      .eq('id', pet_id)
+      .single()
+
+    if (petError || !pet) {
+      return new Response(JSON.stringify({ error: 'Pet not found' }), {
+        status: 404,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Fetch service details if provided
+    let service = null
+    if (service_id) {
+      const { data } = await supabaseAdmin
+        .from('services')
+        .select('*')
+        .eq('id', service_id)
+        .single()
+      service = data
+    }
+
+    // Check for existing appointments at the same time (overlap detection)
+    const { data: existingAppts } = await supabaseAdmin
+      .from('appointments')
+      .select('id, start_time, end_time, pets(name)')
+      .eq('appointment_date', appointment_date)
+      .eq('groomer_id', pet.groomer_id)
+      .neq('status', 'cancelled')
+
+    // Get the Claude API key from Supabase secrets
+    const claudeApiKey = Deno.env.get('CLAUDE_API_KEY')
+
+    if (!claudeApiKey) {
+      return new Response(JSON.stringify({
+        error: 'Claude API key not configured',
+        approved: false,
+        flags: [{ level: 'danger', message: 'AI safety system not configured. Cannot check booking.' }],
+        summary: 'Missing API key configuration.'
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // THE SYSTEM PROMPT - This is Claude's grooming brain
+    const systemPrompt = `You are PetPro's AI Safety Brain for a professional dog grooming shop. Your job is to review every booking and flag safety concerns BEFORE the appointment is confirmed.
+
+You will receive a pet's full profile and the requested service/appointment details. You must check for ALL of the following:
+
+DANGER FLAGS (serious safety concerns - require groomer approval before booking):
+- Dog aggressive pets being booked when other dogs may be present
+- People aggressive or bite history pets without muzzle required being checked
+- Collapsed trachea dogs - MUST note "SHOULDER WRAP ONLY - nothing around neck"
+- Missing or expired vaccination records
+- Known allergies that could be triggered by grooming products
+- Medications the groomer needs to know about before handling
+- Senior dogs with hip/joint issues needing gentle handling protocol
+- Front leg sensitivity requiring extra care during grooming
+
+WARNING FLAGS (important concerns the groomer should review):
+- Severe matting on ANY breed - groomer must assess in person before confirming final price
+- Matted doodles, poodles, or any curly/wavy coat - NEVER confirm final price without groomer seeing the dog first
+- Time slot appears too short for the breed size and coat type
+- Puppy age suggesting they may need adult pricing instead of puppy pricing
+- First time client pets with incomplete safety profiles (missing key fields)
+- Overlapping appointment times with another pet already booked
+
+INFO FLAGS (good to know - groomer should be aware):
+- Anxiety level medium or high - calming approach needed
+- Not good with dryer - use air dry or low setting
+- Handling fee applies for this pet
+- Special grooming notes or special notes from the groomer
+- Any behavior notes worth reviewing
+- Last groom date was a long time ago
+
+RESPOND IN THIS EXACT JSON FORMAT ONLY (no other text):
+{
+  "approved": true or false,
+  "flags": [
+    {
+      "level": "danger" or "warning" or "info",
+      "message": "Clear, specific message about the concern"
+    }
+  ],
+  "summary": "One sentence summary for the groomer"
+}
+
+RULES:
+- approved = false ONLY when there are danger-level flags requiring groomer review
+- approved = true means booking can proceed, but groomer should still see any warnings/info
+- Be specific - mention the pet's name, the exact concern, and what action to take
+- Keep messages concise but actionable
+- If the pet profile is mostly empty or missing critical safety info, flag that as a warning
+- If there are zero concerns, return approved: true with an empty flags array and a positive summary`
+
+    // Build the detailed pet profile message for Claude
+    const userMessage = `Review this booking request:
+
+PET PROFILE:
+- Name: ${pet.name}
+- Breed: ${pet.breed || 'NOT SPECIFIED'}
+- Weight: ${pet.weight ? pet.weight + ' lbs' : 'NOT SPECIFIED'}
+- Age: ${pet.age || 'NOT SPECIFIED'}
+- Sex: ${pet.sex || 'Not specified'}
+- Spayed/Neutered: ${pet.is_spayed_neutered ? 'Yes' : 'No/Unknown'}
+
+SAFETY INFO:
+- Allergies: ${pet.allergies || 'None listed'}
+- Medications: ${pet.medications || 'None listed'}
+- Vaccination Status: ${pet.vaccination_status || 'NOT SPECIFIED'}
+- Vaccination Expiry: ${pet.vaccination_expiry || 'NOT SPECIFIED'}
+- Senior Dog: ${pet.is_senior ? 'YES' : 'No'}
+- Hip/Joint Issues: ${pet.hip_joint_issues ? 'YES' : 'No'}
+- Front Leg Sensitivity: ${pet.front_leg_sensitivity ? 'YES' : 'No'}
+- Collapsed Trachea: ${pet.collapsed_trachea ? 'YES - SHOULDER WRAP ONLY' : 'No'}
+
+BEHAVIOR & HANDLING:
+- Behavior Notes: ${pet.behavior_notes || 'None'}
+- Anxiety Level: ${pet.anxiety_level || 'Not specified'}
+- Dog Aggressive: ${pet.dog_aggressive ? 'YES' : 'No'}
+- People Aggressive: ${pet.people_aggressive ? 'YES' : 'No'}
+- Bite History: ${pet.bite_history ? 'YES' : 'No'}
+- Muzzle Required: ${pet.muzzle_required ? 'YES' : 'No'}
+- Good With Dryer: ${pet.good_with_dryer === false ? 'NO' : pet.good_with_dryer === true ? 'Yes' : 'Not specified'}
+- Handling Fee: ${pet.handling_fee ? 'YES' : 'No'}
+
+COAT INFO:
+- Coat Type: ${pet.coat_type || 'Not specified'}
+- Matting Level: ${pet.matting_level || 'none'}
+- Matting Notes: ${pet.matting_notes || 'None'}
+- Last Groom Date: ${pet.last_groom_date || 'Unknown'}
+
+GROOMING & SPECIAL NOTES:
+- Grooming Notes: ${pet.grooming_notes || 'None'}
+- Special Notes: ${pet.special_notes || 'None'}
+
+REQUESTED SERVICE:
+- Service: ${service ? service.service_name : 'Not selected'}
+- Category: ${service ? service.category : 'N/A'}
+- Time Block: ${service ? service.time_block_minutes + ' minutes' : 'N/A'}
+- Price: ${service ? '$' + service.price : 'N/A'}
+
+APPOINTMENT:
+- Date: ${appointment_date}
+- Start: ${start_time}
+- End: ${end_time}
+- Client: ${pet.clients?.first_name} ${pet.clients?.last_name}
+
+OTHER APPOINTMENTS ALREADY BOOKED THIS DAY:
+${existingAppts && existingAppts.length > 0
+      ? existingAppts.map(a => `- ${a.pets?.name}: ${a.start_time} to ${a.end_time}`).join('\n')
+      : 'No other appointments scheduled'}`
+
+    // Call Claude API
+    const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1024,
+        messages: [
+          { role: 'user', content: userMessage }
+        ],
+        system: systemPrompt,
+      }),
+    })
+
+    const claudeData = await claudeResponse.json()
+
+    if (!claudeResponse.ok) {
+      console.error('Claude API error:', claudeData)
+      return new Response(JSON.stringify({
+        approved: false,
+        flags: [{ level: 'warning', message: 'AI safety check temporarily unavailable. Please review booking manually.' }],
+        summary: 'Could not reach AI safety service.',
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Parse Claude's JSON response
+    const responseText = claudeData.content[0].text
+    let safetyCheck
+    try {
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/)
+      safetyCheck = JSON.parse(jsonMatch[0])
+    } catch {
+      safetyCheck = {
+        approved: false,
+        flags: [{ level: 'warning', message: 'Safety check response was unclear. Please review this booking manually.' }],
+        summary: 'Could not parse safety check - manual review needed.',
+      }
+    }
+
+    return new Response(JSON.stringify(safetyCheck), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+
+  } catch (err) {
+    console.error('Edge function error:', err)
+    return new Response(JSON.stringify({
+      error: err.message,
+      approved: false,
+      flags: [{ level: 'warning', message: 'Safety check encountered an error. Please review manually.' }],
+      summary: 'System error during safety check.',
+    }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+})

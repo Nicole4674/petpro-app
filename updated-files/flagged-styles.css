@@ -1,0 +1,278 @@
+/* Flagged Bookings Styles */
+/* ADD THIS TO THE BOTTOM OF YOUR App.css FILE */
+
+/* Dashboard AI Card */
+.dashboard-card-ai {
+  background: linear-gradient(135deg, #f5f3ff, #ede9fe) !important;
+  border: 2px solid #c4b5fd !important;
+}
+
+.dashboard-card-ai:hover {
+  border-color: #7c3aed !important;
+}
+
+.flag-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #dc2626;
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  padding: 0 8px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+/* Filter Tabs */
+.flag-filter-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.flag-tab {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  color: #64748b;
+  transition: all 0.2s;
+}
+
+.flag-tab:hover {
+  color: #334155;
+  background: #e2e8f0;
+}
+
+.flag-tab.active {
+  background: white;
+  color: #7c3aed;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.flag-count-bar {
+  font-size: 14px;
+  color: #64748b;
+  margin-bottom: 16px;
+  padding: 0 4px;
+}
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: #94a3b8;
+  font-size: 16px;
+}
+
+/* Flagged Cards */
+.flagged-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.flagged-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  border-left: 5px solid #94a3b8;
+}
+
+.flagged-card-pending {
+  border-left-color: #dc2626;
+}
+
+.flagged-card-approved {
+  border-left-color: #16a34a;
+}
+
+.flagged-card-disapproved {
+  border-left-color: #94a3b8;
+  opacity: 0.7;
+}
+
+.flagged-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.flagged-pet-info h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #1e293b;
+}
+
+.flagged-breed {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.flagged-appt-info {
+  text-align: right;
+}
+
+.flagged-date {
+  display: block;
+  font-weight: 600;
+  color: #334155;
+  font-size: 14px;
+}
+
+.flagged-time {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.flagged-details-row {
+  font-size: 13px;
+  color: #64748b;
+  margin-bottom: 12px;
+}
+
+/* Flag Badges */
+.flagged-badge-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.flag-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.flag-badge-danger {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+}
+
+.flag-badge-warning {
+  background: #fffbeb;
+  color: #d97706;
+  border: 1px solid #fcd34d;
+}
+
+.flag-badge-info {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #93c5fd;
+}
+
+.flag-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.flag-status-pending {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+}
+
+.flag-status-approved {
+  background: #dcfce7;
+  color: #16a34a;
+  border: 1px solid #86efac;
+}
+
+.flag-status-disapproved {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+}
+
+/* Individual Flags */
+.flagged-flags {
+  margin-bottom: 16px;
+}
+
+/* Action Buttons */
+.flagged-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.btn-approve {
+  padding: 10px 24px;
+  background: #16a34a;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.btn-approve:hover {
+  background: #15803d;
+}
+
+.btn-decline {
+  padding: 10px 24px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.btn-decline:hover {
+  background: #b91c1c;
+}
+
+.btn-secondary-sm {
+  padding: 6px 14px;
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn-secondary-sm:hover {
+  background: #e2e8f0;
+}
+
+.flagged-reviewed {
+  font-weight: 600;
+  color: #16a34a;
+  font-size: 14px;
+}
+
+.flagged-declined-text {
+  color: #dc2626;
+}

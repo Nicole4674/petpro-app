@@ -1,0 +1,48 @@
+/* === ADD THESE TO YOUR App.css (paste at the bottom) === */
+
+/* Wake word flash - purple flash when "Hey PetPro" is detected */
+.voice-wake-flash {
+  animation: wakeFlash 0.6s ease-out;
+}
+
+@keyframes wakeFlash {
+  0% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.9); transform: scale(1); }
+  50% { box-shadow: 0 0 60px 30px rgba(168, 85, 247, 0.6); transform: scale(1.08); }
+  100% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0); transform: scale(1); }
+}
+
+/* Wake word ACTIVE state - persistent purple glow during 8-second command window */
+.voice-wake-active {
+  box-shadow: 0 0 40px 8px rgba(168, 85, 247, 0.5) !important;
+  border-color: #a855f7 !important;
+}
+
+/* Countdown badge - shows seconds left in command window */
+.voice-countdown {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  background: #a855f7;
+  color: white;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  animation: countdownPulse 1s ease-in-out infinite;
+  z-index: 10;
+}
+
+@keyframes countdownPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+/* Make sure the hands-free indicator is positioned for the badge */
+.voice-hands-free-indicator {
+  position: relative;
+}

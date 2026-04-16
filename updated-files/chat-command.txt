@@ -1,0 +1,269 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    var body = await req.json()
+    console.log('Chat command received:', body.message)
+
+    var claudeKey = Deno.env.get('CLAUDE_API_KEY')
+
+    if (!claudeKey) {
+      return new Response(JSON.stringify({ text: 'PetPro AI is not configured yet.' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Get context from database
+    var supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
+
+    var now = new Date()
+    var today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0')
+
+    var weekEnd = new Date(now)
+    weekEnd.setDate(weekEnd.getDate() + 7)
+    var weekEndStr = weekEnd.getFullYear() + '-' + String(weekEnd.getMonth() + 1).padStart(2, '0') + '-' + String(weekEnd.getDate()).padStart(2, '0')
+
+    // Fetch today's appointments
+    var { data: todayAppts } = await supabaseAdmin
+      .from('appointments')
+      .select('*, clients(first_name, last_name, phone), pets(name, breed, weight, grooming_notes, special_notes, allergies, medications, dog_aggressive, matting_level, anxiety_level), services(service_name, price, time_block_minutes)')
+      .eq('groomer_id', body.groomer_id)
+      .eq('appointment_date', today)
+      .neq('status', 'cancelled')
+      .order('start_time')
+
+    // Fetch this week
+    var { data: weekAppts } = await supabaseAdmin
+      .from('appointments')
+      .select('*, clients(first_name, last_name), pets(name, breed), services(service_name)')
+      .eq('groomer_id', body.groomer_id)
+      .gte('appointment_date', today)
+      .lte('appointment_date', weekEndStr)
+      .neq('status', 'cancelled')
+      .order('appointment_date')
+      .order('start_time')
+
+    // Fetch all clients
+    var { data: allClients } = await supabaseAdmin
+      .from('clients')
+      .select('id, first_name, last_name, phone, email')
+      .eq('groomer_id', body.groomer_id)
+      .order('last_name')
+
+    // Fetch all pets
+    var { data: allPets } = await supabaseAdmin
+      .from('pets')
+      .select('id, name, breed, weight, client_id, grooming_notes, special_notes, allergies, medications, dog_aggressive, people_aggressive, bite_history, matting_level, anxiety_level, last_groom_date, collapsed_trachea, hip_joint_issues')
+      .eq('groomer_id', body.groomer_id)
+
+    // Fetch services
+    var { data: services } = await supabaseAdmin
+      .from('services')
+      .select('id, service_name, price, time_block_minutes, category')
+      .eq('groomer_id', body.groomer_id)
+      .eq('is_active', true)
+
+    // Fetch cancelled today
+    var { data: cancelledToday } = await supabaseAdmin
+      .from('appointments')
+      .select('*, clients(first_name, last_name), pets(name)')
+      .eq('groomer_id', body.groomer_id)
+      .eq('appointment_date', today)
+      .eq('status', 'cancelled')
+
+    // Fetch flagged bookings
+    var { data: flaggedAppts } = await supabaseAdmin
+      .from('appointments')
+      .select('*, clients(first_name, last_name), pets(name, breed), services(service_name)')
+      .eq('groomer_id', body.groomer_id)
+      .eq('has_flags', true)
+      .eq('flag_status', 'pending')
+
+    function formatTime(timeStr) {
+      if (!timeStr) return ''
+      var parts = timeStr.split(':')
+      var h = parseInt(parts[0])
+      var m = parseInt(parts[1])
+      var ampm = h >= 12 ? 'PM' : 'AM'
+      var hr = h === 0 ? 12 : (h > 12 ? h - 12 : h)
+      return m === 0 ? hr + ' ' + ampm : hr + ':' + String(m).padStart(2, '0') + ' ' + ampm
+    }
+
+    var contextParts = []
+    contextParts.push('TODAY: ' + today)
+    contextParts.push('')
+
+    contextParts.push('=== TODAY\'S APPOINTMENTS ===')
+    if (todayAppts && todayAppts.length > 0) {
+      for (var a of todayAppts) {
+        var line = formatTime(a.start_time) + ' - ' + formatTime(a.end_time)
+        line = line + ' | ' + (a.pets ? a.pets.name : 'Unknown pet')
+        line = line + ' (' + (a.pets ? a.pets.breed : '') + ')'
+        line = line + ' | Client: ' + (a.clients ? a.clients.first_name + ' ' + a.clients.last_name : 'Unknown')
+        line = line + ' | Service: ' + (a.services ? a.services.service_name : 'Not set')
+        line = line + ' | Status: ' + a.status
+        if (a.quoted_price) line = line + ' | Price: $' + a.quoted_price
+        if (a.pets && a.pets.grooming_notes) line = line + ' | Notes: ' + a.pets.grooming_notes
+        if (a.pets && a.pets.special_notes) line = line + ' | Special: ' + a.pets.special_notes
+        if (a.service_notes) line = line + ' | Appt Notes: ' + a.service_notes
+        contextParts.push(line)
+      }
+    } else {
+      contextParts.push('No appointments scheduled today.')
+    }
+
+    contextParts.push('')
+    contextParts.push('=== CANCELLATIONS TODAY ===')
+    if (cancelledToday && cancelledToday.length > 0) {
+      for (var c of cancelledToday) {
+        contextParts.push(formatTime(c.start_time) + ' - ' + (c.pets ? c.pets.name : 'Unknown') + ' (' + (c.clients ? c.clients.first_name + ' ' + c.clients.last_name : 'Unknown') + ') - CANCELLED')
+      }
+    } else {
+      contextParts.push('No cancellations today.')
+    }
+
+    contextParts.push('')
+    contextParts.push('=== THIS WEEK ===')
+    if (weekAppts && weekAppts.length > 0) {
+      for (var w of weekAppts) {
+        contextParts.push(w.appointment_date + ' ' + formatTime(w.start_time) + ' | ' + (w.pets ? w.pets.name : 'Unknown') + ' | ' + (w.clients ? w.clients.first_name + ' ' + w.clients.last_name : 'Unknown') + ' | ' + (w.services ? w.services.service_name : 'Not set'))
+      }
+    } else {
+      contextParts.push('No appointments this week.')
+    }
+
+    contextParts.push('')
+    contextParts.push('=== FLAGGED BOOKINGS NEEDING REVIEW ===')
+    if (flaggedAppts && flaggedAppts.length > 0) {
+      for (var f of flaggedAppts) {
+        contextParts.push((f.pets ? f.pets.name : 'Unknown') + ' | ' + f.appointment_date + ' ' + formatTime(f.start_time) + ' | ' + (f.clients ? f.clients.first_name + ' ' + f.clients.last_name : 'Unknown') + ' | NEEDS REVIEW')
+      }
+    } else {
+      contextParts.push('No flagged bookings pending.')
+    }
+
+    contextParts.push('')
+    contextParts.push('=== ALL CLIENTS (' + (allClients ? allClients.length : 0) + ') ===')
+    if (allClients && allClients.length > 0) {
+      for (var cl of allClients) {
+        contextParts.push(cl.first_name + ' ' + cl.last_name + (cl.phone ? ' | ' + cl.phone : '') + (cl.email ? ' | ' + cl.email : ''))
+      }
+    }
+
+    contextParts.push('')
+    contextParts.push('=== ALL PETS (' + (allPets ? allPets.length : 0) + ') ===')
+    if (allPets && allPets.length > 0) {
+      for (var p of allPets) {
+        var petLine = p.name + ' (' + (p.breed || 'Unknown breed') + ')'
+        if (p.weight) petLine = petLine + ' ' + p.weight + 'lbs'
+        if (p.grooming_notes) petLine = petLine + ' | Notes: ' + p.grooming_notes
+        if (p.special_notes) petLine = petLine + ' | Special: ' + p.special_notes
+        if (p.allergies) petLine = petLine + ' | Allergies: ' + p.allergies
+        if (p.medications) petLine = petLine + ' | Meds: ' + p.medications
+        if (p.dog_aggressive) petLine = petLine + ' | DOG AGGRESSIVE'
+        if (p.people_aggressive) petLine = petLine + ' | PEOPLE AGGRESSIVE'
+        if (p.collapsed_trachea) petLine = petLine + ' | COLLAPSED TRACHEA'
+        if (p.last_groom_date) petLine = petLine + ' | Last groom: ' + p.last_groom_date
+        contextParts.push(petLine)
+      }
+    }
+
+    contextParts.push('')
+    contextParts.push('=== SERVICES ===')
+    if (services && services.length > 0) {
+      for (var s of services) {
+        contextParts.push(s.service_name + ' | $' + s.price + ' | ' + s.time_block_minutes + ' min | ' + (s.category || 'General'))
+      }
+    }
+
+    var contextString = contextParts.join('\n')
+
+    // Build system prompt
+    var systemPrompt = [
+      'You are PetPro AI, a helpful assistant built into a pet grooming and boarding management app. You are chatting with the groomer through a text chat widget.',
+      '',
+      'RULES:',
+      '- Be friendly, helpful, and professional',
+      '- Answer questions about the schedule, clients, pets, and services using the REAL data provided below',
+      '- If asked to book, cancel, or modify appointments - explain what needs to happen and guide them',
+      '- If asked about a pet, give all relevant safety and grooming info from their profile',
+      '- If asked about preferences or settings, acknowledge the request and explain what you can help with',
+      '- Keep responses concise but thorough',
+      '- Use the groomer\'s actual data - NEVER make up clients, pets, or appointments',
+      '- When mentioning times, use 12-hour format',
+      '- If the groomer asks something you don\'t have data for, say so honestly',
+      '- You can help with grooming advice, breed-specific tips, and general business questions too',
+      '- ALWAYS refer to yourself as PetPro AI. NEVER say Sonnet, Claude, Anthropic, or any AI model name. You are PetPro AI and nothing else',
+      '- Never give veterinary medical advice - say consult your vet',
+      '- Never share one client\'s information when asked about a different client',
+      '',
+      'CURRENT DATA:',
+      contextString,
+    ].join('\n')
+
+    // Build conversation history for Claude
+    var messages = []
+    if (body.history && body.history.length > 0) {
+      for (var h of body.history) {
+        messages.push({ role: 'user', content: h.user })
+        messages.push({ role: 'assistant', content: h.assistant })
+      }
+    }
+    messages.push({ role: 'user', content: body.message })
+
+    // Call Claude
+    console.log('Sending to Claude...')
+    var claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: systemPrompt,
+        messages: messages,
+      }),
+    })
+
+    if (!claudeResponse.ok) {
+      var errText = await claudeResponse.text()
+      console.error('Claude error:', errText)
+      return new Response(JSON.stringify({ text: 'PetPro AI is having trouble right now. Try again in a moment.' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    var claudeData = await claudeResponse.json()
+    var responseText = claudeData.content[0].text
+    console.log('Claude response:', responseText)
+
+    return new Response(JSON.stringify({ text: responseText }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+
+  } catch (err) {
+    console.error('Function error:', err.message)
+    return new Response(JSON.stringify({ text: 'Something went wrong. Try again.' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+})

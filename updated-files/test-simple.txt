@@ -1,0 +1,38 @@
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const body = await req.json()
+    console.log('Got request with pet_id:', body.pet_id)
+
+    return new Response(JSON.stringify({
+      approved: false,
+      flags: [
+        { level: 'danger', message: 'TEST: Dog aggressive - ensure no other dogs present.' },
+        { level: 'warning', message: 'TEST: Severe matting - groomer must assess before pricing.' },
+        { level: 'info', message: 'TEST: Handling fee applies.' }
+      ],
+      summary: 'TEST MODE - Connection working! This is a test response.'
+    }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  } catch (err) {
+    console.error('Error:', err.message)
+    return new Response(JSON.stringify({
+      approved: false,
+      flags: [{ level: 'warning', message: 'Error: ' + err.message }],
+      summary: 'Function error occurred.'
+    }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+})
