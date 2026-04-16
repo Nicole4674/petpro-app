@@ -18,6 +18,9 @@ import Kennels from './pages/Kennels'
 import BoardingCalendar from './pages/BoardingCalendar'
 import StaffList from './pages/StaffList'
 import StaffDetail from './pages/StaffDetail'
+import Waitlist from './pages/Waitlist'
+import PetDetail from './pages/PetDetail'
+import StaffSchedule from './pages/StaffSchedule'
 import AIChatWidget from './components/AIChatWidget'
 import Sidebar from './components/Sidebar'
 import './App.css'
@@ -77,6 +80,7 @@ function App() {
                     <Route path="/clients/new" element={session ? <AddClient /> : <Navigate to="/login" />} />
                     <Route path="/clients/:id" element={session ? <ClientDetail /> : <Navigate to="/login" />} />
                     <Route path="/clients/:clientId/pets/new" element={session ? <AddPet /> : <Navigate to="/login" />} />
+                    <Route path="/pets/:id" element={session ? <PetDetail /> : <Navigate to="/login" />} />
                     <Route path="/pricing" element={session ? <Pricing /> : <Navigate to="/login" />} />
                     <Route path="/calendar" element={session ? <Calendar /> : <Navigate to="/login" />} />
                     <Route path="/flagged" element={session ? <FlaggedBookings /> : <Navigate to="/login" />} />
@@ -87,6 +91,8 @@ function App() {
                     <Route path="/boarding/calendar" element={session ? <BoardingCalendar /> : <Navigate to="/login" />} />
                     <Route path="/staff" element={session ? <StaffList /> : <Navigate to="/login" />} />
                     <Route path="/staff/:id" element={session ? <StaffDetail /> : <Navigate to="/login" />} />
+                    <Route path="/waitlist" element={session ? <Waitlist /> : <Navigate to="/login" />} />
+                    <Route path="/staff/schedule" element={session ? <StaffSchedule /> : <Navigate to="/login" />} />
                 </Routes>
             </AppLayout>
         </BrowserRouter>

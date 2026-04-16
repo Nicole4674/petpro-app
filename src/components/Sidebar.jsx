@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import usePermissions from '../hooks/usePermissions'
 
 export default function Sidebar({ onToggle }) {
   const navigate = useNavigate()
   const location = useLocation()
+  const { canAccess, canAccessAny, loading, role } = usePermissions()
   const [collapsed, setCollapsed] = useState(false)
   const [openSections, setOpenSections] = useState({
     grooming: true,
@@ -58,7 +60,8 @@ export default function Sidebar({ onToggle }) {
           {!collapsed && <span className="sidebar-label">Dashboard</span>}
         </div>
 
-        {/* Grooming Section */}
+        {/* Grooming Section — visible if user can access any grooming-related permission */}
+        {canAccessAny(['calendar.view_own', 'clients.view_list', 'pricing.view', 'ai.view_flags']) && (
         <div className="sidebar-section">
           <div className="sidebar-section-header" onClick={function() { if (!collapsed) toggleSection('grooming') }}>
             <span className="sidebar-icon">✂️</span>
@@ -71,35 +74,53 @@ export default function Sidebar({ onToggle }) {
           </div>
           {!collapsed && openSections.grooming && (
             <div className="sidebar-subitems">
+              {canAccessAny(['calendar.view_own', 'calendar.view_all']) && (
               <div
                 className={'sidebar-subitem' + (isActive('/calendar') ? ' sidebar-subitem-active' : '')}
                 onClick={function() { goTo('/calendar') }}
               >
                 Calendar
               </div>
+              )}
+              {canAccess('clients.view_list') && (
               <div
                 className={'sidebar-subitem' + (isActive('/clients') ? ' sidebar-subitem-active' : '')}
                 onClick={function() { goTo('/clients') }}
               >
                 Clients
               </div>
+              )}
+              {canAccess('pricing.view') && (
               <div
                 className={'sidebar-subitem' + (isActive('/pricing') ? ' sidebar-subitem-active' : '')}
                 onClick={function() { goTo('/pricing') }}
               >
                 Pricing
               </div>
+              )}
+              {canAccessAny(['calendar.view_own', 'calendar.view_all']) && (
+              <div
+                className={'sidebar-subitem' + (isActive('/waitlist') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/waitlist') }}
+              >
+                Waitlist
+              </div>
+              )}
+              {canAccess('ai.view_flags') && (
               <div
                 className={'sidebar-subitem' + (isActive('/flagged') ? ' sidebar-subitem-active' : '')}
                 onClick={function() { goTo('/flagged') }}
               >
                 Flagged Bookings
               </div>
+              )}
             </div>
           )}
         </div>
+        )}
 
-        {/* Boarding Section */}
+        {/* Boarding Section — visible if user can access any boarding permission */}
+        {canAccessAny(['boarding.view_calendar', 'boarding.manage_runs']) && (
         <div className="sidebar-section">
           <div className="sidebar-section-header" onClick={function() { if (!collapsed) toggleSection('boarding') }}>
             <span className="sidebar-icon">🏠</span>
@@ -112,29 +133,37 @@ export default function Sidebar({ onToggle }) {
           </div>
           {!collapsed && openSections.boarding && (
             <div className="sidebar-subitems">
+              {canAccess('boarding.view_calendar') && (
               <div
                 className={'sidebar-subitem' + (isActive('/boarding/calendar') ? ' sidebar-subitem-active' : '')}
                 onClick={function() { goTo('/boarding/calendar') }}
               >
                 Boarding Calendar
               </div>
+              )}
+              {canAccess('boarding.manage_runs') && (
               <div
                 className={'sidebar-subitem' + (isActive('/boarding/setup') ? ' sidebar-subitem-active' : '')}
                 onClick={function() { goTo('/boarding/setup') }}
               >
                 Boarding Setup
               </div>
+              )}
+              {canAccess('boarding.manage_runs') && (
               <div
                 className={'sidebar-subitem' + (isActive('/boarding/kennels') ? ' sidebar-subitem-active' : '')}
                 onClick={function() { goTo('/boarding/kennels') }}
               >
                 Kennels
               </div>
+              )}
             </div>
           )}
         </div>
+        )}
 
-        {/* Staff Section */}
+        {/* Staff Section — visible if user can view staff or clock in */}
+        {canAccessAny(['staff.view_list', 'staff.clock_own']) && (
         <div className="sidebar-section">
           <div className="sidebar-section-header" onClick={function() { if (!collapsed) toggleSection('staff') }}>
             <span className="sidebar-icon">👥</span>
@@ -147,26 +176,43 @@ export default function Sidebar({ onToggle }) {
           </div>
           {!collapsed && openSections.staff && (
             <div className="sidebar-subitems">
+              {canAccess('staff.view_list') && (
               <div
                 className={'sidebar-subitem' + (isActive('/staff') ? ' sidebar-subitem-active' : '')}
                 onClick={function() { goTo('/staff') }}
               >
                 Staff List
               </div>
+              )}
+              {canAccessAny(['staff.view_list', 'calendar.view_all']) && (
+              <div
+                className={'sidebar-subitem' + (isActive('/staff/schedule') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/staff/schedule') }}
+              >
+                Schedule
+              </div>
+              )}
+              {canAccess('staff.toggle_permissions') && (
               <div className="sidebar-subitem sidebar-subitem-coming">
                 Roles & Permissions
               </div>
+              )}
+              {canAccess('staff.clock_own') && (
               <div className="sidebar-subitem sidebar-subitem-coming">
                 Time Clock
               </div>
+              )}
+              {canAccess('staff.view_payroll') && (
               <div className="sidebar-subitem sidebar-subitem-coming">
                 Payroll
               </div>
+              )}
             </div>
           )}
         </div>
+        )}
 
-        {/* Daycare & Training (Coming Soon) */}
+        {/* Daycare & Training (Coming Soon) — always visible */}
         <div className="sidebar-section">
           <div className="sidebar-section-header" onClick={function() {}}>
             <span className="sidebar-icon">🐕</span>
@@ -191,7 +237,8 @@ export default function Sidebar({ onToggle }) {
           </div>
         </div>
 
-        {/* AI Section */}
+        {/* AI Section — visible if user has any AI permissions */}
+        {canAccessAny(['ai.voice_booking', 'ai.access_settings', 'ai.view_flags']) && (
         <div className="sidebar-section">
           <div className="sidebar-section-header" onClick={function() { if (!collapsed) toggleSection('ai') }}>
             <span className="sidebar-icon">🤖</span>
@@ -204,23 +251,31 @@ export default function Sidebar({ onToggle }) {
           </div>
           {!collapsed && openSections.ai && (
             <div className="sidebar-subitems">
+              {canAccess('ai.voice_booking') && (
               <div
                 className={'sidebar-subitem' + (isActive('/voice') ? ' sidebar-subitem-active' : '')}
                 onClick={function() { goTo('/voice') }}
               >
                 Voice Mode
               </div>
+              )}
+              {canAccess('ai.access_settings') && (
               <div className="sidebar-subitem sidebar-subitem-coming">
                 Chat Settings
               </div>
+              )}
+              {canAccess('ai.access_settings') && (
               <div className="sidebar-subitem sidebar-subitem-coming">
                 AI Preferences
               </div>
+              )}
             </div>
           )}
         </div>
+        )}
 
-        {/* Tools Section */}
+        {/* Tools Section — visible if user can import/export */}
+        {canAccess('settings.import_export') && (
         <div className="sidebar-section">
           <div className="sidebar-section-header" onClick={function() { if (!collapsed) toggleSection('tools') }}>
             <span className="sidebar-icon">🔧</span>
@@ -242,6 +297,7 @@ export default function Sidebar({ onToggle }) {
             </div>
           )}
         </div>
+        )}
       </nav>
 
       {/* Bottom section */}

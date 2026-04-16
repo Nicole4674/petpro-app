@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import ROLE_DEFAULTS from '../lib/roleDefaults'
 
-// ==========================================
-// ROLE DEFAULT PERMISSIONS
-// ==========================================
-var ROLE_DEFAULTS = {
+// Old ROLE_DEFAULTS block removed — now imported from lib/roleDefaults.js
+var _OLD_DEFAULTS = {
   owner: {
     'calendar.view_own': true, 'calendar.view_all': true,
     'calendar.create_own': true, 'calendar.create_others': true,
@@ -437,10 +436,27 @@ export default function StaffDetail() {
   var [permSaving, setPermSaving] = useState(null)
   var [customCount, setCustomCount] = useState(0)
 
+  // Schedule state
+  var [schedWeekStart, setSchedWeekStart] = useState(getSchedWeekStart(new Date()))
+  var [schedShifts, setSchedShifts] = useState([])
+  var [schedLoading, setSchedLoading] = useState(false)
+
+  // Personal notepad state
+  var [staffNotes, setStaffNotes] = useState([])
+  var [newStaffNote, setNewStaffNote] = useState('')
+  var [savingStaffNote, setSavingStaffNote] = useState(false)
+
   useEffect(function() {
     fetchStaffMember()
     fetchPermissions()
   }, [id])
+
+  useEffect(function() {
+    if (activeTab === 'schedule') {
+      fetchSchedule()
+      fetchStaffNotes()
+    }
+  }, [activeTab, schedWeekStart, id])
 
   async function fetchStaffMember() {
     var { data, error } = await supabase
@@ -597,6 +613,132 @@ export default function StaffDetail() {
   function formatDate(d) {
     if (!d) return '—'
     return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+
+  // ===== SCHEDULE HELPERS =====
+  var SCHED_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  var SCHED_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+  function getSchedWeekStart(date) {
+    var d = new Date(date)
+    d.setDate(d.getDate() - d.getDay())
+    d.setHours(0, 0, 0, 0)
+    return d
+  }
+
+  function getSchedWeekDays() {
+    var days = []
+    for (var i = 0; i < 7; i++) {
+      var d = new Date(schedWeekStart)
+      d.setDate(schedWeekStart.getDate() + i)
+      days.push(d)
+    }
+    return days
+  }
+
+  function formatSchedDateISO(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+  }
+
+  function formatSchedTime(t) {
+    if (!t) return ''
+    var parts = t.split(':')
+    var h = parseInt(parts[0])
+    var m = parts[1]
+    var ampm = h >= 12 ? 'PM' : 'AM'
+    if (h === 0) h = 12
+    else if (h > 12) h = h - 12
+    return h + ':' + m + ' ' + ampm
+  }
+
+  function getSchedOrdinal(n) {
+    if (n > 3 && n < 21) return 'th'
+    switch (n % 10) { case 1: return 'st'; case 2: return 'nd'; case 3: return 'rd'; default: return 'th' }
+  }
+
+  function getShiftHours(shift) {
+    var start = shift.start_time.split(':')
+    var end = shift.end_time.split(':')
+    var startMin = parseInt(start[0]) * 60 + parseInt(start[1])
+    var endMin = parseInt(end[0]) * 60 + parseInt(end[1])
+    return Math.max(0, (endMin - startMin - (shift.break_minutes || 0)) / 60)
+  }
+
+  function getSchedDayHours(dateStr) {
+    return schedShifts.filter(function(s) { return s.shift_date === dateStr }).reduce(function(sum, s) { return sum + getShiftHours(s) }, 0)
+  }
+
+  function getSchedWeekHours() {
+    return schedShifts.reduce(function(sum, s) { return sum + getShiftHours(s) }, 0)
+  }
+
+  function isSchedToday(d) {
+    var today = new Date()
+    return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate()
+  }
+
+  async function fetchSchedule() {
+    setSchedLoading(true)
+    var weekEnd = new Date(schedWeekStart)
+    weekEnd.setDate(schedWeekStart.getDate() + 6)
+
+    var { data } = await supabase
+      .from('staff_schedules')
+      .select('*')
+      .eq('staff_id', id)
+      .gte('shift_date', formatSchedDateISO(schedWeekStart))
+      .lte('shift_date', formatSchedDateISO(weekEnd))
+
+    setSchedShifts(data || [])
+    setSchedLoading(false)
+  }
+
+  function navigateSchedWeek(dir) {
+    var newStart = new Date(schedWeekStart)
+    newStart.setDate(schedWeekStart.getDate() + (dir * 7))
+    setSchedWeekStart(newStart)
+  }
+
+  async function fetchStaffNotes() {
+    var { data } = await supabase
+      .from('notes')
+      .select('*')
+      .eq('staff_id', id)
+      .eq('note_type', 'staff_personal')
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    setStaffNotes(data || [])
+  }
+
+  async function handleAddStaffNote() {
+    if (!newStaffNote.trim()) return
+    setSavingStaffNote(true)
+
+    var { data: { user } } = await supabase.auth.getUser()
+
+    var { error } = await supabase
+      .from('notes')
+      .insert([{
+        staff_id: id,
+        groomer_id: user.id,
+        note_type: 'staff_personal',
+        content: newStaffNote.trim()
+      }])
+
+    if (!error) {
+      setNewStaffNote('')
+      fetchStaffNotes()
+    } else {
+      alert('Error saving note: ' + error.message)
+    }
+    setSavingStaffNote(false)
+  }
+
+  async function deleteStaffNote(noteId) {
+    if (!window.confirm('Delete this note?')) return
+    await supabase.from('notes').delete().eq('id', noteId)
+    fetchStaffNotes()
   }
 
   function getInitials(first, last) {
@@ -897,31 +1039,107 @@ export default function StaffDetail() {
         )}
 
         {/* ===== SCHEDULE TAB ===== */}
-        {activeTab === 'schedule' && (
-          <div className="sd-schedule-tab">
-            <div className="sd-coming-soon">
-              <div className="sd-coming-icon">📅</div>
-              <h3>Schedule Management</h3>
-              <p>Working hours, break times, max appointments per day, and weekly schedule view coming in Phase 2!</p>
-              <div className="sd-coming-preview">
-                <div className="sd-preview-item">
-                  <strong>Working Days:</strong> {(s.working_days || []).join(', ') || 'Mon-Fri'}
+        {activeTab === 'schedule' && (function() {
+          var weekDays = getSchedWeekDays()
+          var weekHrs = getSchedWeekHours()
+          var weekLabel = SCHED_MONTHS[weekDays[0].getMonth()] + ' ' + weekDays[0].getDate() + ' – ' + SCHED_MONTHS[weekDays[6].getMonth()] + ' ' + weekDays[6].getDate() + ', ' + weekDays[6].getFullYear()
+
+          return (
+            <div className="sd-schedule-tab">
+              {/* Schedule Nav */}
+              <div className="ss-nav" style={{ marginBottom: '16px' }}>
+                <div className="ss-week-nav">
+                  <button className="ss-nav-arrow" onClick={function() { navigateSchedWeek(-1) }}>◀</button>
+                  <span className="ss-week-label">{weekLabel}</span>
+                  <button className="ss-nav-arrow" onClick={function() { navigateSchedWeek(1) }}>▶</button>
                 </div>
-                <div className="sd-preview-item">
-                  <strong>Shift:</strong> {s.shift_start || '9:00 AM'} — {s.shift_end || '5:00 PM'}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <span style={{ fontSize: '14px', color: '#7c3aed', fontWeight: '600' }}>{weekHrs.toFixed(1)} hrs this week</span>
+                  <button className="ss-today-btn" onClick={function() { setSchedWeekStart(getSchedWeekStart(new Date())) }}>This Week</button>
+                  <button className="ss-copy-btn" onClick={function() { window.print() }}>🖨️ Print</button>
                 </div>
-                <div className="sd-preview-item">
-                  <strong>Break:</strong> {s.break_duration_min || 30} minutes
+              </div>
+
+              {schedLoading ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#7c3aed' }}>Loading schedule...</div>
+              ) : (
+                <div className="sdsc-week-grid">
+                  {weekDays.map(function(day) {
+                    var dateStr = formatSchedDateISO(day)
+                    var dayShifts = schedShifts.filter(function(sh) { return sh.shift_date === dateStr })
+                    var dayHrs = getSchedDayHours(dateStr)
+                    var today = isSchedToday(day)
+
+                    return (
+                      <div key={dateStr} className={'sdsc-day-card' + (today ? ' sdsc-day-today' : '') + (dayShifts.length === 0 ? ' sdsc-day-off' : '')}>
+                        <div className="sdsc-day-header">
+                          <span className="sdsc-day-name">{SCHED_DAYS[day.getDay()]}</span>
+                          <span className="sdsc-day-date">{SCHED_MONTHS[day.getMonth()] + ' ' + day.getDate()}</span>
+                          {today && <span className="sdsc-today-badge">Today</span>}
+                        </div>
+                        <div className="sdsc-day-body">
+                          {dayShifts.length === 0 ? (
+                            <div className="sdsc-off-label">Day Off</div>
+                          ) : (
+                            dayShifts.map(function(shift) {
+                              return (
+                                <div key={shift.id} className="sdsc-shift" style={{ borderLeftColor: s.color || '#7c3aed' }}>
+                                  <div className="sdsc-shift-time">{formatSchedTime(shift.start_time)} – {formatSchedTime(shift.end_time)}</div>
+                                  {shift.break_minutes > 0 && <div className="sdsc-shift-break">☕ {shift.break_minutes} min break</div>}
+                                  {shift.notes && <div className="sdsc-shift-note">📝 {shift.notes}</div>}
+                                </div>
+                              )
+                            })
+                          )}
+                        </div>
+                        {dayHrs > 0 && <div className="sdsc-day-hours">{dayHrs.toFixed(1)} hrs</div>}
+                      </div>
+                    )
+                  })}
                 </div>
-                {s.max_appointments_per_day && (
-                  <div className="sd-preview-item">
-                    <strong>Max Appointments/Day:</strong> {s.max_appointments_per_day}
+              )}
+
+              {/* Personal Notepad */}
+              <div className="sdsc-notepad">
+                <h3 className="sdsc-notepad-title">📝 Personal Notes</h3>
+                <p className="sdsc-notepad-desc">Reminders, to-dos, and notes for the day</p>
+                <div className="sdsc-note-form">
+                  <textarea
+                    value={newStaffNote}
+                    onChange={function(e) { setNewStaffNote(e.target.value) }}
+                    placeholder={'Add a note for ' + s.first_name + '...'}
+                    className="sdsc-note-input"
+                    rows="2"
+                  />
+                  <button
+                    className="sdsc-note-submit"
+                    onClick={handleAddStaffNote}
+                    disabled={savingStaffNote || !newStaffNote.trim()}
+                  >
+                    {savingStaffNote ? 'Saving...' : '💾 Save Note'}
+                  </button>
+                </div>
+                {staffNotes.length === 0 ? (
+                  <div className="sdsc-note-empty">No notes yet. Add reminders or daily to-dos here!</div>
+                ) : (
+                  <div className="sdsc-notes-list">
+                    {staffNotes.map(function(note) {
+                      return (
+                        <div key={note.id} className="sdsc-note-card">
+                          <div className="sdsc-note-content">{note.content}</div>
+                          <div className="sdsc-note-footer">
+                            <span className="sdsc-note-date">{new Date(note.created_at).toLocaleDateString()}</span>
+                            <button className="sdsc-note-delete" onClick={function() { deleteStaffNote(note.id) }}>🗑️</button>
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* ===== PAY TAB ===== */}
         {activeTab === 'pay' && (

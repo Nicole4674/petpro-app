@@ -241,9 +241,81 @@ export default function Calendar() {
             if (error) throw error
             setSelectedAppt(prev => ({ ...prev, status: newStatus }))
             fetchData()
+
+            // Auto-notify waitlist when an appointment is cancelled
+            if (newStatus === 'cancelled') {
+                await checkWaitlistForOpening(apptId)
+            }
         } catch (err) {
             console.error('Error updating status:', err)
             alert('Error: ' + err.message)
+        }
+    }
+
+    // Check waitlist for matching entries when an appointment slot opens up
+    const checkWaitlistForOpening = async (cancelledApptId) => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser()
+            if (!user) return
+
+            // Get the cancelled appointment details
+            const { data: cancelledAppt } = await supabase
+                .from('appointments')
+                .select('appointment_date, service_id, start_time')
+                .eq('id', cancelledApptId)
+                .single()
+
+            if (!cancelledAppt) return
+
+            // Find waitlist entries that match this date (or are flexible)
+            const { data: waitlistMatches } = await supabase
+                .from('grooming_waitlist')
+                .select('*, clients:client_id(first_name, last_name, phone), pets:pet_id(name)')
+                .eq('groomer_id', user.id)
+                .eq('status', 'waiting')
+                .order('position', { ascending: true })
+
+            if (!waitlistMatches || waitlistMatches.length === 0) return
+
+            // Filter to find best matches:
+            // 1. Same date match or flexible dates
+            // 2. Same service match (if specified) or any service
+            const matches = waitlistMatches.filter(entry => {
+                const dateMatch = entry.flexible_dates || entry.preferred_date === cancelledAppt.appointment_date
+                const serviceMatch = !entry.service_id || entry.service_id === cancelledAppt.service_id
+                return dateMatch && serviceMatch
+            })
+
+            if (matches.length === 0) return
+
+            // Auto-notify the first matching person on the waitlist
+            const firstMatch = matches[0]
+            const { error: updateError } = await supabase
+                .from('grooming_waitlist')
+                .update({
+                    status: 'notified',
+                    notified_at: new Date().toISOString(),
+                    notification_count: (firstMatch.notification_count || 0) + 1
+                })
+                .eq('id', firstMatch.id)
+
+            if (updateError) throw updateError
+
+            // Show notification to the groomer
+            const clientName = firstMatch.clients ? firstMatch.clients.first_name + ' ' + firstMatch.clients.last_name : 'Unknown'
+            const petName = firstMatch.pets ? firstMatch.pets.name : 'Unknown'
+            const phone = firstMatch.clients?.phone || 'no phone'
+
+            alert(
+                '📋 Waitlist Match Found!\n\n' +
+                clientName + ' with ' + petName + ' was #' + firstMatch.position + ' on the waitlist.\n\n' +
+                'They\'ve been marked as notified.\n' +
+                'Contact them at: ' + phone + '\n\n' +
+                '💡 Tip: Go to the Waitlist page to manage their booking.'
+            )
+        } catch (err) {
+            console.error('Waitlist auto-notify error:', err)
+            // Don't alert - this is a bonus feature, don't block the cancellation flow
         }
     }
 
