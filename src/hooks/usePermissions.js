@@ -45,27 +45,11 @@ export default function usePermissions() {
 
       var userId = user.id
 
-      // Step 2: Check if this user owns a business
-      var { data: bizData, error: bizErr } = await supabase
-        .from('businesses')
-        .select('*')
-        .eq('owner_id', userId)
-        .maybeSingle()
-
-      if (bizData) {
-        // This user IS the business owner
-        setRole('owner')
-        setBusinessOwnerId(userId)
-        setBusinessId(bizData.id)
-        setPermissions(ROLE_DEFAULTS.owner || {})
-        setLoading(false)
-        return
-      }
-
-      // Step 3: Not an owner — check if they're a staff member
+      // Step 2: Check if this user is a staff member first
+      // (check staff before owner so staff with groomer_id don't get treated as owner)
       var { data: staffData, error: staffErr } = await supabase
         .from('staff_members')
-        .select('*, businesses!business_id(owner_id)')
+        .select('*')
         .eq('auth_user_id', userId)
         .maybeSingle()
 
@@ -75,19 +59,14 @@ export default function usePermissions() {
         setRole(staffRole)
         setStaffId(staffData.id)
         setStaffRecord(staffData)
-        setBusinessId(staffData.business_id)
 
-        // Get the business owner's ID (this is what we use as groomer_id in queries)
-        var ownerId = null
-        if (staffData.businesses && staffData.businesses.owner_id) {
-          ownerId = staffData.businesses.owner_id
-        }
-        setBusinessOwnerId(ownerId)
+        // groomer_id points to the business owner
+        setBusinessOwnerId(staffData.groomer_id)
 
         // Start with role defaults
         var mergedPerms = Object.assign({}, ROLE_DEFAULTS[staffRole] || {})
 
-        // Step 4: Load any permission overrides for this specific staff member
+        // Load any permission overrides for this specific staff member
         var { data: overrides, error: overErr } = await supabase
           .from('staff_permissions')
           .select('permission_key, allowed')
@@ -104,9 +83,23 @@ export default function usePermissions() {
         return
       }
 
-      // Step 4 fallback: User is neither owner nor linked staff
-      // They might be an owner who hasn't created a business yet (legacy accounts)
-      // For backwards compatibility, treat them as owner with their own uid as groomer_id
+      // Step 3: Check if this user is a business owner (has a groomers row)
+      var { data: groomerData, error: groomerErr } = await supabase
+        .from('groomers')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle()
+
+      if (groomerData) {
+        // This user IS the business owner
+        setRole('owner')
+        setBusinessOwnerId(userId)
+        setPermissions(ROLE_DEFAULTS.owner || {})
+        setLoading(false)
+        return
+      }
+
+      // Fallback: treat as owner for backwards compatibility
       setRole('owner')
       setBusinessOwnerId(userId)
       setPermissions(ROLE_DEFAULTS.owner || {})
