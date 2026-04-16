@@ -198,7 +198,10 @@ export default function Sidebar({ onToggle }) {
               </div>
               )}
               {canAccess('staff.clock_own') && (
-              <div className="sidebar-subitem sidebar-subitem-coming">
+              <div
+                className={'sidebar-subitem' + (isActive('/staff/timeclock') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/staff/timeclock') }}
+              >
                 Time Clock
               </div>
               )}

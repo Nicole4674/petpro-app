@@ -8,6 +8,7 @@ export default function AIChatWidget() {
   ])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [adminMode, setAdminMode] = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -31,6 +32,31 @@ export default function AIChatWidget() {
     const userMessage = input.trim()
     setInput('')
     setSending(true)
+
+    // Check for admin mode toggle
+    var isAdminToggle = userMessage.toLowerCase().replace(/\s+/g, ' ').trim() === 'mortal ties access'
+    if (isAdminToggle) {
+      if (!adminMode) {
+        setAdminMode(true)
+        setMessages(prev => [...prev,
+          { role: 'user', text: userMessage },
+          { role: 'assistant', text: 'Admin mode activated. Full access unlocked - ask me anything about how PetPro works, debugging, features, architecture, or anything else. Say "business mode" to switch back.' }
+        ])
+        setSending(false)
+        return
+      }
+    }
+
+    // Check for switching back to business mode
+    if (adminMode && userMessage.toLowerCase().trim() === 'business mode') {
+      setAdminMode(false)
+      setMessages(prev => [...prev,
+        { role: 'user', text: userMessage },
+        { role: 'assistant', text: 'Back to business mode. How can I help with your schedule, clients, or pets?' }
+      ])
+      setSending(false)
+      return
+    }
 
     // Add user message to chat
     setMessages(prev => [...prev, { role: 'user', text: userMessage }])
@@ -57,6 +83,7 @@ export default function AIChatWidget() {
           message: userMessage,
           groomer_id: user.id,
           history: recentHistory,
+          admin_mode: adminMode,
         },
       })
 
@@ -82,6 +109,7 @@ export default function AIChatWidget() {
   }
 
   const clearChat = () => {
+    setAdminMode(false)
     setMessages([
       { role: 'assistant', text: 'Chat cleared! What can I help you with?' }
     ])
@@ -104,7 +132,7 @@ export default function AIChatWidget() {
           <div className="chat-header">
             <div className="chat-header-info">
               <span className="chat-header-dot"></span>
-              <span className="chat-header-title">PetPro AI</span>
+              <span className="chat-header-title">PetPro AI{adminMode ? ' (Admin)' : ''}</span>
             </div>
             <div className="chat-header-actions">
               <button className="chat-clear-btn" onClick={clearChat} title="Clear chat">🗑</button>

@@ -21,6 +21,7 @@ import StaffDetail from './pages/StaffDetail'
 import Waitlist from './pages/Waitlist'
 import PetDetail from './pages/PetDetail'
 import StaffSchedule from './pages/StaffSchedule'
+import TimeClock from './pages/TimeClock'
 import AIChatWidget from './components/AIChatWidget'
 import Sidebar from './components/Sidebar'
 import './App.css'
@@ -93,6 +94,7 @@ function App() {
                     <Route path="/staff/:id" element={session ? <StaffDetail /> : <Navigate to="/login" />} />
                     <Route path="/waitlist" element={session ? <Waitlist /> : <Navigate to="/login" />} />
                     <Route path="/staff/schedule" element={session ? <StaffSchedule /> : <Navigate to="/login" />} />
+                    <Route path="/staff/timeclock" element={session ? <TimeClock /> : <Navigate to="/login" />} />
                 </Routes>
             </AppLayout>
         </BrowserRouter>

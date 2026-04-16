@@ -8997,3 +8997,315 @@
     flex-direction: column;
   }
 }
+
+/* ==========================================
+   TIME CLOCK
+   ========================================== */
+.timeclock-page {
+  padding: 24px;
+  background: #f0f4f8;
+  min-height: 100vh;
+}
+
+.timeclock-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.timeclock-header h1 {
+  font-size: 24px;
+  color: #1e293b;
+  margin: 0;
+}
+
+.timeclock-staff-select select {
+  padding: 8px 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  background: white;
+  color: #1e293b;
+  cursor: pointer;
+}
+
+/* Clock In/Out Panel */
+.timeclock-panel {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  padding: 32px;
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.timeclock-status-badge {
+  display: inline-block;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+
+.timeclock-status-badge.clocked-in {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.timeclock-status-badge.clocked-out {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.timeclock-timer {
+  font-size: 56px;
+  font-weight: 700;
+  color: #2563eb;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 8px;
+  font-family: 'Courier New', monospace;
+}
+
+.timeclock-since {
+  font-size: 14px;
+  color: #64748b;
+  margin-bottom: 20px;
+}
+
+.timeclock-break-info {
+  color: #f59e0b;
+  font-weight: 500;
+}
+
+.timeclock-clock-display {
+  font-size: 48px;
+  font-weight: 300;
+  color: #94a3b8;
+  margin: 16px 0 24px;
+}
+
+.timeclock-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.timeclock-btn {
+  padding: 12px 28px;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.timeclock-btn-in {
+  background: #2563eb;
+  color: white;
+  font-size: 18px;
+  padding: 14px 40px;
+}
+
+.timeclock-btn-in:hover {
+  background: #1d4ed8;
+  transform: scale(1.02);
+}
+
+.timeclock-btn-out {
+  background: #ef4444;
+  color: white;
+}
+
+.timeclock-btn-out:hover {
+  background: #dc2626;
+}
+
+.timeclock-btn-break {
+  background: #f59e0b;
+  color: white;
+}
+
+.timeclock-btn-break:hover {
+  background: #d97706;
+}
+
+.timeclock-btn-break.on-break {
+  background: #22c55e;
+  animation: pulse-break 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-break {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Tabs */
+.timeclock-tabs {
+  display: flex;
+  gap: 4px;
+  background: white;
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  margin-bottom: 16px;
+  width: fit-content;
+}
+
+.timeclock-tab {
+  padding: 8px 20px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.timeclock-tab.active {
+  background: #2563eb;
+  color: white;
+}
+
+.timeclock-tab:hover:not(.active) {
+  background: #f1f5f9;
+}
+
+/* Week Navigation */
+.timeclock-week-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.timeclock-week-nav button {
+  padding: 6px 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: white;
+  cursor: pointer;
+  font-size: 14px;
+  color: #475569;
+}
+
+.timeclock-week-nav button:hover {
+  background: #f1f5f9;
+}
+
+.timeclock-week-nav span {
+  font-weight: 600;
+  color: #1e293b;
+  font-size: 15px;
+}
+
+/* Summary Cards */
+.timeclock-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.timeclock-summary-item {
+  background: white;
+  border-radius: 10px;
+  padding: 16px 20px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  text-align: center;
+}
+
+.timeclock-summary-label {
+  display: block;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #94a3b8;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.timeclock-summary-value {
+  display: block;
+  font-size: 22px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+/* Entries Table */
+.timeclock-entries {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.timeclock-empty {
+  padding: 40px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 15px;
+}
+
+.timeclock-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.timeclock-table th {
+  background: #f8fafc;
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.timeclock-table td {
+  padding: 12px 16px;
+  font-size: 14px;
+  color: #334155;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.timeclock-table tr:hover {
+  background: #f8fafc;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .timeclock-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .timeclock-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .timeclock-timer {
+    font-size: 40px;
+  }
+
+  .timeclock-actions {
+    flex-direction: column;
+  }
+
+  .timeclock-table {
+    font-size: 13px;
+  }
+
+  .timeclock-table th,
+  .timeclock-table td {
+    padding: 8px 10px;
+  }
+}
