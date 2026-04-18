@@ -11,6 +11,7 @@ export default function Sidebar({ onToggle }) {
     grooming: true,
     boarding: true,
     staff: true,
+    payroll: true,
     ai: true,
     tools: true,
   })
@@ -88,6 +89,14 @@ export default function Sidebar({ onToggle }) {
                 onClick={function() { goTo('/clients') }}
               >
                 Clients
+              </div>
+              )}
+              {canAccess('clients.view_list') && (
+              <div
+                className={'sidebar-subitem' + (isActive('/balances') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/balances') }}
+              >
+                Balances
               </div>
               )}
               {canAccess('pricing.view') && (
@@ -205,11 +214,59 @@ export default function Sidebar({ onToggle }) {
                 Time Clock
               </div>
               )}
-              {canAccess('staff.view_payroll') && (
-              <div className="sidebar-subitem sidebar-subitem-coming">
-                Payroll
+            </div>
+          )}
+        </div>
+        )}
+
+        {/* Payroll Section — visible if user has payroll permission */}
+        {canAccess('staff.view_payroll') && (
+        <div className="sidebar-section">
+          <div className="sidebar-section-header" onClick={function() { if (!collapsed) toggleSection('payroll') }}>
+            <span className="sidebar-icon">💰</span>
+            {!collapsed && (
+              <>
+                <span className="sidebar-section-title">Payroll</span>
+                <span className={'sidebar-arrow' + (openSections.payroll ? ' sidebar-arrow-open' : '')}>▸</span>
+              </>
+            )}
+          </div>
+          {!collapsed && openSections.payroll && (
+            <div className="sidebar-subitems">
+              <div
+                className={'sidebar-subitem' + (isActive('/payroll') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/payroll') }}
+              >
+                Dashboard
               </div>
-              )}
+              <div
+                className={'sidebar-subitem' + (isActive('/payroll/pay-periods') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/payroll/pay-periods') }}
+              >
+                Pay Periods
+              </div>
+              <div
+                className={'sidebar-subitem' + (isActive('/payroll/tax-settings') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/payroll/tax-settings') }}
+              >
+                Tax Settings
+              </div>
+              {/* Reports — hidden for launch, coming in v1.1
+              <div
+                className={'sidebar-subitem' + (isActive('/payroll/reports') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/payroll/reports') }}
+              >
+                Reports
+              </div>
+              */}
+              {/* Year-End Forms — hidden for launch, coming in v1.1
+              <div
+                className={'sidebar-subitem' + (isActive('/payroll/year-end') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/payroll/year-end') }}
+              >
+                Year-End Forms
+              </div>
+              */}
             </div>
           )}
         </div>
@@ -263,7 +320,10 @@ export default function Sidebar({ onToggle }) {
               </div>
               )}
               {canAccess('ai.access_settings') && (
-              <div className="sidebar-subitem sidebar-subitem-coming">
+              <div
+                className={'sidebar-subitem' + (isActive('/ai/chat-settings') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/ai/chat-settings') }}
+              >
                 Chat Settings
               </div>
               )}

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 
 const TABS = [
   { key: 'overview', label: '🐾 Overview' },
+  { key: 'upcoming', label: '📅 Upcoming' },
   { key: 'grooming', label: '✂️ Past Grooming' },
   { key: 'boarding', label: '🏠 Past Boarding' },
   { key: 'vaccinations', label: '💉 Vaccinations' },
@@ -32,17 +33,253 @@ export default function ClientDetail() {
   const [noteForPet, setNoteForPet] = useState('') // pet_id for grooming notes
   const [savingNote, setSavingNote] = useState(false)
   const [groomingNotes, setGroomingNotes] = useState([]) // per-pet grooming notes
+  const [clientPayments, setClientPayments] = useState([]) // actual payment records from payments table
+  const [clientOutstanding, setClientOutstanding] = useState({ total: 0, appointments: [] })
+  const [upcomingAppts, setUpcomingAppts] = useState([])
+  const [upcomingCount, setUpcomingCount] = useState(0)
+  const [overdueCount, setOverdueCount] = useState(0)
+  // Most recent completed appointment per pet — used by "Book Again" buttons to pre-fill the calendar form
+  const [lastApptPerPet, setLastApptPerPet] = useState({})
+  // Most recent completed appointment overall for this client (for the header "Book Again" button)
+  const [lastApptOverall, setLastApptOverall] = useState(null)
 
   useEffect(() => {
     fetchClientAndPets()
+    fetchUpcomingCounts()
+    fetchLastCompletedPerPet()
   }, [id])
+
+  // For "Book Again" pre-fill — find each pet's most recent completed appointment (and overall most recent for the header button)
+  const fetchLastCompletedPerPet = async () => {
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('id, pet_id, service_id, appointment_date, services(id, service_name)')
+      .eq('client_id', id)
+      .eq('status', 'completed')
+      .not('checked_out_at', 'is', null)
+      .order('appointment_date', { ascending: false })
+
+    if (error || !data) {
+      setLastApptPerPet({})
+      setLastApptOverall(null)
+      return
+    }
+
+    // Most recent overall
+    setLastApptOverall(data[0] || null)
+
+    // Most recent per pet (data is already sorted desc, so first hit per pet_id wins)
+    const perPet = {}
+    data.forEach(a => {
+      if (a.pet_id && !perPet[a.pet_id]) {
+        perPet[a.pet_id] = a
+      }
+    })
+    setLastApptPerPet(perPet)
+  }
+
+  // Lightweight count fetch — runs on page load so badge appears immediately
+  const fetchUpcomingCounts = async () => {
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('appointment_date, status')
+      .eq('client_id', id)
+      .is('checked_out_at', null)
+
+    if (error || !data) {
+      setUpcomingCount(0)
+      setOverdueCount(0)
+      return
+    }
+
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const closedStatuses = ['cancelled', 'no_show', 'completed', 'checked_out']
+
+    let overdue = 0
+    let upcoming = 0
+    data.forEach(a => {
+      if (closedStatuses.includes(a.status)) return
+      const apptDate = new Date(a.appointment_date + 'T00:00:00')
+      if (apptDate < today) overdue++
+      else upcoming++
+    })
+
+    setOverdueCount(overdue)
+    setUpcomingCount(upcoming)
+  }
 
   useEffect(() => {
     if (activeTab === 'grooming') fetchGroomingHistory()
     if (activeTab === 'boarding') fetchBoardingHistory()
     if (activeTab === 'vaccinations') fetchVaccinations()
     if (activeTab === 'notes') fetchNotes()
+    if (activeTab === 'payments') fetchClientPayments()
+    if (activeTab === 'upcoming') fetchUpcomingAppointments()
   }, [activeTab, id])
+
+  // Fetch ALL real payments for this client (from payments table)
+  const fetchClientPayments = async () => {
+    setLoadingTab(true)
+    try {
+      // 1. Get payment history
+      const { data: payData, error } = await supabase
+        .from('payments')
+        .select(`
+          *,
+          appointments:appointment_id (
+            id,
+            appointment_date,
+            final_price,
+            quoted_price,
+            pets:pet_id ( name ),
+            services:service_id ( service_name )
+          )
+        `)
+        .eq('client_id', id)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Error fetching payments:', error)
+        setClientPayments([])
+      } else {
+        setClientPayments(payData || [])
+      }
+
+      // 2. Get checked-out appointments for this client to compute outstanding balance
+      const { data: apptsData } = await supabase
+        .from('appointments')
+        .select(`
+          id, appointment_date, start_time, quoted_price, final_price, discount_amount,
+          pets:pet_id ( name ),
+          services:service_id ( service_name )
+        `)
+        .eq('client_id', id)
+        .not('checked_out_at', 'is', null)
+        .order('appointment_date', { ascending: false })
+
+      // Build paid map from payment rows
+      const paidMap = {}
+      ;(payData || []).forEach(p => {
+        if (!paidMap[p.appointment_id]) paidMap[p.appointment_id] = 0
+        paidMap[p.appointment_id] += parseFloat(p.amount || 0)
+      })
+
+      // Calculate balance per appointment
+      const unpaidAppts = []
+      let totalOwed = 0
+      ;(apptsData || []).forEach(a => {
+        const servicePrice = parseFloat(a.final_price != null ? a.final_price : (a.quoted_price || 0))
+        const discount = parseFloat(a.discount_amount || 0)
+        const totalDue = servicePrice - discount
+        const paid = paidMap[a.id] || 0
+        const balance = totalDue - paid
+        if (balance > 0.01) {
+          unpaidAppts.push({
+            id: a.id,
+            appointmentDate: a.appointment_date,
+            startTime: a.start_time,
+            petName: a.pets ? a.pets.name : '—',
+            serviceName: a.services ? a.services.service_name : '—',
+            totalDue: totalDue,
+            paid: paid,
+            balance: balance
+          })
+          totalOwed += balance
+        }
+      })
+
+      setClientOutstanding({ total: totalOwed, appointments: unpaidAppts })
+    } finally {
+      setLoadingTab(false)
+    }
+  }
+
+  // Fetch upcoming appointments for this client (grooming only for now — boarding handled later)
+  // Shows ANY appointment that hasn't been closed out yet (not completed/cancelled/no_show/checked_out)
+  // Past-dated confirmed appointments that never got marked done still show here — with an overdue badge
+  const fetchUpcomingAppointments = async () => {
+    setLoadingTab(true)
+    const { data, error } = await supabase
+      .from('appointments')
+      .select(`
+        *,
+        pets(id, name, breed),
+        services(id, service_name, price, time_block_minutes)
+      `)
+      .eq('client_id', id)
+      .is('checked_out_at', null)
+      .order('appointment_date', { ascending: true })
+      .order('start_time', { ascending: true })
+
+    if (error) {
+      console.error('Error fetching upcoming appts:', error)
+      setUpcomingAppts([])
+    } else {
+      // Filter out closed-out statuses — only "still open" appointments
+      const filtered = (data || []).filter(a =>
+        !['cancelled', 'no_show', 'completed', 'checked_out'].includes(a.status)
+      )
+      setUpcomingAppts(filtered)
+    }
+    setLoadingTab(false)
+  }
+
+  // Cancel an upcoming appointment — keeps the record with status 'cancelled' for history
+  const handleCancelAppointment = async (appt) => {
+    const petName = appt.pets?.name || 'this pet'
+    const dateStr = formatDate(appt.appointment_date)
+    const timeStr = formatTime(appt.start_time)
+    if (!window.confirm(`Cancel ${petName}'s appointment on ${dateStr} at ${timeStr}?\n\nThis will keep the record in history for tracking cancellations.`)) return
+
+    const { error } = await supabase
+      .from('appointments')
+      .update({ status: 'cancelled' })
+      .eq('id', appt.id)
+
+    if (error) {
+      alert('Error cancelling appointment: ' + error.message)
+      return
+    }
+
+    fetchUpcomingAppointments()
+    fetchUpcomingCounts()
+  }
+
+  // Jump to calendar with the reschedule modal auto-opened for this appointment
+  const handleReschedule = (apptId) => {
+    navigate(`/calendar?rescheduleAppt=${apptId}`)
+  }
+
+  // "Book Again" → jump to calendar with New Appointment form pre-filled with client + pet + service
+  const handleBookAgain = (petId, serviceId) => {
+    const params = new URLSearchParams({
+      bookClient: id,
+      bookPet: petId,
+    })
+    if (serviceId) params.set('bookService', serviceId)
+    navigate(`/calendar?${params.toString()}`)
+  }
+
+  // Header "Book Again" — uses most recently groomed pet's last service
+  const handleBookAgainFromHeader = () => {
+    if (!lastApptOverall) {
+      alert('No previous appointments to rebook from — use + New Appointment instead.')
+      return
+    }
+    handleBookAgain(lastApptOverall.pet_id, lastApptOverall.service_id)
+  }
+
+  // Pet card "Book Again" — uses this pet's last service
+  const handleBookAgainForPet = (petId) => {
+    const last = lastApptPerPet[petId]
+    if (last) {
+      handleBookAgain(petId, last.service_id)
+    } else {
+      // No history for this pet — still pre-fill client + pet, let user pick service
+      handleBookAgain(petId, null)
+    }
+  }
 
   const fetchClientAndPets = async () => {
     const { data: clientData, error: clientError } = await supabase
@@ -120,20 +357,22 @@ export default function ClientDetail() {
   const fetchNotes = async () => {
     setLoadingTab(true)
 
-    // Fetch client notes
-    const { data: cnData, error: cnError } = await supabase
-      .from('client_notes')
+    // Fetch all notes for this client from the unified notes table
+    // Exclude appointment-specific notes (those live on the appointment modal)
+    const { data, error } = await supabase
+      .from('notes')
       .select('*')
       .eq('client_id', id)
+      .is('appointment_id', null)
       .order('created_at', { ascending: false })
 
-    if (!cnError) {
-      // Separate client notes from grooming notes by note_type field
-      const allNotes = cnData || []
-      setClientNotes(allNotes.filter(n => n.note_type !== 'grooming'))
-      setGroomingNotes(allNotes.filter(n => n.note_type === 'grooming'))
+    if (!error) {
+      const allNotes = data || []
+      // Client-level notes: no pet_id OR note_type = 'client'
+      setClientNotes(allNotes.filter(n => n.note_type === 'client' || (!n.pet_id && n.note_type !== 'grooming')))
+      // Grooming notes: linked to a pet
+      setGroomingNotes(allNotes.filter(n => n.note_type === 'grooming' || (n.pet_id && n.note_type !== 'client')))
     } else {
-      // Table might not exist yet — we'll handle with fallback
       setClientNotes([])
       setGroomingNotes([])
     }
@@ -148,50 +387,24 @@ export default function ClientDetail() {
     }
     setSavingNote(true)
 
-    // Try to save to client_notes table with note_type
-    const noteData = {
-      client_id: id,
-      note: newNote.trim(),
-      note_type: noteType,
-      pet_id: noteType === 'grooming' ? noteForPet : null,
-      created_by: client.groomer_id,
-    }
+    const { data: { user } } = await supabase.auth.getUser()
 
-    const { error } = await supabase
-      .from('client_notes')
-      .insert(noteData)
+    // Save to the unified notes table
+    const { error } = await supabase.from('notes').insert({
+      client_id: id,
+      pet_id: noteType === 'grooming' ? noteForPet : null,
+      appointment_id: null,
+      groomer_id: user.id,
+      note_type: noteType,
+      content: newNote.trim(),
+    })
 
     if (!error) {
       setNewNote('')
       setNoteForPet('')
       fetchNotes()
     } else {
-      // Fallback: if table doesn't have the new columns yet, try basic insert
-      const { error: fallbackError } = await supabase
-        .from('client_notes')
-        .insert({
-          client_id: id,
-          note: `[${noteType === 'grooming' ? '✂️ GROOMING' : '📋 CLIENT'}] ${newNote.trim()}`,
-          created_by: client.groomer_id,
-        })
-
-      if (!fallbackError) {
-        setNewNote('')
-        setNoteForPet('')
-        fetchNotes()
-      } else {
-        // Last fallback: update client.notes text field
-        const existingNotes = client.notes || ''
-        const timestamp = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-        const prefix = noteType === 'grooming' ? '✂️' : '📋'
-        const petName = noteType === 'grooming' && noteForPet ? ` [${getPetName(noteForPet)}]` : ''
-        const updatedNotes = `[${timestamp}] ${prefix}${petName} ${newNote.trim()}\n${existingNotes}`
-
-        await supabase.from('clients').update({ notes: updatedNotes }).eq('id', id)
-        setClient({ ...client, notes: updatedNotes })
-        setNewNote('')
-        setNoteForPet('')
-      }
+      alert('Error saving note: ' + error.message)
     }
     setSavingNote(false)
   }
@@ -273,7 +486,16 @@ export default function ClientDetail() {
     <div className="cp-page">
       {/* Header */}
       <div className="cp-header">
-        <Link to="/clients" className="cp-back">← Back to Clients</Link>
+        <div className="cp-header-top">
+          <Link to="/clients" className="cp-back">← Back to Clients</Link>
+          <button
+            className="cp-book-again-btn"
+            onClick={handleBookAgainFromHeader}
+            title={lastApptOverall ? `Rebook last service` : 'No history to rebook from'}
+          >
+            📅 Book Again
+          </button>
+        </div>
         <div className="cp-header-row">
           <div className="cp-avatar-big" style={{ background: getPetAvatar({ name: client.first_name }) }}>
             {client.first_name?.[0]}{client.last_name?.[0]}
@@ -282,6 +504,24 @@ export default function ClientDetail() {
             <h1 className="cp-name">
               {client.first_name} {client.last_name}
               {client.is_first_time && <span className="cp-badge-new">New Client</span>}
+              {overdueCount > 0 && (
+                <span
+                  className="cp-badge-overdue"
+                  onClick={() => setActiveTab('upcoming')}
+                  title="Click to view overdue appointments"
+                >
+                  🔴 {overdueCount} Overdue
+                </span>
+              )}
+              {overdueCount === 0 && upcomingCount > 0 && (
+                <span
+                  className="cp-badge-upcoming"
+                  onClick={() => setActiveTab('upcoming')}
+                  title="Click to view upcoming appointments"
+                >
+                  📅 {upcomingCount} Upcoming
+                </span>
+              )}
             </h1>
             <div className="cp-quick-stats">
               <span>🐾 {pets.length} Pet{pets.length !== 1 ? 's' : ''}</span>
@@ -420,12 +660,104 @@ export default function ClientDetail() {
                         {pet.grooming_notes && (
                           <div className="cp-pet-groom-notes">✂️ {pet.grooming_notes}</div>
                         )}
+
+                        {/* Book Again button for this specific pet */}
+                        <div className="cp-pet-actions">
+                          <button
+                            className="cp-pet-book-again"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              handleBookAgainForPet(pet.id)
+                            }}
+                            title={lastApptPerPet[pet.id] ? `Rebook ${pet.name}'s last service` : `Book a service for ${pet.name}`}
+                          >
+                            📅 Book Again for {pet.name}
+                          </button>
+                        </div>
                       </Link>
                     )
                   })}
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ═══════ UPCOMING TAB ═══════ */}
+        {activeTab === 'upcoming' && (
+          <div className="cp-upcoming">
+            {loadingTab ? (
+              <div className="cp-tab-loading">🐾 Loading upcoming appointments...</div>
+            ) : upcomingAppts.length === 0 ? (
+              <div className="cp-empty-tab">
+                <div className="cp-empty-icon">📅</div>
+                <p>No upcoming appointments</p>
+                <p className="cp-empty-sub">Book this client's next appointment from the calendar</p>
+              </div>
+            ) : (
+              <>
+                {/* Summary */}
+                <div className="cp-summary-bar">
+                  <div className="cp-summary-item">
+                    <span className="cp-summary-number">{upcomingAppts.length}</span>
+                    <span className="cp-summary-label">Upcoming Appointment{upcomingAppts.length !== 1 ? 's' : ''}</span>
+                  </div>
+                </div>
+
+                {/* Upcoming List */}
+                <div className="cp-history-list">
+                  {upcomingAppts.map(appt => {
+                    const apptDate = new Date(appt.appointment_date + 'T00:00:00')
+                    const today = new Date()
+                    today.setHours(0, 0, 0, 0)
+                    const isOverdue = apptDate < today
+                    return (
+                    <div key={appt.id} className={`cp-upcoming-item ${isOverdue ? 'cp-upcoming-overdue' : ''}`}>
+                      <div className="cp-history-date-col">
+                        <span className="cp-history-month">{apptDate.toLocaleDateString('en-US', { month: 'short' })}</span>
+                        <span className="cp-history-day">{apptDate.getDate()}</span>
+                        <span className="cp-history-year">{apptDate.getFullYear()}</span>
+                      </div>
+                      <div className="cp-history-details">
+                        <div className="cp-history-top-row">
+                          <span className="cp-history-service">{appt.services?.service_name || 'Service'}</span>
+                          {isOverdue && (
+                            <span className="cp-upcoming-overdue-badge">⚠️ Overdue — needs action</span>
+                          )}
+                          <span className="cp-history-status" style={{ background: getStatusColor(appt.status) + '20', color: getStatusColor(appt.status) }}>
+                            {appt.status}
+                          </span>
+                        </div>
+                        <div className="cp-history-meta">
+                          <span>🐾 {appt.pets?.name || 'Unknown Pet'}</span>
+                          <span>🕐 {formatTime(appt.start_time)} — {formatTime(appt.end_time)}</span>
+                          {appt.services?.time_block_minutes && <span>⏱️ {appt.services.time_block_minutes} min</span>}
+                        </div>
+                        {appt.service_notes && (
+                          <div className="cp-history-notes">📝 {appt.service_notes}</div>
+                        )}
+                      </div>
+                      <div className="cp-upcoming-actions">
+                        <button
+                          className="cp-upcoming-btn cp-upcoming-btn-reschedule"
+                          onClick={() => handleReschedule(appt.id)}
+                        >
+                          📅 Reschedule
+                        </button>
+                        <button
+                          className="cp-upcoming-btn cp-upcoming-btn-cancel"
+                          onClick={() => handleCancelAppointment(appt)}
+                        >
+                          ❌ Cancel
+                        </button>
+                      </div>
+                    </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -485,8 +817,17 @@ export default function ClientDetail() {
                           <div className="cp-history-flags">🚩 {appt.flag_details}</div>
                         )}
                       </div>
-                      <div className="cp-history-price">
-                        ${parseFloat(appt.final_price || appt.quoted_price || 0).toFixed(2)}
+                      <div className="cp-history-right">
+                        <div className="cp-history-price">
+                          ${parseFloat(appt.final_price || appt.quoted_price || 0).toFixed(2)}
+                        </div>
+                        <button
+                          className="cp-history-book-again"
+                          onClick={() => handleBookAgain(appt.pet_id, appt.service_id)}
+                          title="Rebook this exact service for this pet"
+                        >
+                          📅 Book Again
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -625,84 +966,153 @@ export default function ClientDetail() {
         )}
 
         {/* ═══════ PAYMENTS TAB ═══════ */}
-        {activeTab === 'payments' && (
-          <div className="cp-payments">
-            {/* Combined grooming + boarding payment history */}
-            {groomingHistory.length === 0 && boardingHistory.length === 0 ? (
-              <>
-                {loadingTab ? (
-                  <div className="cp-tab-loading">🐾 Loading payment history...</div>
-                ) : (
-                  <div className="cp-empty-tab">
-                    <div className="cp-empty-icon">💳</div>
-                    <p>No payment history yet</p>
-                    <p className="cp-empty-sub">Payments will appear here after grooming or boarding appointments</p>
-                  </div>
-                )}
-              </>
-            ) : (
-              <>
-                {/* Payment Summary */}
-                <div className="cp-summary-bar">
-                  <div className="cp-summary-item">
-                    <span className="cp-summary-number cp-summary-money">${(totalGroomingSpent + totalBoardingSpent).toFixed(2)}</span>
-                    <span className="cp-summary-label">Lifetime Spend</span>
-                  </div>
-                  <div className="cp-summary-item">
-                    <span className="cp-summary-number cp-summary-money">${totalGroomingSpent.toFixed(2)}</span>
-                    <span className="cp-summary-label">Grooming</span>
-                  </div>
-                  <div className="cp-summary-item">
-                    <span className="cp-summary-number cp-summary-money">${totalBoardingSpent.toFixed(2)}</span>
-                    <span className="cp-summary-label">Boarding</span>
-                  </div>
-                </div>
+        {activeTab === 'payments' && (() => {
+          // Compute summary totals from REAL payment records
+          const totalPaid = clientPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0)
+          const totalTips = clientPayments.reduce((sum, p) => sum + parseFloat(p.tip_amount || 0), 0)
+          const methodIcon = (m) => m === 'cash' ? '💵' : m === 'zelle' ? '⚡' : m === 'venmo' ? '🔵' : m === 'card' ? '💳' : m === 'check' ? '📝' : '•'
 
-                {/* Combined timeline - merge and sort by date */}
-                <div className="cp-history-list">
-                  {[
-                    ...groomingHistory
-                      .filter(a => a.status === 'completed')
-                      .map(a => ({
-                        type: 'grooming',
-                        date: a.appointment_date,
-                        label: `✂️ ${a.services?.service_name || 'Grooming'}`,
-                        pet: a.pets?.name || 'Unknown',
-                        amount: parseFloat(a.final_price || a.quoted_price || 0),
-                        id: a.id
-                      })),
-                    ...boardingHistory
-                      .filter(r => r.status === 'checked_out' || r.status === 'completed')
-                      .map(r => ({
-                        type: 'boarding',
-                        date: r.start_date,
-                        label: `🏠 Boarding (${Math.max(1, Math.round((new Date(r.end_date) - new Date(r.start_date)) / (1000 * 60 * 60 * 24)))} nights)`,
-                        pet: r.boarding_reservation_pets?.map(brp => brp.pets?.name).filter(Boolean).join(', ') || 'Unknown',
-                        amount: parseFloat(r.total_price || 0),
-                        id: r.id
-                      }))
-                  ]
-                    .sort((a, b) => new Date(b.date) - new Date(a.date))
-                    .map(item => (
-                      <div key={item.id} className="cp-payment-row">
-                        <div className="cp-history-date-col">
-                          <span className="cp-history-month">{new Date(item.date).toLocaleDateString('en-US', { month: 'short' })}</span>
-                          <span className="cp-history-day">{new Date(item.date).getDate()}</span>
-                          <span className="cp-history-year">{new Date(item.date).getFullYear()}</span>
+          // Payment breakdown by method
+          const byMethod = clientPayments.reduce((acc, p) => {
+            const method = p.method || 'other'
+            const total = parseFloat(p.amount || 0) + parseFloat(p.tip_amount || 0)
+            acc[method] = (acc[method] || 0) + total
+            return acc
+          }, {})
+
+          return (
+            <div className="cp-payments">
+              {loadingTab ? (
+                <div className="cp-tab-loading">🐾 Loading payment history...</div>
+              ) : (
+                <>
+                  {/* Outstanding Balance Card (Phase C - Step 3) */}
+                  {clientOutstanding.total > 0 && (
+                    <div className="cp-outstanding-card">
+                      <div className="cp-outstanding-head">
+                        <div>
+                          <div className="cp-outstanding-label">Outstanding Balance</div>
+                          <div className="cp-outstanding-amount">${clientOutstanding.total.toFixed(2)}</div>
                         </div>
-                        <div className="cp-payment-info">
-                          <span className="cp-payment-label">{item.label}</span>
-                          <span className="cp-payment-pet">🐾 {item.pet}</span>
+                        <div className="cp-outstanding-count">
+                          {clientOutstanding.appointments.length} appointment{clientOutstanding.appointments.length !== 1 ? 's' : ''}
                         </div>
-                        <div className="cp-history-price">${item.amount.toFixed(2)}</div>
                       </div>
-                    ))
-                  }
-                </div>
-              </>
-            )}
-          </div>
-        )}
+                      <div className="cp-outstanding-list">
+                        {clientOutstanding.appointments.map(a => (
+                          <div key={a.id} className="cp-outstanding-row">
+                            <div className="cp-outstanding-row-info">
+                              <div className="cp-outstanding-row-head">
+                                🐾 {a.petName} · ✂️ {a.serviceName}
+                              </div>
+                              <div className="cp-outstanding-row-sub">
+                                {new Date(a.appointmentDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                {a.paid > 0 && (
+                                  <span className="cp-outstanding-row-partial"> · ${a.paid.toFixed(2)} of ${a.totalDue.toFixed(2)} paid</span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="cp-outstanding-row-balance">${a.balance.toFixed(2)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {clientPayments.length === 0 && clientOutstanding.total === 0 ? (
+                    <div className="cp-empty-tab">
+                      <div className="cp-empty-icon">💳</div>
+                      <p>No payment history yet</p>
+                      <p className="cp-empty-sub">Payments will appear here once you take payment at checkout</p>
+                    </div>
+                  ) : clientPayments.length === 0 ? (
+                    <div className="cp-empty-tab" style={{ marginTop: '20px' }}>
+                      <div className="cp-empty-icon">💳</div>
+                      <p>No payments recorded yet</p>
+                      <p className="cp-empty-sub">This client has appointments checked out but hasn't paid</p>
+                    </div>
+                  ) : (
+                    <>
+                  {/* Payment Summary */}
+                  <div className="cp-summary-bar">
+                    <div className="cp-summary-item">
+                      <span className="cp-summary-number cp-summary-money">${(totalPaid + totalTips).toFixed(2)}</span>
+                      <span className="cp-summary-label">Lifetime Paid</span>
+                    </div>
+                    <div className="cp-summary-item">
+                      <span className="cp-summary-number cp-summary-money">${totalPaid.toFixed(2)}</span>
+                      <span className="cp-summary-label">Services</span>
+                    </div>
+                    <div className="cp-summary-item">
+                      <span className="cp-summary-number cp-summary-money">${totalTips.toFixed(2)}</span>
+                      <span className="cp-summary-label">Tips</span>
+                    </div>
+                  </div>
+
+                  {/* Breakdown by payment method */}
+                  <div className="cp-method-breakdown">
+                    <div className="cp-method-breakdown-label">By Payment Method</div>
+                    <div className="cp-method-breakdown-chips">
+                      {Object.entries(byMethod).map(([method, total]) => (
+                        <div key={method} className="cp-method-chip">
+                          <span className="cp-method-chip-icon">{methodIcon(method)}</span>
+                          <span className="cp-method-chip-label">{method.toUpperCase()}</span>
+                          <span className="cp-method-chip-amount">${total.toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Payment Records Timeline */}
+                  <div className="cp-payments-timeline">
+                    <div className="cp-payments-timeline-label">All Payments</div>
+                    {clientPayments.map(p => {
+                      const date = new Date(p.created_at)
+                      const apptPrice = parseFloat(p.appointments?.final_price || p.appointments?.quoted_price || 0)
+                      return (
+                        <div key={p.id} className="cp-real-payment-row">
+                          <div className="cp-history-date-col">
+                            <span className="cp-history-month">{date.toLocaleDateString('en-US', { month: 'short' })}</span>
+                            <span className="cp-history-day">{date.getDate()}</span>
+                            <span className="cp-history-year">{date.getFullYear()}</span>
+                          </div>
+                          <div className="cp-real-payment-info">
+                            <div className="cp-real-payment-head">
+                              <span className="cp-real-payment-method">
+                                {methodIcon(p.method)} {p.method.toUpperCase()}
+                              </span>
+                              <span className="cp-real-payment-time">
+                                {date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <div className="cp-real-payment-sub">
+                              {p.appointments?.services?.service_name && (
+                                <span>✂️ {p.appointments.services.service_name}</span>
+                              )}
+                              {p.appointments?.pets?.name && (
+                                <span>🐾 {p.appointments.pets.name}</span>
+                              )}
+                              {!p.appointments && <span className="cp-real-payment-orphan">Payment (no appointment link)</span>}
+                            </div>
+                            {p.notes && <div className="cp-real-payment-notes">"{p.notes}"</div>}
+                          </div>
+                          <div className="cp-real-payment-amounts">
+                            <div className="cp-history-price">${parseFloat(p.amount).toFixed(2)}</div>
+                            {parseFloat(p.tip_amount) > 0 && (
+                              <div className="cp-real-payment-tip">+ ${parseFloat(p.tip_amount).toFixed(2)} tip</div>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+                  )}
+                </>
+              )}
+            </div>
+          )
+        })()}
 
         {/* ═══════ NOTES TAB ═══════ */}
         {activeTab === 'notes' && (
@@ -780,7 +1190,7 @@ export default function ClientDetail() {
                         <span className="cp-note-badge-client">📋 Client</span>
                         <span className="cp-note-date">{formatDate(note.created_at)}</span>
                       </div>
-                      <div className="cp-note-text">{note.note}</div>
+                      <div className="cp-note-text">{note.content}</div>
                     </div>
                   ))}
                 </div>
@@ -824,7 +1234,7 @@ export default function ClientDetail() {
                               <span className="cp-note-badge-groom">✂️ Grooming</span>
                               <span className="cp-note-date">{formatDate(note.created_at)}</span>
                             </div>
-                            <div className="cp-note-text">{note.note}</div>
+                            <div className="cp-note-text">{note.content}</div>
                           </div>
                         ))}
                       </div>
@@ -837,7 +1247,7 @@ export default function ClientDetail() {
                         <span className="cp-note-badge-groom">✂️ Grooming</span>
                         <span className="cp-note-date">{formatDate(note.created_at)}</span>
                       </div>
-                      <div className="cp-note-text">{note.note}</div>
+                      <div className="cp-note-text">{note.content}</div>
                     </div>
                   ))}
                 </div>

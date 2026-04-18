@@ -45,6 +45,7 @@ export default function Dashboard() {
   })
   var [saving, setSaving] = useState(false)
   var [waitlistCount, setWaitlistCount] = useState(0)
+  var [owedSummary, setOwedSummary] = useState({ total: 0, clientCount: 0, top3: [] })
 
   useEffect(function() {
     fetchAll()
@@ -134,7 +135,72 @@ export default function Dashboard() {
 
     setWaitlistCount(wlCount || 0)
 
+    // Fetch outstanding balances summary (Phase C)
+    await fetchOwedSummary(user.id)
+
     setLoading(false)
+  }
+
+  async function fetchOwedSummary(userId) {
+    // Get checked-out appointments
+    var { data: appts } = await supabase
+      .from('appointments')
+      .select('id, quoted_price, final_price, discount_amount, appointment_date, clients:client_id(id, first_name, last_name), pets:pet_id(name)')
+      .eq('groomer_id', userId)
+      .not('checked_out_at', 'is', null)
+
+    if (!appts || appts.length === 0) {
+      setOwedSummary({ total: 0, clientCount: 0, top3: [] })
+      return
+    }
+
+    // Sum payments per appointment
+    var apptIds = appts.map(function(a) { return a.id })
+    var { data: payments } = await supabase
+      .from('payments')
+      .select('appointment_id, amount')
+      .in('appointment_id', apptIds)
+
+    var paidMap = {}
+    ;(payments || []).forEach(function(p) {
+      if (!paidMap[p.appointment_id]) paidMap[p.appointment_id] = 0
+      paidMap[p.appointment_id] += parseFloat(p.amount || 0)
+    })
+
+    // Compute unpaid with balance
+    var unpaid = []
+    appts.forEach(function(a) {
+      var servicePrice = parseFloat(a.final_price != null ? a.final_price : (a.quoted_price || 0))
+      var discount = parseFloat(a.discount_amount || 0)
+      var totalDue = servicePrice - discount
+      var paid = paidMap[a.id] || 0
+      var bal = totalDue - paid
+      if (bal > 0.01) {
+        unpaid.push({
+          apptId: a.id,
+          clientName: a.clients ? (a.clients.first_name + ' ' + a.clients.last_name) : 'Unknown',
+          petName: a.pets ? a.pets.name : '—',
+          balance: bal,
+          appointmentDate: a.appointment_date
+        })
+      }
+    })
+
+    // Sort by oldest appointment first (most overdue at top)
+    unpaid.sort(function(a, b) { return a.appointmentDate.localeCompare(b.appointmentDate) })
+
+    var total = 0
+    var clientSet = {}
+    unpaid.forEach(function(u) {
+      total += u.balance
+      clientSet[u.clientName] = true
+    })
+
+    setOwedSummary({
+      total: total,
+      clientCount: Object.keys(clientSet).length,
+      top3: unpaid.slice(0, 3)
+    })
   }
 
   function getDateRange() {
@@ -351,7 +417,48 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+        {owedSummary.total > 0 && (
+          <div className="db-stat-card db-stat-owed" onClick={function() { navigate('/balances') }} style={{ cursor: 'pointer' }}>
+            <div className="db-stat-icon">💸</div>
+            <div className="db-stat-info">
+              <div className="db-stat-number">${owedSummary.total.toFixed(0)}</div>
+              <div className="db-stat-label">Owed · {owedSummary.clientCount} client{owedSummary.clientCount !== 1 ? 's' : ''}</div>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Outstanding Balances Widget (Phase C) */}
+      {owedSummary.top3.length > 0 && (
+        <div className="db-balances-widget">
+          <div className="db-balances-widget-header">
+            <div className="db-balances-widget-title">
+              <span className="db-balances-widget-icon">💸</span>
+              Outstanding Balances
+            </div>
+            <button className="db-balances-widget-link" onClick={function() { navigate('/balances') }}>
+              View all →
+            </button>
+          </div>
+          <div className="db-balances-widget-list">
+            {owedSummary.top3.map(function(b) {
+              return (
+                <div
+                  key={b.apptId}
+                  className="db-balances-widget-row"
+                  onClick={function() { navigate('/balances') }}
+                >
+                  <div className="db-balances-widget-info">
+                    <div className="db-balances-widget-name">{b.clientName}</div>
+                    <div className="db-balances-widget-sub">🐾 {b.petName}</div>
+                  </div>
+                  <div className="db-balances-widget-amount">${b.balance.toFixed(2)}</div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Main Grid: Grooming + Boarding + Notes */}
       <div className="db-main-grid">
@@ -467,7 +574,7 @@ export default function Dashboard() {
               <div className="db-alert db-alert-red" onClick={function() { navigate('/flagged') }}>
                 <span className="db-alert-icon">🤖</span>
                 <div className="db-alert-text">
-                  <strong>Claude AI:</strong> {flagCount} booking{flagCount !== 1 ? 's' : ''} flagged for review
+                  <strong>PetPro AI:</strong> {flagCount} booking{flagCount !== 1 ? 's' : ''} flagged for review
                 </div>
                 <span className="db-alert-arrow">→</span>
               </div>

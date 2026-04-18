@@ -470,7 +470,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, onClose, onS
         setForm({ ...form, [name]: value })
     }
 
-    // Run Claude AI safety check
+    // Run PetPro AI safety check
     const runSafetyCheck = async () => {
         if (!form.pet_id) {
             setError('Select a pet first so Claude can check their profile.')
@@ -651,7 +651,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, onClose, onS
                         <textarea name="service_notes" value={form.service_notes} onChange={handleChange} rows={2} placeholder="Any notes for this appointment..." />
                     </div>
 
-                    {/* Claude AI Safety Check Section */}
+                    {/* PetPro AI Safety Check Section */}
                     <div className="safety-check-section">
                         <button
                             type="button"
@@ -659,7 +659,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, onClose, onS
                             onClick={runSafetyCheck}
                             disabled={checking || !form.pet_id}
                         >
-                            {checking ? 'Claude is checking...' : 'Check with Claude AI'}
+                            {checking ? 'PetPro AI is checking...' : 'Check with PetPro AI'}
                         </button>
 
                         {safetyCheck && (

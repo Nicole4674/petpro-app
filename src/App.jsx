@@ -22,6 +22,15 @@ import Waitlist from './pages/Waitlist'
 import PetDetail from './pages/PetDetail'
 import StaffSchedule from './pages/StaffSchedule'
 import TimeClock from './pages/TimeClock'
+import PayrollDashboard from './pages/PayrollDashboard'
+import PayPeriods from './pages/PayPeriods'
+import RunPayroll from './pages/RunPayroll'
+import PaycheckDetail from './pages/PaycheckDetail'
+import TaxSettings from './pages/TaxSettings'
+import PayrollReports from './pages/PayrollReports'
+import YearEndForms from './pages/YearEndForms'
+import ChatSettings from './pages/ChatSettings'
+import Balances from './pages/Balances'
 import AIChatWidget from './components/AIChatWidget'
 import Sidebar from './components/Sidebar'
 import './App.css'
@@ -95,6 +104,15 @@ function App() {
                     <Route path="/waitlist" element={session ? <Waitlist /> : <Navigate to="/login" />} />
                     <Route path="/staff/schedule" element={session ? <StaffSchedule /> : <Navigate to="/login" />} />
                     <Route path="/staff/timeclock" element={session ? <TimeClock /> : <Navigate to="/login" />} />
+                    <Route path="/payroll" element={session ? <PayrollDashboard /> : <Navigate to="/login" />} />
+                    <Route path="/payroll/run" element={session ? <RunPayroll /> : <Navigate to="/login" />} />
+                    <Route path="/payroll/paycheck/:id" element={session ? <PaycheckDetail /> : <Navigate to="/login" />} />
+                    <Route path="/payroll/pay-periods" element={session ? <PayPeriods /> : <Navigate to="/login" />} />
+                    <Route path="/payroll/tax-settings" element={session ? <TaxSettings /> : <Navigate to="/login" />} />
+                    <Route path="/payroll/reports" element={session ? <PayrollReports /> : <Navigate to="/login" />} />
+                    <Route path="/payroll/year-end" element={session ? <YearEndForms /> : <Navigate to="/login" />} />
+                    <Route path="/ai/chat-settings" element={session ? <ChatSettings /> : <Navigate to="/login" />} />
+                    <Route path="/balances" element={session ? <Balances /> : <Navigate to="/login" />} />
                 </Routes>
             </AppLayout>
         </BrowserRouter>

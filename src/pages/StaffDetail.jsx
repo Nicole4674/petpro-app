@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import ROLE_DEFAULTS from '../lib/roleDefaults'
+import StaffDeductions from '../components/StaffDeductions'
 
 // Old ROLE_DEFAULTS block removed — now imported from lib/roleDefaults.js
 var _OLD_DEFAULTS = {
@@ -380,11 +381,11 @@ var PERMISSION_CATEGORIES = [
   },
   {
     key: 'ai',
-    label: '🤖 Claude AI & Smart Features',
+    label: '🤖 PetPro AI & Smart Features',
     permissions: [
-      { key: 'ai.trigger_validation', label: 'Trigger Claude booking validation' },
-      { key: 'ai.view_flags', label: 'View Claude AI flags / suggestions' },
-      { key: 'ai.override_warnings', label: 'Override Claude AI warnings' },
+      { key: 'ai.trigger_validation', label: 'Trigger PetPro AI booking validation' },
+      { key: 'ai.view_flags', label: 'View PetPro AI flags / suggestions' },
+      { key: 'ai.override_warnings', label: 'Override PetPro AI warnings' },
       { key: 'ai.access_settings', label: 'Access AI preferences / settings' },
       { key: 'ai.voice_booking', label: 'Use voice booking mode' },
     ]
@@ -435,6 +436,11 @@ export default function StaffDetail() {
   var [openCategories, setOpenCategories] = useState({ calendar: true })
   var [permSaving, setPermSaving] = useState(null)
   var [customCount, setCustomCount] = useState(0)
+
+  // Pay tab edit state
+  var [payEditing, setPayEditing] = useState(false)
+  var [payEditData, setPayEditData] = useState({})
+  var [paySaving, setPaySaving] = useState(false)
 
   // Schedule state
   var [schedWeekStart, setSchedWeekStart] = useState(getSchedWeekStart(new Date()))
@@ -571,9 +577,6 @@ export default function StaffDetail() {
       role: editData.role,
       color_code: editData.color_code,
       hire_date: editData.hire_date || null,
-      pay_type: editData.pay_type,
-      hourly_rate: editData.hourly_rate ? parseFloat(editData.hourly_rate) : null,
-      commission_percent: editData.commission_percent ? parseFloat(editData.commission_percent) : null,
       internal_notes: editData.internal_notes || null,
       updated_at: new Date().toISOString()
     }
@@ -590,6 +593,83 @@ export default function StaffDetail() {
       alert('Error saving: ' + error.message)
     }
     setSaving(false)
+  }
+
+  async function handleSavePay(e) {
+    if (e) e.preventDefault()
+    setPaySaving(true)
+
+    var payUpdates = {
+      // pay settings
+      pay_type: payEditData.pay_type || 'hourly',
+      hourly_rate: payEditData.hourly_rate ? parseFloat(payEditData.hourly_rate) : null,
+      commission_percent: payEditData.commission_percent ? parseFloat(payEditData.commission_percent) : null,
+      salary_amount: payEditData.salary_amount ? parseFloat(payEditData.salary_amount) : 0,
+      pay_period_type: payEditData.pay_period_type || 'bi_weekly',
+      overtime_enabled: payEditData.overtime_enabled !== false,
+      overtime_rate_multiplier: payEditData.overtime_rate_multiplier ? parseFloat(payEditData.overtime_rate_multiplier) : 1.5,
+      tips_handling: payEditData.tips_handling || 'keep_all',
+      tips_percent: payEditData.tips_percent ? parseFloat(payEditData.tips_percent) : 100,
+      // worker type + tax info
+      worker_type: payEditData.worker_type || 'w2',
+      tax_filing_status: payEditData.tax_filing_status || 'single',
+      federal_allowances: payEditData.federal_allowances ? parseInt(payEditData.federal_allowances, 10) : 0,
+      tax_id: payEditData.tax_id ? String(payEditData.tax_id).trim() : null,
+      // mailing address
+      address_line1: payEditData.address_line1 || null,
+      address_line2: payEditData.address_line2 || null,
+      city: payEditData.city || null,
+      state: payEditData.state ? String(payEditData.state).trim().toUpperCase() : null,
+      zip: payEditData.zip || null,
+      updated_at: new Date().toISOString()
+    }
+
+    var { error } = await supabase
+      .from('staff_members')
+      .update(payUpdates)
+      .eq('id', id)
+
+    if (!error) {
+      setStaffMember(Object.assign({}, staffMember, payUpdates))
+      setPayEditing(false)
+    } else {
+      alert('Error saving pay settings: ' + error.message)
+    }
+    setPaySaving(false)
+  }
+
+  function startPayEdit() {
+    setPayEditData({
+      // pay settings
+      pay_type: staffMember.pay_type || 'hourly',
+      hourly_rate: staffMember.hourly_rate || '',
+      commission_percent: staffMember.commission_percent || '',
+      salary_amount: staffMember.salary_amount || '',
+      pay_period_type: staffMember.pay_period_type || 'bi_weekly',
+      overtime_enabled: staffMember.overtime_enabled !== false,
+      overtime_rate_multiplier: staffMember.overtime_rate_multiplier || 1.5,
+      tips_handling: staffMember.tips_handling || 'keep_all',
+      tips_percent: staffMember.tips_percent || 100,
+      // worker type + tax info
+      worker_type: staffMember.worker_type || 'w2',
+      tax_filing_status: staffMember.tax_filing_status || 'single',
+      federal_allowances: staffMember.federal_allowances || 0,
+      tax_id: staffMember.tax_id || '',
+      // mailing address
+      address_line1: staffMember.address_line1 || '',
+      address_line2: staffMember.address_line2 || '',
+      city: staffMember.city || '',
+      state: staffMember.state || '',
+      zip: staffMember.zip || ''
+    })
+    setPayEditing(true)
+  }
+
+  function maskTaxId(id) {
+    if (!id) return '—'
+    var cleaned = String(id).replace(/[^0-9]/g, '')
+    if (cleaned.length < 4) return '***'
+    return '***-**-' + cleaned.slice(-4)
   }
 
   function toggleCategory(catKey) {
@@ -945,15 +1025,9 @@ export default function StaffDetail() {
                     <label className="sl-label">Hire Date</label>
                     <input type="date" value={editData.hire_date || ''} onChange={function(e) { setEditData(Object.assign({}, editData, { hire_date: e.target.value })) }} className="sl-input" />
                   </div>
-                  <div className="sl-form-group">
-                    <label className="sl-label">Pay Type</label>
-                    <select value={editData.pay_type || 'hourly'} onChange={function(e) { setEditData(Object.assign({}, editData, { pay_type: e.target.value })) }} className="sl-input">
-                      <option value="hourly">💵 Hourly</option>
-                      <option value="commission">📊 Commission</option>
-                      <option value="salary">💼 Salary</option>
-                      <option value="hourly_commission">💵 Hourly + Commission</option>
-                    </select>
-                  </div>
+                </div>
+                <div className="sd-inline-note">
+                  💡 Pay Type, rates, and commission are now managed on the <strong>Pay tab</strong>.
                 </div>
                 <div className="sl-form-group">
                   <label className="sl-label">Internal Notes</label>
@@ -1144,46 +1218,414 @@ export default function StaffDetail() {
         {/* ===== PAY TAB ===== */}
         {activeTab === 'pay' && (
           <div className="sd-pay-tab">
-            <div className="sd-profile-section">
-              <h3 className="sd-section-title">💰 Compensation Details</h3>
-              <div className="sd-info-grid">
-                <div className="sd-info-item">
-                  <span className="sd-info-label">Pay Type</span>
-                  <span className="sd-info-value">
-                    {s.pay_type === 'hourly' && '💵 Hourly'}
-                    {s.pay_type === 'commission' && '📊 Commission'}
-                    {s.pay_type === 'salary' && '💼 Salary'}
-                    {s.pay_type === 'hourly_commission' && '💵 Hourly + Commission'}
-                  </span>
+            {!payEditing ? (
+              /* ---------- DISPLAY MODE ---------- */
+              <div className="sd-profile-section">
+                <div className="sd-section-header">
+                  <h3 className="sd-section-title">💰 Pay Settings</h3>
+                  <button className="sl-edit-btn" onClick={startPayEdit}>✏️ Edit Pay</button>
                 </div>
-                {(s.pay_type === 'hourly' || s.pay_type === 'hourly_commission') && (
+                <div className="sd-info-grid">
                   <div className="sd-info-item">
-                    <span className="sd-info-label">Hourly Rate</span>
-                    <span className="sd-info-value sd-info-money">${s.hourly_rate ? parseFloat(s.hourly_rate).toFixed(2) : '0.00'}/hr</span>
+                    <span className="sd-info-label">Pay Type</span>
+                    <span className="sd-info-value">
+                      {s.pay_type === 'hourly' && '💵 Hourly'}
+                      {s.pay_type === 'commission' && '📊 Commission'}
+                      {s.pay_type === 'salary' && '💼 Salary'}
+                      {s.pay_type === 'hourly_commission' && '💵 Hourly + Commission'}
+                      {!s.pay_type && '—'}
+                    </span>
                   </div>
-                )}
-                {(s.pay_type === 'commission' || s.pay_type === 'hourly_commission') && (
+                  {(s.pay_type === 'hourly' || s.pay_type === 'hourly_commission') && (
+                    <div className="sd-info-item">
+                      <span className="sd-info-label">Hourly Rate</span>
+                      <span className="sd-info-value sd-info-money">${s.hourly_rate ? parseFloat(s.hourly_rate).toFixed(2) : '0.00'}/hr</span>
+                    </div>
+                  )}
+                  {(s.pay_type === 'commission' || s.pay_type === 'hourly_commission') && (
+                    <div className="sd-info-item">
+                      <span className="sd-info-label">Commission</span>
+                      <span className="sd-info-value sd-info-money">{s.commission_percent || 0}%</span>
+                    </div>
+                  )}
+                  {s.pay_type === 'salary' && (
+                    <div className="sd-info-item">
+                      <span className="sd-info-label">Salary (per period)</span>
+                      <span className="sd-info-value sd-info-money">${s.salary_amount ? parseFloat(s.salary_amount).toFixed(2) : '0.00'}</span>
+                    </div>
+                  )}
                   <div className="sd-info-item">
-                    <span className="sd-info-label">Commission</span>
-                    <span className="sd-info-value sd-info-money">{s.commission_percent || 0}%</span>
+                    <span className="sd-info-label">Pay Period</span>
+                    <span className="sd-info-value">
+                      {s.pay_period_type === 'weekly' && 'Weekly'}
+                      {s.pay_period_type === 'bi_weekly' && 'Bi-Weekly'}
+                      {s.pay_period_type === 'semi_monthly' && 'Semi-Monthly (1st & 15th)'}
+                      {s.pay_period_type === 'monthly' && 'Monthly'}
+                      {!s.pay_period_type && 'Bi-Weekly'}
+                    </span>
                   </div>
-                )}
-                <div className="sd-info-item">
-                  <span className="sd-info-label">Tips</span>
-                  <span className="sd-info-value">
-                    {s.tips_handling === 'keep_all' && 'Keeps all tips'}
-                    {s.tips_handling === 'pool' && 'Tip pool'}
-                    {s.tips_handling === 'split' && 'Split ' + (s.tips_percent || 0) + '%'}
-                    {!s.tips_handling && 'Keeps all tips'}
-                  </span>
+                  <div className="sd-info-item">
+                    <span className="sd-info-label">Overtime</span>
+                    <span className="sd-info-value">
+                      {s.overtime_enabled === false
+                        ? 'Not applicable'
+                        : (s.overtime_rate_multiplier || 1.5) + 'x after 40 hrs/week'}
+                    </span>
+                  </div>
+                  <div className="sd-info-item">
+                    <span className="sd-info-label">Tips</span>
+                    <span className="sd-info-value">
+                      {s.tips_handling === 'keep_all' && 'Keeps all tips'}
+                      {s.tips_handling === 'pool' && 'Tip pool'}
+                      {s.tips_handling === 'split' && 'Split ' + (s.tips_percent || 0) + '%'}
+                      {!s.tips_handling && 'Keeps all tips'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Worker & Tax Info (view mode) */}
+                <h3 className="sd-section-title" style={{ marginTop: '28px' }}>🧾 Worker &amp; Tax Info</h3>
+                <div className="sd-info-grid">
+                  <div className="sd-info-item">
+                    <span className="sd-info-label">Worker Type</span>
+                    <span className="sd-info-value">
+                      {s.worker_type === '1099'
+                        ? '🧾 1099 Contractor'
+                        : '👤 W-2 Employee'}
+                    </span>
+                  </div>
+                  {s.worker_type !== '1099' && (
+                    <>
+                      <div className="sd-info-item">
+                        <span className="sd-info-label">Filing Status</span>
+                        <span className="sd-info-value">
+                          {s.tax_filing_status === 'single' && 'Single'}
+                          {s.tax_filing_status === 'married' && 'Married'}
+                          {s.tax_filing_status === 'head_of_household' && 'Head of Household'}
+                          {s.tax_filing_status === 'married_separately' && 'Married Filing Separately'}
+                          {!s.tax_filing_status && 'Single'}
+                        </span>
+                      </div>
+                      <div className="sd-info-item">
+                        <span className="sd-info-label">Federal Allowances</span>
+                        <span className="sd-info-value">{s.federal_allowances || 0}</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="sd-info-item">
+                    <span className="sd-info-label">
+                      {s.worker_type === '1099' ? 'EIN (Tax ID)' : 'SSN'}
+                    </span>
+                    <span className="sd-info-value">{maskTaxId(s.tax_id)}</span>
+                  </div>
+                </div>
+
+                {/* Mailing Address (view mode) */}
+                <h3 className="sd-section-title" style={{ marginTop: '28px' }}>📬 Mailing Address</h3>
+                <div className="sd-address-block">
+                  {(!s.address_line1 && !s.city && !s.state && !s.zip) ? (
+                    <span className="sd-address-empty">No address on file</span>
+                  ) : (
+                    <>
+                      {s.address_line1 && <div>{s.address_line1}</div>}
+                      {s.address_line2 && <div>{s.address_line2}</div>}
+                      <div>
+                        {s.city && s.city + ', '}
+                        {s.state && s.state + ' '}
+                        {s.zip}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
-            </div>
-            <div className="sd-coming-soon" style={{ marginTop: '20px' }}>
-              <div className="sd-coming-icon">📊</div>
-              <h3>Earnings Dashboard</h3>
-              <p>Sales contribution, commission breakdown, tip tracking, and payroll summaries coming in Phase 2!</p>
-            </div>
+            ) : (
+              /* ---------- EDIT MODE ---------- */
+              <form className="sd-profile-section" onSubmit={handleSavePay}>
+                <h3 className="sd-section-title">💰 Edit Pay Settings</h3>
+
+                {/* Pay Type */}
+                <div className="sl-form-group">
+                  <label className="sl-label">Pay Type</label>
+                  <select
+                    value={payEditData.pay_type || 'hourly'}
+                    onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { pay_type: e.target.value })) }}
+                    className="sl-input"
+                  >
+                    <option value="hourly">💵 Hourly</option>
+                    <option value="commission">📊 Commission only</option>
+                    <option value="hourly_commission">💵 Hourly + Commission</option>
+                    <option value="salary">💼 Salary</option>
+                  </select>
+                </div>
+
+                {/* Hourly Rate (shown for hourly or hourly_commission) */}
+                {(payEditData.pay_type === 'hourly' || payEditData.pay_type === 'hourly_commission') && (
+                  <div className="sl-form-group">
+                    <label className="sl-label">Hourly Rate ($)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={payEditData.hourly_rate || ''}
+                      onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { hourly_rate: e.target.value })) }}
+                      className="sl-input"
+                      placeholder="e.g. 18.50"
+                    />
+                  </div>
+                )}
+
+                {/* Commission % (shown for commission or hourly_commission) */}
+                {(payEditData.pay_type === 'commission' || payEditData.pay_type === 'hourly_commission') && (
+                  <div className="sl-form-group">
+                    <label className="sl-label">Commission Percent (%)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="100"
+                      value={payEditData.commission_percent || ''}
+                      onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { commission_percent: e.target.value })) }}
+                      className="sl-input"
+                      placeholder="e.g. 50"
+                    />
+                    <span className="sd-field-hint">% of service price this staff earns</span>
+                  </div>
+                )}
+
+                {/* Salary Amount (shown for salary) */}
+                {payEditData.pay_type === 'salary' && (
+                  <div className="sl-form-group">
+                    <label className="sl-label">Salary Amount per Pay Period ($)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={payEditData.salary_amount || ''}
+                      onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { salary_amount: e.target.value })) }}
+                      className="sl-input"
+                      placeholder="e.g. 1500.00"
+                    />
+                  </div>
+                )}
+
+                {/* Pay Period */}
+                <div className="sl-form-group">
+                  <label className="sl-label">Pay Period</label>
+                  <select
+                    value={payEditData.pay_period_type || 'bi_weekly'}
+                    onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { pay_period_type: e.target.value })) }}
+                    className="sl-input"
+                  >
+                    <option value="weekly">Weekly (every week)</option>
+                    <option value="bi_weekly">Bi-Weekly (every 2 weeks)</option>
+                    <option value="semi_monthly">Semi-Monthly (1st &amp; 15th)</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+
+                {/* Overtime */}
+                <div className="sl-form-row">
+                  <div className="sl-form-group">
+                    <label className="sl-label">
+                      <input
+                        type="checkbox"
+                        checked={payEditData.overtime_enabled !== false}
+                        onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { overtime_enabled: e.target.checked })) }}
+                        style={{ marginRight: '8px' }}
+                      />
+                      Overtime applies after 40 hrs/week
+                    </label>
+                  </div>
+                  {payEditData.overtime_enabled !== false && (
+                    <div className="sl-form-group">
+                      <label className="sl-label">OT Multiplier</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="1"
+                        max="3"
+                        value={payEditData.overtime_rate_multiplier || 1.5}
+                        onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { overtime_rate_multiplier: e.target.value })) }}
+                        className="sl-input"
+                      />
+                      <span className="sd-field-hint">1.5 = time-and-a-half</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Tips Handling */}
+                <div className="sl-form-group">
+                  <label className="sl-label">Tips Handling</label>
+                  <select
+                    value={payEditData.tips_handling || 'keep_all'}
+                    onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { tips_handling: e.target.value })) }}
+                    className="sl-input"
+                  >
+                    <option value="keep_all">Keeps all own tips</option>
+                    <option value="pool">Tip pool (split evenly with team)</option>
+                    <option value="split">Split (this staff gets a set %)</option>
+                  </select>
+                </div>
+
+                {/* Tips Split % (shown for split) */}
+                {payEditData.tips_handling === 'split' && (
+                  <div className="sl-form-group">
+                    <label className="sl-label">This staff's tip share (%)</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={payEditData.tips_percent || ''}
+                      onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { tips_percent: e.target.value })) }}
+                      className="sl-input"
+                      placeholder="e.g. 70"
+                    />
+                  </div>
+                )}
+
+                {/* =============== Worker & Tax Info =============== */}
+                <h3 className="sd-section-title" style={{ marginTop: '28px' }}>🧾 Worker &amp; Tax Info</h3>
+
+                <div className="sl-form-group">
+                  <label className="sl-label">Worker Type</label>
+                  <select
+                    value={payEditData.worker_type || 'w2'}
+                    onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { worker_type: e.target.value })) }}
+                    className="sl-input"
+                  >
+                    <option value="w2">👤 W-2 Employee (taxes withheld)</option>
+                    <option value="1099">🧾 1099 Contractor (no tax withholding)</option>
+                  </select>
+                  <span className="sd-field-hint">
+                    Affects whether tax is estimated on the pay stub. W-2 gets year-end W-2, 1099 gets year-end 1099-NEC.
+                  </span>
+                </div>
+
+                {payEditData.worker_type !== '1099' && (
+                  <div className="sl-form-row">
+                    <div className="sl-form-group">
+                      <label className="sl-label">Filing Status (W-4)</label>
+                      <select
+                        value={payEditData.tax_filing_status || 'single'}
+                        onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { tax_filing_status: e.target.value })) }}
+                        className="sl-input"
+                      >
+                        <option value="single">Single</option>
+                        <option value="married">Married Filing Jointly</option>
+                        <option value="married_separately">Married Filing Separately</option>
+                        <option value="head_of_household">Head of Household</option>
+                      </select>
+                    </div>
+                    <div className="sl-form-group">
+                      <label className="sl-label">Federal Allowances</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="20"
+                        value={payEditData.federal_allowances || 0}
+                        onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { federal_allowances: e.target.value })) }}
+                        className="sl-input"
+                      />
+                      <span className="sd-field-hint">From their W-4 form (usually 0-3)</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="sl-form-group">
+                  <label className="sl-label">
+                    {payEditData.worker_type === '1099' ? 'EIN (Tax ID)' : 'SSN (Social Security Number)'}
+                  </label>
+                  <input
+                    type="password"
+                    value={payEditData.tax_id || ''}
+                    onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { tax_id: e.target.value })) }}
+                    className="sl-input"
+                    placeholder={payEditData.worker_type === '1099' ? 'XX-XXXXXXX' : 'XXX-XX-XXXX'}
+                    autoComplete="off"
+                  />
+                  <span className="sd-field-hint">
+                    🔒 Stored securely. Shown masked (last 4 digits only). Required for year-end forms.
+                  </span>
+                </div>
+
+                {/* =============== Mailing Address =============== */}
+                <h3 className="sd-section-title" style={{ marginTop: '28px' }}>📬 Mailing Address</h3>
+                <span className="sd-field-hint" style={{ marginBottom: '12px', display: 'block' }}>
+                  Needed on year-end W-2 / 1099 forms.
+                </span>
+
+                <div className="sl-form-group">
+                  <label className="sl-label">Street Address</label>
+                  <input
+                    type="text"
+                    value={payEditData.address_line1 || ''}
+                    onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { address_line1: e.target.value })) }}
+                    className="sl-input"
+                    placeholder="123 Main St"
+                  />
+                </div>
+
+                <div className="sl-form-group">
+                  <label className="sl-label">Apt / Suite (optional)</label>
+                  <input
+                    type="text"
+                    value={payEditData.address_line2 || ''}
+                    onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { address_line2: e.target.value })) }}
+                    className="sl-input"
+                    placeholder="Apt 4B"
+                  />
+                </div>
+
+                <div className="sl-form-row">
+                  <div className="sl-form-group">
+                    <label className="sl-label">City</label>
+                    <input
+                      type="text"
+                      value={payEditData.city || ''}
+                      onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { city: e.target.value })) }}
+                      className="sl-input"
+                      placeholder="Austin"
+                    />
+                  </div>
+                  <div className="sl-form-group">
+                    <label className="sl-label">State</label>
+                    <input
+                      type="text"
+                      maxLength="2"
+                      value={payEditData.state || ''}
+                      onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { state: e.target.value.toUpperCase() })) }}
+                      className="sl-input"
+                      placeholder="TX"
+                    />
+                  </div>
+                  <div className="sl-form-group">
+                    <label className="sl-label">ZIP</label>
+                    <input
+                      type="text"
+                      maxLength="10"
+                      value={payEditData.zip || ''}
+                      onChange={function(e) { setPayEditData(Object.assign({}, payEditData, { zip: e.target.value })) }}
+                      className="sl-input"
+                      placeholder="78701"
+                    />
+                  </div>
+                </div>
+
+                {/* Save / Cancel */}
+                <div className="sl-form-actions">
+                  <button type="button" className="sl-cancel-btn" onClick={function() { setPayEditing(false) }}>Cancel</button>
+                  <button type="submit" className="sl-submit-btn" disabled={paySaving}>
+                    {paySaving ? '🐾 Saving...' : '✅ Save Pay Settings'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* ===== DEDUCTIONS ===== */}
+            {staffMember && (
+              <StaffDeductions staffId={id} groomerId={staffMember.groomer_id} />
+            )}
           </div>
         )}
 
