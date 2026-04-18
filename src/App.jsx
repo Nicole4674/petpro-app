@@ -31,6 +31,8 @@ import PayrollReports from './pages/PayrollReports'
 import YearEndForms from './pages/YearEndForms'
 import ChatSettings from './pages/ChatSettings'
 import Balances from './pages/Balances'
+import Privacy from './pages/Privacy'
+import Terms from './pages/Terms'
 import AIChatWidget from './components/AIChatWidget'
 import Sidebar from './components/Sidebar'
 import './App.css'
@@ -39,9 +41,10 @@ function AppLayout({ children }) {
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
     const location = useLocation()
 
-    // Don't show sidebar on login/signup
+    // Don't show sidebar on login/signup or public legal pages
     var isAuthPage = location.pathname === '/login' || location.pathname === '/signup'
-    if (isAuthPage) {
+    var isPublicPage = location.pathname === '/privacy' || location.pathname === '/terms'
+    if (isAuthPage || isPublicPage) {
         return <>{children}</>
     }
 
@@ -85,6 +88,8 @@ function App() {
                 <Routes>
                     <Route path="/login" element={!session ? <Login /> : <Navigate to="/" />} />
                     <Route path="/signup" element={!session ? <Signup /> : <Navigate to="/" />} />
+                    <Route path="/privacy" element={<Privacy />} />
+                    <Route path="/terms" element={<Terms />} />
                     <Route path="/" element={session ? <Dashboard /> : <Navigate to="/login" />} />
                     <Route path="/clients" element={session ? <Clients /> : <Navigate to="/login" />} />
                     <Route path="/clients/new" element={session ? <AddClient /> : <Navigate to="/login" />} />
