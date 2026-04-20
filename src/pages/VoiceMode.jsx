@@ -31,6 +31,9 @@ export default function VoiceMode() {
     const commandBufferRef = useRef('')
     const silenceTimerRef = useRef(null)
     const processingRef = useRef(false)
+    // Mirror of partialTranscript so closures (like handleMicClick) can read
+    // the live interim text without stale React state.
+    const partialTranscriptRef = useRef('')
 
     // Keep refs in sync with state
     useEffect(() => {
@@ -87,6 +90,7 @@ export default function VoiceMode() {
 
             if (interimTranscript) {
                 setPartialTranscript(interimTranscript)
+                partialTranscriptRef.current = interimTranscript
                 // Check interim too — catches wake word faster (don't wait for final)
                 if (handsFreeRef.current && !wakeWordRef.current && statusRef.current === 'listening') {
                     if (detectWakeWord(interimTranscript)) {
@@ -109,6 +113,7 @@ export default function VoiceMode() {
 
             if (finalTranscript) {
                 setPartialTranscript('')
+                partialTranscriptRef.current = ''
                 // Reset restart attempts on successful result
                 restartAttemptsRef.current = 0
                 handleFinalTranscript(finalTranscript.trim(), alternates)
@@ -513,6 +518,14 @@ export default function VoiceMode() {
     }
 
     async function speakText(text, onDone) {
+        // Stop anything currently speaking so two replies can't overlap.
+        if (audioRef.current) {
+            try { audioRef.current.pause() } catch (e) { }
+            audioRef.current = null
+        }
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel()
+        }
         // Short responses like "Yes?" use browser speech to save ElevenLabs credits
         if (text.length < 10) {
             if ('speechSynthesis' in window) {
@@ -590,24 +603,46 @@ export default function VoiceMode() {
 
     function handleMicClick() {
         if (status === 'listening') {
-            // User tapped stop — fire whatever they said as one full command
+            // User tapped stop. Give the mic a tiny moment to flush any
+            // pending final transcripts, then fire whatever we've got.
+            // Fallback to interim text if mobile Chrome never finalized
+            // (common on Android — happens to be why "hey" never went
+            // through before).
             try { recognitionRef.current.stop() } catch (e) { }
-            var buffered = (commandBufferRef.current || '').trim()
-            commandBufferRef.current = ''
+            setStatus('processing')
             if (silenceTimerRef.current) {
                 clearTimeout(silenceTimerRef.current)
                 silenceTimerRef.current = null
             }
-            if (buffered.length > 0) {
-                processCommand(buffered)
-            } else {
-                setStatus('idle')
-            }
+            setTimeout(function () {
+                var buffered = (commandBufferRef.current || '').trim()
+                if (!buffered) {
+                    buffered = (partialTranscriptRef.current || '').trim()
+                }
+                commandBufferRef.current = ''
+                partialTranscriptRef.current = ''
+                setPartialTranscript('')
+                if (buffered.length > 0) {
+                    processCommand(buffered)
+                } else {
+                    setStatus('idle')
+                }
+            }, 300)
         } else if (status === 'idle') {
             setError(null)
             setPartialTranscript('')
+            partialTranscriptRef.current = ''
             commandBufferRef.current = '' // clear any stale text
             processingRef.current = false
+            // Kill any lingering browser speech so we don't dump queued
+            // replies when mic turns on.
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel()
+            }
+            if (audioRef.current) {
+                try { audioRef.current.pause() } catch (e) { }
+                audioRef.current = null
+            }
             try {
                 recognitionRef.current.start()
                 setStatus('listening')
@@ -630,6 +665,20 @@ export default function VoiceMode() {
             setHandsFree(true)
             setError(null)
             restartAttemptsRef.current = 0
+            // Kill any queued speech — Android Chrome loves to dump every
+            // pending SpeechSynthesis utterance at once the moment the audio
+            // context wakes up. Cancel BEFORE we resume the context.
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel()
+            }
+            if (audioRef.current) {
+                try { audioRef.current.pause() } catch (e) { }
+                audioRef.current = null
+            }
+            commandBufferRef.current = ''
+            processingRef.current = false
+            setPartialTranscript('')
+            partialTranscriptRef.current = ''
             // Prime AudioContext for beep (browsers require user gesture)
             try {
                 if (!audioCtxRef.current) {
