@@ -93,6 +93,13 @@ export default function VoiceMode() {
                         // Will be handled when final arrives
                     }
                 }
+                // If wake word is active and interim speech is STILL coming in,
+                // the user is mid-sentence — keep the silence timer alive so we
+                // don't cut them off at a natural pause like "what's..." before
+                // they finish "...my schedule today".
+                if (wakeWordRef.current && commandTimerRef.current) {
+                    armSilenceTimer()
+                }
             }
 
             if (finalTranscript) {
@@ -327,16 +334,17 @@ export default function VoiceMode() {
         setCommandTimeLeft(0)
     }
 
-    // Arm/reset the 3-sec silence timer. Called every time the user speaks
-    // another chunk. When the user is truly silent for 3 sec, we fire the
-    // accumulated command to the AI.
+    // Arm/reset the silence timer. Called every time the user speaks
+    // another chunk OR while the mic is still picking up audio (interim).
+    // Fires the command to the AI only when the user is truly silent for
+    // 6 seconds — enough room for natural thinking pauses mid-sentence.
     function armSilenceTimer() {
         if (silenceTimerRef.current) {
             clearTimeout(silenceTimerRef.current)
         }
         silenceTimerRef.current = setTimeout(function () {
             fireAccumulatedCommand()
-        }, 3000)
+        }, 6000)
     }
 
     // Fire whatever the user has said since the wake word, then reset.
