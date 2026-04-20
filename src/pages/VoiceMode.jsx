@@ -24,6 +24,13 @@ export default function VoiceMode() {
     const commandIntervalRef = useRef(null)
     const restartAttemptsRef = useRef(0)
     const audioCtxRef = useRef(null)
+    // --- Double-AI / cut-off fix ---
+    // commandBufferRef: accumulates what the user is saying after the wake word
+    // silenceTimerRef:  3-sec quiet timer — fires the AI once user really stops
+    // processingRef:    guard that blocks a second AI call until the first finishes
+    const commandBufferRef = useRef('')
+    const silenceTimerRef = useRef(null)
+    const processingRef = useRef(false)
 
     // Keep refs in sync with state
     useEffect(() => {
@@ -284,26 +291,24 @@ export default function VoiceMode() {
         setTimeout(function () { setWakeFlash(false) }, 600)
     }
 
-    // 8-second command window after wake word
+    // 15-second command window after wake word (hard cap)
+    // Silence auto-fire fires sooner when the user actually stops talking.
     function startCommandWindow() {
         clearCommandWindow()
-        setCommandTimeLeft(8)
+        setCommandTimeLeft(15)
         var elapsed = 0
         commandIntervalRef.current = setInterval(function () {
             elapsed += 1
-            var left = 8 - elapsed
+            var left = 15 - elapsed
             setCommandTimeLeft(left)
             if (left <= 0) {
                 clearCommandWindow()
             }
         }, 1000)
         commandTimerRef.current = setTimeout(function () {
-            // Time's up — go back to wake word listening
-            if (wakeWordRef.current) {
-                setWakeWordActive(false)
-                setCommandTimeLeft(0)
-            }
-        }, 8000)
+            // Hard time's up — fire whatever's buffered so we don't drop it
+            fireAccumulatedCommand()
+        }, 15000)
     }
 
     function clearCommandWindow() {
@@ -315,7 +320,36 @@ export default function VoiceMode() {
             clearInterval(commandIntervalRef.current)
             commandIntervalRef.current = null
         }
+        if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current)
+            silenceTimerRef.current = null
+        }
         setCommandTimeLeft(0)
+    }
+
+    // Arm/reset the 3-sec silence timer. Called every time the user speaks
+    // another chunk. When the user is truly silent for 3 sec, we fire the
+    // accumulated command to the AI.
+    function armSilenceTimer() {
+        if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current)
+        }
+        silenceTimerRef.current = setTimeout(function () {
+            fireAccumulatedCommand()
+        }, 3000)
+    }
+
+    // Fire whatever the user has said since the wake word, then reset.
+    // Safe to call multiple times — guards handle duplicates.
+    function fireAccumulatedCommand() {
+        var buffered = (commandBufferRef.current || '').trim()
+        commandBufferRef.current = ''
+        clearCommandWindow()
+        setWakeWordActive(false)
+        wakeWordRef.current = false
+        if (buffered.length > 0) {
+            processCommand(buffered)
+        }
     }
 
     function handleFinalTranscript(text, alternates) {
@@ -340,24 +374,29 @@ export default function VoiceMode() {
                 playBeep()
                 flashWake()
                 setWakeWordActive(true)
+                wakeWordRef.current = true // force-sync so next transcript sees it
 
-                if (wakeResult.command && wakeResult.command.length > 2) {
-                    // Wake word + command in one breath — process immediately
-                    clearCommandWindow()
-                    processCommand(wakeResult.command)
-                } else {
-                    // Just wake word, start 8-second listening window
-                    startCommandWindow()
-                    setStatus('listening')
-                }
+                // Seed the buffer with anything said AFTER the wake word in the
+                // same breath (e.g. "Hey PetPro book Bella tomorrow at 2")
+                commandBufferRef.current = (wakeResult.command || '').trim()
+
+                // 15-sec hard cap + 3-sec silence auto-fire
+                startCommandWindow()
+                armSilenceTimer()
+                setStatus('listening')
                 return
             }
 
-            // If wake word was just activated AND we're still in command window, treat as command
+            // If the wake word is active and we're still inside the command
+            // window, ACCUMULATE this chunk rather than firing immediately.
+            // The silence timer (3 sec quiet) decides when we actually send.
             if (wakeWordRef.current && commandTimerRef.current) {
-                clearCommandWindow()
-                setWakeWordActive(false)
-                processCommand(text)
+                if (commandBufferRef.current) {
+                    commandBufferRef.current += ' ' + text
+                } else {
+                    commandBufferRef.current = text
+                }
+                armSilenceTimer() // user spoke — reset the 3-sec quiet countdown
                 return
             }
 
@@ -370,6 +409,15 @@ export default function VoiceMode() {
     }
 
     async function processCommand(text) {
+        // Double-fire guard: if another transcript arrives while the AI is
+        // still thinking/speaking, drop it on the floor. Prevents the
+        // "two Claudes talking at once" bug.
+        if (processingRef.current) {
+            console.log('[voice] already processing — skipping duplicate:', text)
+            return
+        }
+        processingRef.current = true
+
         setTranscript(text)
         setStatus('processing')
         setResponse('')
@@ -407,6 +455,7 @@ export default function VoiceMode() {
                 console.error('Voice command error:', fnError)
                 setError('Could not process command. Try again.')
                 setStatus('idle')
+                processingRef.current = false
                 if (handsFreeRef.current) restartListening()
                 return
             }
@@ -427,6 +476,7 @@ export default function VoiceMode() {
             setStatus('speaking')
             speakText(aiResponse, function () {
                 setStatus('idle')
+                processingRef.current = false // done — next command allowed
                 if (handsFreeRef.current) {
                     restartListening()
                 }
@@ -436,6 +486,7 @@ export default function VoiceMode() {
             console.error('Voice processing failed:', err)
             setError('Something went wrong. Try again.')
             setStatus('idle')
+            processingRef.current = false
             if (handsFreeRef.current) restartListening()
         }
     }
@@ -537,6 +588,8 @@ export default function VoiceMode() {
             setHandsFree(false)
             setWakeWordActive(false)
             clearCommandWindow()
+            commandBufferRef.current = ''
+            processingRef.current = false
             try { recognitionRef.current.stop() } catch (e) { }
             setStatus('idle')
         } else {
@@ -572,6 +625,7 @@ export default function VoiceMode() {
             window.speechSynthesis.cancel()
         }
         setStatus('idle')
+        processingRef.current = false // user interrupted — next command allowed
         if (handsFreeRef.current) {
             restartListening()
         }
