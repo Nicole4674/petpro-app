@@ -1,12 +1,14 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import usePermissions from '../hooks/usePermissions'
+import { supabase } from '../lib/supabase'
 
 export default function Sidebar({ onToggle }) {
   const navigate = useNavigate()
   const location = useLocation()
   const { canAccess, canAccessAny, loading, role } = usePermissions()
   const [collapsed, setCollapsed] = useState(false)
+  const [unreadMessages, setUnreadMessages] = useState(0)
   const [openSections, setOpenSections] = useState({
     grooming: true,
     boarding: true,
@@ -14,7 +16,51 @@ export default function Sidebar({ onToggle }) {
     payroll: true,
     ai: true,
     tools: true,
+    settings: true,
   })
+
+  // Track unread messages count (live)
+  useEffect(function() {
+    var userId = null
+    var channel = null
+
+    async function load() {
+      var { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      userId = user.id
+
+      var { count } = await supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('groomer_id', userId)
+        .eq('sender_type', 'client')
+        .eq('read_by_groomer', false)
+      setUnreadMessages(count || 0)
+
+      channel = supabase
+        .channel('sidebar-messages-' + userId)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'messages',
+          filter: 'groomer_id=eq.' + userId,
+        }, async function() {
+          var { count: c2 } = await supabase
+            .from('messages')
+            .select('id', { count: 'exact', head: true })
+            .eq('groomer_id', userId)
+            .eq('sender_type', 'client')
+            .eq('read_by_groomer', false)
+          setUnreadMessages(c2 || 0)
+        })
+        .subscribe()
+    }
+    load()
+
+    return function() {
+      if (channel) supabase.removeChannel(channel)
+    }
+  }, [])
 
   function toggleSection(section) {
     setOpenSections(function(prev) {
@@ -59,6 +105,36 @@ export default function Sidebar({ onToggle }) {
         >
           <span className="sidebar-icon">📊</span>
           {!collapsed && <span className="sidebar-label">Dashboard</span>}
+        </div>
+
+        {/* Messages — top-level with unread badge */}
+        <div
+          className={'sidebar-item' + (isActive('/messages') ? ' sidebar-item-active' : '')}
+          onClick={function() { goTo('/messages') }}
+          title="Messages"
+          style={{ position: 'relative' }}
+        >
+          <span className="sidebar-icon">💬</span>
+          {!collapsed && <span className="sidebar-label">Messages</span>}
+          {unreadMessages > 0 && (
+            <span style={{
+              position: 'absolute',
+              right: collapsed ? '8px' : '16px',
+              top: collapsed ? '6px' : '50%',
+              transform: collapsed ? 'none' : 'translateY(-50%)',
+              background: '#dc3545',
+              color: '#fff',
+              borderRadius: '10px',
+              padding: '2px 7px',
+              fontSize: '11px',
+              fontWeight: 700,
+              minWidth: '18px',
+              textAlign: 'center',
+              lineHeight: '1.2',
+            }}>
+              {unreadMessages > 99 ? '99+' : unreadMessages}
+            </span>
+          )}
         </div>
 
         {/* Grooming Section — visible if user can access any grooming-related permission */}
@@ -328,6 +404,14 @@ export default function Sidebar({ onToggle }) {
               </div>
               )}
               {canAccess('ai.access_settings') && (
+              <div
+                className={'sidebar-subitem' + (isActive('/ai/booking-rules') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/ai/booking-rules') }}
+              >
+                AI Booking Rules
+              </div>
+              )}
+              {canAccess('ai.access_settings') && (
               <div className="sidebar-subitem sidebar-subitem-coming">
                 AI Preferences
               </div>
@@ -337,8 +421,7 @@ export default function Sidebar({ onToggle }) {
         </div>
         )}
 
-        {/* Tools Section — visible if user can import/export */}
-        {canAccess('settings.import_export') && (
+        {/* Tools Section — always visible (Contact is available to every user; Import/Export gated by permission) */}
         <div className="sidebar-section">
           <div className="sidebar-section-header" onClick={function() { if (!collapsed) toggleSection('tools') }}>
             <span className="sidebar-icon">🔧</span>
@@ -351,16 +434,46 @@ export default function Sidebar({ onToggle }) {
           </div>
           {!collapsed && openSections.tools && (
             <div className="sidebar-subitems">
+              {canAccess('settings.import_export') && (
+                <div
+                  className={'sidebar-subitem' + (isActive('/import') ? ' sidebar-subitem-active' : '')}
+                  onClick={function() { goTo('/import') }}
+                >
+                  Import / Export
+                </div>
+              )}
               <div
-                className={'sidebar-subitem' + (isActive('/import') ? ' sidebar-subitem-active' : '')}
-                onClick={function() { goTo('/import') }}
+                className={'sidebar-subitem' + (isActive('/contact') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/contact') }}
               >
-                Import / Export
+                Contact
               </div>
             </div>
           )}
         </div>
-        )}
+
+        {/* Settings Section */}
+        <div className="sidebar-section">
+          <div className="sidebar-section-header" onClick={function() { if (!collapsed) toggleSection('settings') }}>
+            <span className="sidebar-icon">⚙️</span>
+            {!collapsed && (
+              <>
+                <span className="sidebar-section-title">Settings</span>
+                <span className={'sidebar-arrow' + (openSections.settings ? ' sidebar-arrow-open' : '')}>▸</span>
+              </>
+            )}
+          </div>
+          {!collapsed && openSections.settings && (
+            <div className="sidebar-subitems">
+              <div
+                className={'sidebar-subitem' + (isActive('/settings/shop') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/settings/shop') }}
+              >
+                🏪 Shop Settings
+              </div>
+            </div>
+          )}
+        </div>
       </nav>
 
       {/* Bottom section */}

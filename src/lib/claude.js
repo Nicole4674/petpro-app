@@ -2,10 +2,10 @@
 // Calls the Supabase Edge Function to check bookings with Claude
 import { supabase } from './supabase'
 
-export async function checkBookingSafety({ pet_id, service_id, appointment_date, start_time, end_time }) {
+export async function checkBookingSafety({ pet_id, service_id, appointment_date, start_time, end_time, staff_id }) {
   try {
     const { data, error } = await supabase.functions.invoke('check-booking', {
-      body: { pet_id, service_id, appointment_date, start_time, end_time },
+      body: { pet_id, service_id, appointment_date, start_time, end_time, staff_id: staff_id || null },
     })
 
     if (error) {

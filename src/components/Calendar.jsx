@@ -427,7 +427,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, onClose, onS
         end_time: '',
         quoted_price: '',
         service_notes: '',
-        status: 'confirmed',
+        status: 'unconfirmed',
     })
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState(null)
@@ -624,6 +624,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, onClose, onS
                         <div className="form-group">
                             <label>Status</label>
                             <select name="status" value={form.status} onChange={handleChange}>
+                                <option value="unconfirmed">Unconfirmed</option>
                                 <option value="confirmed">Confirmed</option>
                                 <option value="pending">Pending</option>
                             </select>

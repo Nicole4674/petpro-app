@@ -50,12 +50,13 @@ export default function ClientDetail() {
   }, [id])
 
   // For "Book Again" pre-fill — find each pet's most recent completed appointment (and overall most recent for the header button)
+  // NOTE: checkout flow only sets checked_out_at (not status='completed'), so filter on that alone.
+  // Any appointment with checked_out_at IS NOT NULL is "done" regardless of status field.
   const fetchLastCompletedPerPet = async () => {
     const { data, error } = await supabase
       .from('appointments')
       .select('id, pet_id, service_id, appointment_date, services(id, service_name)')
       .eq('client_id', id)
-      .eq('status', 'completed')
       .not('checked_out_at', 'is', null)
       .order('appointment_date', { ascending: false })
 

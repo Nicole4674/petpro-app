@@ -1,60 +1,50 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
-export default function AIChatWidget() {
+export default function ClientChatWidget() {
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState([
-    { role: 'assistant', text: 'Hey! I\'m PetPro AI. Ask me anything about your schedule, clients, or pets. I\'m here to help!' }
+    { role: 'assistant', text: 'Hi! I\'m your shop\'s AI assistant. I can help you book, reschedule, or cancel appointments. What can I do for you?' }
   ])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
-  const [adminMode, setAdminMode] = useState(false)
-  const [loaded, setLoaded] = useState(false)
+  const [enabled, setEnabled] = useState(null) // null = loading, true/false = known
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
-  // Load saved chat from Supabase on mount
+  // On mount: check if client Claude is enabled for this client's groomer
   useEffect(() => {
-    async function loadChat() {
+    async function checkEnabled() {
       var { data: { user } } = await supabase.auth.getUser()
       if (!user) {
-        setLoaded(true)
+        setEnabled(false)
         return
       }
-      var { data, error } = await supabase
-        .from('chat_conversations')
-        .select('messages, admin_mode')
-        .eq('groomer_id', user.id)
+      // Find this client's groomer
+      var { data: clientRow } = await supabase
+        .from('clients')
+        .select('groomer_id')
+        .eq('user_id', user.id)
         .maybeSingle()
-      if (error) {
-        console.error('Chat load error:', error)
-      } else if (data && data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
-        setMessages(data.messages)
-        setAdminMode(data.admin_mode || false)
+      if (!clientRow) {
+        setEnabled(false)
+        return
       }
-      setLoaded(true)
+      // Check the groomer's toggle
+      var { data: settings } = await supabase
+        .from('ai_personalization')
+        .select('client_claude_enabled')
+        .eq('groomer_id', clientRow.groomer_id)
+        .maybeSingle()
+      // Default to true if no settings row yet
+      if (!settings) {
+        setEnabled(true)
+        return
+      }
+      setEnabled(settings.client_claude_enabled !== false)
     }
-    loadChat()
+    checkEnabled()
   }, [])
-
-  // Save chat to Supabase whenever messages or admin mode change (after initial load)
-  useEffect(() => {
-    if (!loaded) return
-    async function saveChat() {
-      var { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      var { error } = await supabase
-        .from('chat_conversations')
-        .upsert({
-          groomer_id: user.id,
-          messages: messages,
-          admin_mode: adminMode,
-          updated_at: new Date().toISOString(),
-        })
-      if (error) console.error('Chat save error:', error)
-    }
-    saveChat()
-  }, [messages, adminMode, loaded])
 
   // Auto scroll to bottom when new messages
   useEffect(() => {
@@ -77,38 +67,11 @@ export default function AIChatWidget() {
     setInput('')
     setSending(true)
 
-    // Check for admin mode toggle
-    var isAdminToggle = userMessage.toLowerCase().replace(/\s+/g, ' ').trim() === 'mortal ties access'
-    if (isAdminToggle) {
-      if (!adminMode) {
-        setAdminMode(true)
-        setMessages(prev => [...prev,
-          { role: 'user', text: userMessage },
-          { role: 'assistant', text: 'Admin mode activated. Full access unlocked - ask me anything about how PetPro works, debugging, features, architecture, or anything else. Say "business mode" to switch back.' }
-        ])
-        setSending(false)
-        return
-      }
-    }
-
-    // Check for switching back to business mode
-    if (adminMode && userMessage.toLowerCase().trim() === 'business mode') {
-      setAdminMode(false)
-      setMessages(prev => [...prev,
-        { role: 'user', text: userMessage },
-        { role: 'assistant', text: 'Back to business mode. How can I help with your schedule, clients, or pets?' }
-      ])
-      setSending(false)
-      return
-    }
-
     // Add user message to chat
     setMessages(prev => [...prev, { role: 'user', text: userMessage }])
 
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-
-      // Build conversation history (last 10 exchanges)
+      // Build conversation history (last 10 exchanges, in-memory only)
       const history = []
       const allMessages = [...messages, { role: 'user', text: userMessage }]
       for (let i = 1; i < allMessages.length - 1; i += 2) {
@@ -119,27 +82,24 @@ export default function AIChatWidget() {
           })
         }
       }
-      // Keep only last 10 exchanges
       const recentHistory = history.slice(-10)
 
-      const { data, error } = await supabase.functions.invoke('chat-command', {
+      const { data, error } = await supabase.functions.invoke('client-chat-command', {
         body: {
           message: userMessage,
-          groomer_id: user.id,
           history: recentHistory,
-          admin_mode: adminMode,
         },
       })
 
       if (error) {
-        console.error('Chat error:', error)
-        setMessages(prev => [...prev, { role: 'assistant', text: 'Sorry, I had trouble with that. Try again!' }])
+        console.error('Client chat error:', error)
+        setMessages(prev => [...prev, { role: 'assistant', text: 'Sorry, I had trouble with that. Try again or message your groomer directly.' }])
       } else {
         setMessages(prev => [...prev, { role: 'assistant', text: data.text }])
       }
     } catch (err) {
-      console.error('Chat failed:', err)
-      setMessages(prev => [...prev, { role: 'assistant', text: 'Something went wrong. Try again!' }])
+      console.error('Client chat failed:', err)
+      setMessages(prev => [...prev, { role: 'assistant', text: 'Something went wrong. Try again or message your groomer directly.' }])
     }
 
     setSending(false)
@@ -152,16 +112,15 @@ export default function AIChatWidget() {
     }
   }
 
-  const clearChat = async () => {
-    setAdminMode(false)
+  const clearChat = () => {
     setMessages([
       { role: 'assistant', text: 'Chat cleared! What can I help you with?' }
     ])
-    // Also wipe the Supabase row for a truly clean slate
-    var { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      await supabase.from('chat_conversations').delete().eq('groomer_id', user.id)
-    }
+  }
+
+  // Don't render anything if loading or disabled
+  if (enabled === null || enabled === false) {
+    return null
   }
 
   return (
@@ -170,7 +129,7 @@ export default function AIChatWidget() {
       {!isOpen && (
         <button className="chat-bubble-btn" onClick={() => setIsOpen(true)}>
           <span className="chat-bubble-icon">💬</span>
-          <span className="chat-bubble-label">PetPro AI</span>
+          <span className="chat-bubble-label">Book with AI</span>
         </button>
       )}
 
@@ -181,7 +140,7 @@ export default function AIChatWidget() {
           <div className="chat-header">
             <div className="chat-header-info">
               <span className="chat-header-dot"></span>
-              <span className="chat-header-title">PetPro AI{adminMode ? ' (Admin)' : ''}</span>
+              <span className="chat-header-title">Shop AI Assistant</span>
             </div>
             <div className="chat-header-actions">
               <button className="chat-clear-btn" onClick={clearChat} title="Clear chat">🗑</button>
@@ -203,7 +162,7 @@ export default function AIChatWidget() {
               <div className="chat-msg chat-msg-ai">
                 <span className="chat-msg-avatar">🐾</span>
                 <div className="chat-bubble-ai chat-typing">
-                  PetPro AI is typing...
+                  AI is typing...
                 </div>
               </div>
             )}
@@ -218,7 +177,7 @@ export default function AIChatWidget() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Ask PetPro AI anything..."
+              placeholder="Ask me to book, reschedule, or cancel..."
               rows={1}
               disabled={sending}
             />

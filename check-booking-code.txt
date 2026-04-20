@@ -5,6 +5,18 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// Helper: tidy "HH:MM" → "9:00 AM"
+function fmt12(t) {
+  if (!t) return ''
+  const [hStr, mStr] = t.split(':')
+  let h = parseInt(hStr, 10)
+  const m = mStr || '00'
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  if (h === 0) h = 12
+  else if (h > 12) h -= 12
+  return `${h}:${m} ${ampm}`
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -12,7 +24,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { pet_id, service_id, appointment_date, start_time, end_time } = await req.json()
+    const { pet_id, service_id, appointment_date, start_time, end_time, staff_id } = await req.json()
 
     // Create Supabase admin client to fetch pet data
     const supabaseAdmin = createClient(
@@ -33,6 +45,64 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Task #38 — HARD BLOCK CHECK (runs BEFORE Claude is called)
+    //
+    // Why this runs first:
+    //   1. Saves Claude API cost (no point asking the AI when it's a hard no)
+    //   2. Faster response to the user
+    //   3. Guaranteed correct (deterministic JS, not AI reasoning)
+    //   4. If groomer wants to book over a block, they MUST remove the block first
+    // ═══════════════════════════════════════════════════════════════
+    const { data: dayBlocks, error: blockErr } = await supabaseAdmin
+      .from('blocked_times')
+      .select('id, start_time, end_time, note, staff_id, staff_members(first_name, last_name)')
+      .eq('groomer_id', pet.groomer_id)
+      .eq('block_date', appointment_date)
+
+    if (blockErr) {
+      console.error('blocked_times fetch error:', blockErr)
+      // Don't crash the whole safety check — fall through with a warning
+    }
+
+    // Filter blocks that apply to THIS staff member (or shop-wide blocks where staff_id is null)
+    const staffFilter = staff_id || null
+    const relevantBlocks = (dayBlocks || []).filter((b) => {
+      if (b.staff_id == null) return true            // shop-wide / owner block — always relevant
+      if (staffFilter == null) return false          // booking is unassigned, block is for specific staff → not blocking
+      return b.staff_id === staffFilter              // specific-to-specific match
+    })
+
+    // Overlap math: appt_start < block_end AND appt_end > block_start
+    const conflict = relevantBlocks.find((b) => start_time < b.end_time && end_time > b.start_time)
+
+    if (conflict) {
+      const who = conflict.staff_members
+        ? `${conflict.staff_members.first_name}${conflict.staff_members.last_name ? ' ' + conflict.staff_members.last_name : ''}`
+        : 'this slot'
+      const noteBit = conflict.note ? ` (${conflict.note})` : ''
+      const blockWindow = `${fmt12(conflict.start_time)} to ${fmt12(conflict.end_time)}`
+
+      return new Response(JSON.stringify({
+        approved: false,
+        blocked_time: true, // Task #38 — signals to React: hide "Book Anyway" override (hard reject)
+        flags: [{
+          level: 'danger',
+          message:
+            `🚫 TIME NOT AVAILABLE — ${who} has this time blocked off${noteBit} from ${blockWindow}. ` +
+            `To book over this, remove the block first. ` +
+            `Otherwise, please pick a different day, or add the client to the waitlist ` +
+            `(note: waitlist does not guarantee a slot — groomer will reach out if one opens up).`
+        }],
+        summary: `Time is blocked off${noteBit} — cannot book over a block. Pick a different time, or join waitlist.`,
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    // ═══════════════════════════════════════════════════════════════
+    // End hard block check — if we reach here, the slot is not blocked off
+    // ═══════════════════════════════════════════════════════════════
 
     // Fetch service details if provided
     let service = null
@@ -98,6 +168,8 @@ INFO FLAGS (good to know - groomer should be aware):
 - Special grooming notes or special notes from the groomer
 - Any behavior notes worth reviewing
 - Last groom date was a long time ago
+
+NOTE: Block-off-time conflicts (lunch breaks, errands, time off) are checked OUTSIDE of you and will hard-reject the booking before you ever see it. You do not need to worry about blocked time slots — only safety, behavior, and overlap concerns.
 
 RESPOND IN THIS EXACT JSON FORMAT ONLY (no other text):
 {

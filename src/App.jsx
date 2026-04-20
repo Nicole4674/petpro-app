@@ -30,10 +30,20 @@ import TaxSettings from './pages/TaxSettings'
 import PayrollReports from './pages/PayrollReports'
 import YearEndForms from './pages/YearEndForms'
 import ChatSettings from './pages/ChatSettings'
+import BookingRules from './pages/BookingRules'
+import Messages from './pages/Messages'
+import ShopSettings from './pages/ShopSettings'
 import Balances from './pages/Balances'
 import Privacy from './pages/Privacy'
 import Terms from './pages/Terms'
+import Contact from './pages/Contact'
+import ClientSignup from './pages/ClientSignup'
+import ClientLogin from './pages/ClientLogin'
+import ClientPortalDashboard from './pages/ClientPortalDashboard'
+import ClientPortalMessages from './pages/ClientPortalMessages'
+import ClientPortalThread from './pages/ClientPortalThread'
 import AIChatWidget from './components/AIChatWidget'
+import ClientChatWidget from './components/ClientChatWidget'
 import Sidebar from './components/Sidebar'
 import './App.css'
 
@@ -43,9 +53,18 @@ function AppLayout({ children }) {
 
     // Don't show sidebar on login/signup or public legal pages
     var isAuthPage = location.pathname === '/login' || location.pathname === '/signup'
-    var isPublicPage = location.pathname === '/privacy' || location.pathname === '/terms'
+    var isPublicPage = location.pathname === '/privacy' || location.pathname === '/terms' || location.pathname === '/portal/signup' || location.pathname === '/portal/login'
+    var isPortalPage = location.pathname.indexOf('/portal') === 0
     if (isAuthPage || isPublicPage) {
         return <>{children}</>
+    }
+    if (isPortalPage) {
+        return (
+            <>
+                {children}
+                <ClientChatWidget />
+            </>
+        )
     }
 
     return (
@@ -90,6 +109,11 @@ function App() {
                     <Route path="/signup" element={!session ? <Signup /> : <Navigate to="/" />} />
                     <Route path="/privacy" element={<Privacy />} />
                     <Route path="/terms" element={<Terms />} />
+                    <Route path="/portal/signup" element={<ClientSignup />} />
+                    <Route path="/portal/login" element={<ClientLogin />} />
+                    <Route path="/portal" element={session ? <ClientPortalDashboard /> : <Navigate to="/portal/login" />} />
+                    <Route path="/portal/messages" element={session ? <ClientPortalMessages /> : <Navigate to="/portal/login" />} />
+                    <Route path="/portal/messages/:threadId" element={session ? <ClientPortalThread /> : <Navigate to="/portal/login" />} />
                     <Route path="/" element={session ? <Dashboard /> : <Navigate to="/login" />} />
                     <Route path="/clients" element={session ? <Clients /> : <Navigate to="/login" />} />
                     <Route path="/clients/new" element={session ? <AddClient /> : <Navigate to="/login" />} />
@@ -101,6 +125,7 @@ function App() {
                     <Route path="/flagged" element={session ? <FlaggedBookings /> : <Navigate to="/login" />} />
                     <Route path="/voice" element={session ? <VoiceMode /> : <Navigate to="/login" />} />
                     <Route path="/import" element={session ? <ImportClients /> : <Navigate to="/login" />} />
+                    <Route path="/contact" element={session ? <Contact /> : <Navigate to="/login" />} />
                     <Route path="/boarding/setup" element={session ? <BoardingSetup /> : <Navigate to="/login" />} />
                     <Route path="/boarding/kennels" element={session ? <Kennels /> : <Navigate to="/login" />} />
                     <Route path="/boarding/calendar" element={session ? <BoardingCalendar /> : <Navigate to="/login" />} />
@@ -117,7 +142,10 @@ function App() {
                     <Route path="/payroll/reports" element={session ? <PayrollReports /> : <Navigate to="/login" />} />
                     <Route path="/payroll/year-end" element={session ? <YearEndForms /> : <Navigate to="/login" />} />
                     <Route path="/ai/chat-settings" element={session ? <ChatSettings /> : <Navigate to="/login" />} />
+                    <Route path="/ai/booking-rules" element={session ? <BookingRules /> : <Navigate to="/login" />} />
+                    <Route path="/settings/shop" element={session ? <ShopSettings /> : <Navigate to="/login" />} />
                     <Route path="/balances" element={session ? <Balances /> : <Navigate to="/login" />} />
+                    <Route path="/messages" element={session ? <Messages /> : <Navigate to="/login" />} />
                 </Routes>
             </AppLayout>
         </BrowserRouter>

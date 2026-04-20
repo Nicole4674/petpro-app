@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { sendRemindersForGroomer } from '../lib/sendReminders'
 
 export default function ChatSettings() {
   var navigate = useNavigate()
@@ -30,8 +31,16 @@ export default function ChatSettings() {
   )
   var [reminderEnabled, setReminderEnabled] = useState(true)
   var [reminderTemplate, setReminderTemplate] = useState(
-    'Hey {owner_name}! Just a reminder {pet_name} has a {service} tomorrow at {time}. See you then!'
+    'Hey {owner_name}! Just a reminder — {pet_name} has a {service} tomorrow at {time}. Reply Y to confirm. See you soon! 🐾'
   )
+  var [boardingReminderEnabled, setBoardingReminderEnabled] = useState(true)
+  var [boardingReminderTemplate, setBoardingReminderTemplate] = useState(
+    'Hey {owner_name}! Just a reminder — {pet_names} check in for boarding tomorrow ({start_date}). Reply Y to confirm. See you soon! 🐾'
+  )
+  var [reminderSendTime, setReminderSendTime] = useState('09:00')
+  var [reminderSendTimezone, setReminderSendTimezone] = useState('America/Chicago')
+  var [sendingReminders, setSendingReminders] = useState(false)
+  var [remindersResult, setRemindersResult] = useState('')
   var [runningLateEnabled, setRunningLateEnabled] = useState(false)
   var [runningLateTemplate, setRunningLateTemplate] = useState(
     "Hi {owner_name}, we're running about {minutes} minutes behind on {pet_name}. So sorry for the wait!"
@@ -48,6 +57,12 @@ export default function ChatSettings() {
   var [noShowTemplate, setNoShowTemplate] = useState(
     'Hi {owner_name}, we missed you at {time} today. Want to reschedule {pet_name}?'
   )
+
+  // ---- Client Portal AI Toggles ----
+  var [clientClaudeEnabled, setClientClaudeEnabled] = useState(true)
+  var [clientAutoBookEnabled, setClientAutoBookEnabled] = useState(true)
+  var [clientCanReschedule, setClientCanReschedule] = useState(true)
+  var [clientCanCancel, setClientCanCancel] = useState(true)
 
   // ---- Custom ----
   var [customInstructions, setCustomInstructions] = useState('')
@@ -88,6 +103,15 @@ export default function ChatSettings() {
 
         setReminderEnabled(!!data.reminder_enabled)
         if (data.reminder_template) setReminderTemplate(data.reminder_template)
+        if (data.reminder_send_time) {
+          // DB stores as 'HH:MM:SS', input type="time" needs 'HH:MM'
+          var timeStr = String(data.reminder_send_time).slice(0, 5)
+          setReminderSendTime(timeStr)
+        }
+        if (data.reminder_send_timezone) setReminderSendTimezone(data.reminder_send_timezone)
+
+        if (data.boarding_reminder_enabled != null) setBoardingReminderEnabled(!!data.boarding_reminder_enabled)
+        if (data.boarding_reminder_template) setBoardingReminderTemplate(data.boarding_reminder_template)
 
         setRunningLateEnabled(!!data.running_late_enabled)
         if (data.running_late_template) setRunningLateTemplate(data.running_late_template)
@@ -102,6 +126,11 @@ export default function ChatSettings() {
         if (data.no_show_template) setNoShowTemplate(data.no_show_template)
 
         if (data.custom_instructions != null) setCustomInstructions(data.custom_instructions)
+
+        if (data.client_claude_enabled != null) setClientClaudeEnabled(!!data.client_claude_enabled)
+        if (data.client_auto_book_enabled != null) setClientAutoBookEnabled(!!data.client_auto_book_enabled)
+        if (data.client_can_reschedule != null) setClientCanReschedule(!!data.client_can_reschedule)
+        if (data.client_can_cancel != null) setClientCanCancel(!!data.client_can_cancel)
       }
     } catch (e) {
       console.error('Load failed:', e)
@@ -133,6 +162,10 @@ export default function ChatSettings() {
         pickup_ready_template: pickupReadyTemplate,
         reminder_enabled: reminderEnabled,
         reminder_template: reminderTemplate,
+        reminder_send_time: reminderSendTime + ':00',
+        reminder_send_timezone: reminderSendTimezone,
+        boarding_reminder_enabled: boardingReminderEnabled,
+        boarding_reminder_template: boardingReminderTemplate,
         running_late_enabled: runningLateEnabled,
         running_late_template: runningLateTemplate,
         arrived_safely_enabled: arrivedSafelyEnabled,
@@ -142,6 +175,10 @@ export default function ChatSettings() {
         no_show_enabled: noShowEnabled,
         no_show_template: noShowTemplate,
         custom_instructions: customInstructions || null,
+        client_claude_enabled: clientClaudeEnabled,
+        client_auto_book_enabled: clientAutoBookEnabled,
+        client_can_reschedule: clientCanReschedule,
+        client_can_cancel: clientCanCancel,
       }
 
       var { error: saveErr } = await supabase
@@ -160,6 +197,56 @@ export default function ChatSettings() {
       setError('Could not save settings.')
     }
     setSaving(false)
+  }
+
+  // -------------------------------------------------------
+  // Manual "Send today's reminders now" — for testing
+  // without waiting for the daily cron job.
+  // Real sender function is wired up in Step 3.
+  // -------------------------------------------------------
+  async function handleSendRemindersNow() {
+    if (!reminderEnabled && !boardingReminderEnabled) {
+      setRemindersResult('⚠️ Both reminders are OFF. Toggle at least one ON first.')
+      return
+    }
+    setSendingReminders(true)
+    setRemindersResult('⏳ Sending reminders...')
+    try {
+      var { data: userData } = await supabase.auth.getUser()
+      var user = userData && userData.user
+      if (!user) {
+        setRemindersResult('❌ Not signed in.')
+        setSendingReminders(false)
+        return
+      }
+
+      var result = await sendRemindersForGroomer(user.id)
+      var total = result.groomingSent + result.boardingSent
+      var parts = []
+      if (result.groomingSent > 0) {
+        parts.push('✂️ ' + result.groomingSent + ' grooming')
+      }
+      if (result.boardingSent > 0) {
+        parts.push('🏠 ' + result.boardingSent + ' boarding')
+      }
+
+      var summary
+      if (total === 0) {
+        summary = '✅ Ran successfully — nothing to send right now. (No unsent appointments or boarding check-ins scheduled for tomorrow, or reminders already went out.)'
+      } else {
+        summary = '✅ Sent ' + total + ' reminder' + (total === 1 ? '' : 's') + ' — ' + parts.join(', ')
+      }
+
+      if (result.errors && result.errors.length > 0) {
+        summary += '\n\n⚠️ Some issues:\n• ' + result.errors.join('\n• ')
+      }
+
+      setRemindersResult(summary)
+    } catch (e) {
+      console.error('handleSendRemindersNow failed:', e)
+      setRemindersResult('❌ Error: ' + (e.message || 'Unknown error'))
+    }
+    setSendingReminders(false)
   }
 
   // -------------------------------------------------------
@@ -318,6 +405,184 @@ export default function ChatSettings() {
         </label>
       </div>
 
+      {/* ===== Client Portal AI ===== */}
+      <div style={cardStyle}>
+        <h3 style={sectionTitleStyle}>🤖 Client Portal AI</h3>
+        <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
+          Control what your clients can do with AI in their portal. Clients can always
+          reach you through messaging — these toggles only affect the AI chat bubble.
+        </div>
+
+        {/* Master toggle */}
+        <div style={{
+          background: clientClaudeEnabled ? '#f0fdf4' : '#fef2f2',
+          border: clientClaudeEnabled ? '1px solid #bbf7d0' : '1px solid #fecaca',
+          borderRadius: 10,
+          padding: 14,
+          marginBottom: 14,
+        }}>
+          <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>
+                Enable Client AI Chat {clientClaudeEnabled ? '' : '(OFF — clients use messaging only)'}
+              </div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                Master switch. When off, clients will not see the AI chat bubble in their portal at all.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={clientClaudeEnabled}
+              onChange={function (e) { setClientClaudeEnabled(e.target.checked) }}
+              style={{ width: 22, height: 22, cursor: 'pointer', flexShrink: 0, marginLeft: 16 }}
+            />
+          </label>
+        </div>
+
+        {/* Auto-Book */}
+        <div style={subToggleCardStyle(clientClaudeEnabled)}>
+          <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: clientClaudeEnabled ? 'pointer' : 'not-allowed' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+                Auto-Book Appointments
+              </div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                AI books directly for returning clients (1+ past appointments).
+                <strong> Spam safety:</strong> if a client books more than 1 non-recurring
+                appointment in 30 days, the booking is flagged as <em>pending</em> for your
+                review instead of auto-booked.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={clientAutoBookEnabled}
+              disabled={!clientClaudeEnabled}
+              onChange={function (e) { setClientAutoBookEnabled(e.target.checked) }}
+              style={{ width: 20, height: 20, cursor: clientClaudeEnabled ? 'pointer' : 'not-allowed', flexShrink: 0, marginLeft: 16 }}
+            />
+          </label>
+        </div>
+
+        {/* Reschedule */}
+        <div style={subToggleCardStyle(clientClaudeEnabled)}>
+          <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: clientClaudeEnabled ? 'pointer' : 'not-allowed' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+                Allow Reschedules
+              </div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                Clients can reschedule their own upcoming appointments via AI.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={clientCanReschedule}
+              disabled={!clientClaudeEnabled}
+              onChange={function (e) { setClientCanReschedule(e.target.checked) }}
+              style={{ width: 20, height: 20, cursor: clientClaudeEnabled ? 'pointer' : 'not-allowed', flexShrink: 0, marginLeft: 16 }}
+            />
+          </label>
+        </div>
+
+        {/* Cancel */}
+        <div style={subToggleCardStyle(clientClaudeEnabled)}>
+          <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: clientClaudeEnabled ? 'pointer' : 'not-allowed' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+                Allow Cancellations
+              </div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                Clients can cancel their own upcoming appointments via AI.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={clientCanCancel}
+              disabled={!clientClaudeEnabled}
+              onChange={function (e) { setClientCanCancel(e.target.checked) }}
+              style={{ width: 20, height: 20, cursor: clientClaudeEnabled ? 'pointer' : 'not-allowed', flexShrink: 0, marginLeft: 16 }}
+            />
+          </label>
+        </div>
+
+        <div style={{
+          fontSize: 12,
+          color: '#6b7280',
+          background: '#fef3c7',
+          border: '1px solid #fde68a',
+          borderRadius: 8,
+          padding: 10,
+          marginTop: 12,
+        }}>
+          <strong>⚠️ Note:</strong> New clients (zero past appointments) always route through
+          messaging — they can never auto-book, no matter what these settings say.
+        </div>
+      </div>
+
+      {/* ===== Reminder Schedule ===== */}
+      <div style={cardStyle}>
+        <h3 style={sectionTitleStyle}>⏰ Appointment Reminder Schedule</h3>
+        <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 14 }}>
+          When should PetPro send the day-before appointment reminder to your clients?
+          Goes into their in-app message inbox — free and unlimited (no SMS fees).
+          Clients reply <strong>Y</strong> to confirm.
+        </div>
+
+        <label style={labelStyle}>Daily send time</label>
+        <input
+          type="time"
+          value={reminderSendTime}
+          onChange={function (e) { setReminderSendTime(e.target.value) }}
+          style={{ ...inputStyle, maxWidth: 200 }}
+        />
+        <div style={hintStyle}>
+          Every day at this time, PetPro scans tomorrow's grooming appointments
+          and boarding check-ins and sends a reminder to each client. (Timezone:
+          {' '}{reminderSendTimezone.replace('America/', '')})
+        </div>
+
+        <div style={{
+          marginTop: 18,
+          padding: 14,
+          background: '#f9fafb',
+          border: '1px dashed #d1d5db',
+          borderRadius: 8,
+        }}>
+          <div style={{ fontSize: 13, color: '#374151', fontWeight: 600, marginBottom: 8 }}>
+            🧪 Test It Now
+          </div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
+            Don't want to wait until {reminderSendTime} tomorrow? Click below to
+            send reminders for tomorrow's appointments right now.
+          </div>
+          <button
+            onClick={handleSendRemindersNow}
+            disabled={sendingReminders}
+            style={{
+              ...buttonSecondaryStyle,
+              opacity: sendingReminders ? 0.6 : 1,
+              cursor: sendingReminders ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {sendingReminders ? 'Sending…' : "📬 Send today's reminders now"}
+          </button>
+          {remindersResult && (
+            <div style={{
+              fontSize: 13,
+              marginTop: 10,
+              color: '#374151',
+              whiteSpace: 'pre-wrap',
+              background: '#fff',
+              border: '1px solid #e5e7eb',
+              borderRadius: 6,
+              padding: 10,
+            }}>
+              {remindersResult}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* ===== Templates ===== */}
       <div style={{ margin: '28px 0 8px 0', fontWeight: 700, fontSize: 18 }}>💬 Message Templates</div>
       <div style={{ color: '#6b7280', fontSize: 13, marginBottom: 16 }}>
@@ -332,11 +597,18 @@ export default function ChatSettings() {
         pickupReadyTemplate, setPickupReadyTemplate
       )}
 
-      {renderTemplate('reminder', 'Appointment Reminder',
-        'Sent the day before an appointment.',
+      {renderTemplate('reminder', 'Appointment Reminder (Grooming)',
+        'Sent the day before a grooming appointment.',
         '{owner_name}, {pet_name}, {service}, {time}',
         reminderEnabled, setReminderEnabled,
         reminderTemplate, setReminderTemplate
+      )}
+
+      {renderTemplate('boarding_reminder', 'Boarding Reminder',
+        'Sent the day before a boarding check-in. (No check-out reminders — clients shouldn\'t feel rushed to pick up.)',
+        '{owner_name}, {pet_names}, {start_date}, {end_date}',
+        boardingReminderEnabled, setBoardingReminderEnabled,
+        boardingReminderTemplate, setBoardingReminderTemplate
       )}
 
       {renderTemplate('running_late', 'Running Late',
@@ -490,4 +762,15 @@ var buttonSecondaryStyle = {
   fontWeight: 500,
   fontSize: 14,
   cursor: 'pointer',
+}
+
+function subToggleCardStyle(enabled) {
+  return {
+    background: enabled ? '#fff' : '#f9fafb',
+    border: '1px solid #e5e7eb',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+    opacity: enabled ? 1 : 0.55,
+  }
 }

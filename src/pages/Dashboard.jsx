@@ -46,10 +46,35 @@ export default function Dashboard() {
   var [saving, setSaving] = useState(false)
   var [waitlistCount, setWaitlistCount] = useState(0)
   var [owedSummary, setOwedSummary] = useState({ total: 0, clientCount: 0, top3: [] })
+  var [unreadSummary, setUnreadSummary] = useState({ total: 0, top3: [] })
 
   useEffect(function() {
     fetchAll()
   }, [currentDate, view])
+
+  // Realtime: refresh unread messages widget when anything changes
+  useEffect(function() {
+    var channel
+    async function setup() {
+      var { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      channel = supabase
+        .channel('dashboard-unread-messages')
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'messages',
+          filter: 'groomer_id=eq.' + user.id,
+        }, function() {
+          fetchUnreadSummary(user.id)
+        })
+        .subscribe()
+    }
+    setup()
+    return function() {
+      if (channel) supabase.removeChannel(channel)
+    }
+  }, [])
 
   async function fetchAll() {
     setLoading(true)
@@ -120,9 +145,10 @@ export default function Dashboard() {
 
     var { data: serviceData } = await supabase
       .from('services')
-      .select('id, name, price, duration')
+      .select('id, service_name, price, time_block_minutes')
       .eq('groomer_id', user.id)
-      .order('name')
+      .eq('is_active', true)
+      .order('service_name')
 
     setServices(serviceData || [])
 
@@ -137,6 +163,9 @@ export default function Dashboard() {
 
     // Fetch outstanding balances summary (Phase C)
     await fetchOwedSummary(user.id)
+
+    // Fetch unread messages summary (Phase 5)
+    await fetchUnreadSummary(user.id)
 
     setLoading(false)
   }
@@ -201,6 +230,66 @@ export default function Dashboard() {
       clientCount: Object.keys(clientSet).length,
       top3: unpaid.slice(0, 3)
     })
+  }
+
+  async function fetchUnreadSummary(userId) {
+    // Get all unread messages from clients to this groomer
+    var { data: unreadMsgs } = await supabase
+      .from('messages')
+      .select('id, thread_id, text, attachment_url, created_at, client_id, clients:client_id(first_name, last_name), threads:thread_id(subject)')
+      .eq('groomer_id', userId)
+      .eq('sender_type', 'client')
+      .eq('read_by_groomer', false)
+      .order('created_at', { ascending: false })
+
+    if (!unreadMsgs || unreadMsgs.length === 0) {
+      setUnreadSummary({ total: 0, top3: [] })
+      return
+    }
+
+    // Group by thread — keep the newest message per thread, count unread per thread
+    var threadMap = {}
+    var threadOrder = []
+    unreadMsgs.forEach(function(m) {
+      if (!threadMap[m.thread_id]) {
+        var previewText = m.text
+          ? m.text
+          : (m.attachment_url ? '📎 Photo' : '')
+        threadMap[m.thread_id] = {
+          threadId: m.thread_id,
+          clientName: m.clients ? (m.clients.first_name + ' ' + m.clients.last_name) : 'Unknown',
+          subject: m.threads ? m.threads.subject : null,
+          preview: previewText,
+          createdAt: m.created_at,
+          unreadCount: 1,
+        }
+        threadOrder.push(m.thread_id)
+      } else {
+        threadMap[m.thread_id].unreadCount += 1
+      }
+    })
+
+    var top3 = threadOrder.slice(0, 3).map(function(id) { return threadMap[id] })
+
+    setUnreadSummary({
+      total: unreadMsgs.length,
+      top3: top3,
+    })
+  }
+
+  function formatMsgTime(iso) {
+    if (!iso) return ''
+    var d = new Date(iso)
+    var now = new Date()
+    var diffMs = now - d
+    var diffMin = Math.floor(diffMs / 60000)
+    if (diffMin < 1) return 'just now'
+    if (diffMin < 60) return diffMin + 'm ago'
+    var diffHr = Math.floor(diffMin / 60)
+    if (diffHr < 24) return diffHr + 'h ago'
+    var diffDay = Math.floor(diffHr / 24)
+    if (diffDay < 7) return diffDay + 'd ago'
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
 
   function getDateRange() {
@@ -426,6 +515,84 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Unread Messages Widget (Phase 5) — always visible */}
+      <div className="db-balances-widget">
+        <div className="db-balances-widget-header">
+          <div className="db-balances-widget-title">
+            <span className="db-balances-widget-icon">📬</span>
+            Unread Messages
+            {unreadSummary.total > 0 && (
+              <span style={{
+                marginLeft: '10px',
+                background: '#dc3545',
+                color: '#fff',
+                borderRadius: '12px',
+                padding: '2px 10px',
+                fontSize: '13px',
+                fontWeight: 700,
+              }}>{unreadSummary.total}</span>
+            )}
+          </div>
+          <button className="db-balances-widget-link" onClick={function() { navigate('/messages') }}>
+            {unreadSummary.total > 0 ? 'Open all →' : 'Open inbox →'}
+          </button>
+        </div>
+        <div className="db-balances-widget-list">
+          {unreadSummary.top3.length === 0 ? (
+            <div style={{ padding: '18px 16px', textAlign: 'center', color: '#6c757d', fontSize: '14px' }}>
+              ✅ All caught up — no unread messages
+            </div>
+          ) : (
+            unreadSummary.top3.map(function(m) {
+              var previewDisplay = m.preview && m.preview.length > 55
+                ? m.preview.substring(0, 55) + '...'
+                : (m.preview || '')
+              return (
+                <div
+                  key={m.threadId}
+                  className="db-balances-widget-row"
+                  onClick={function() { navigate('/messages') }}
+                >
+                  <div className="db-balances-widget-info">
+                    <div className="db-balances-widget-name">
+                      {m.clientName}
+                      {m.unreadCount > 1 && (
+                        <span style={{
+                          marginLeft: '8px',
+                          background: '#dc3545',
+                          color: '#fff',
+                          borderRadius: '10px',
+                          padding: '1px 7px',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                        }}>{m.unreadCount}</span>
+                      )}
+                    </div>
+                    <div className="db-balances-widget-sub" style={{
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      maxWidth: '360px',
+                    }}>
+                      {m.subject ? <span style={{ color: '#7c3aed', fontWeight: 600 }}>📌 {m.subject}</span> : null}
+                      {m.subject && previewDisplay ? ' · ' : ''}
+                      {previewDisplay}
+                    </div>
+                  </div>
+                  <div className="db-balances-widget-amount" style={{
+                    fontSize: '12px',
+                    color: '#6c757d',
+                    fontWeight: 500,
+                  }}>
+                    {formatMsgTime(m.createdAt)}
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
       </div>
 
       {/* Outstanding Balances Widget (Phase C) */}
@@ -717,7 +884,7 @@ export default function Dashboard() {
                     >
                       <option value="">Select service...</option>
                       {services.map(function(s) {
-                        return <option key={s.id} value={s.id}>{s.name} — ${s.price}</option>
+                        return <option key={s.id} value={s.id}>{s.service_name} — ${s.price}</option>
                       })}
                     </select>
                   </div>

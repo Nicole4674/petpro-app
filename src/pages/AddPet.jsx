@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { getBreedDefaults } from '../lib/breedDefaults'
 
 export default function AddPet() {
   const { clientId } = useParams()
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  // Smart auto-fill: once groomer manually picks a coat type, stop auto-filling on breed change
+  const [coatManuallyChanged, setCoatManuallyChanged] = useState(false)
   const [form, setForm] = useState({
     // Basic Info
     name: '',
@@ -49,7 +52,25 @@ export default function AddPet() {
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target
-    setForm({ ...form, [name]: type === 'checkbox' ? checked : value })
+    const newValue = type === 'checkbox' ? checked : value
+
+    // Groomer manually picked a coat type → lock it so future breed edits don't overwrite
+    if (name === 'coat_type') {
+      setCoatManuallyChanged(true)
+      setForm({ ...form, coat_type: newValue })
+      return
+    }
+
+    // Breed changed → try to auto-fill coat_type (only if groomer hasn't manually picked one)
+    if (name === 'breed' && !coatManuallyChanged) {
+      const defaults = getBreedDefaults(newValue)
+      if (defaults.coat_type) {
+        setForm({ ...form, breed: newValue, coat_type: defaults.coat_type })
+        return
+      }
+    }
+
+    setForm({ ...form, [name]: newValue })
   }
 
   const handleSubmit = async (e) => {

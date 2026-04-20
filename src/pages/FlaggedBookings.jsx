@@ -52,9 +52,17 @@ export default function FlaggedBookings() {
   }
 
   const updateFlagStatus = async (appointmentId, newStatus) => {
+    // Phase 6 — when groomer DENIES a flagged booking, also cancel the appointment
+    // so the slot frees up and it disappears from Calendar (cancelled appts are
+    // filtered out of the calendar view).
+    const updatePayload = { flag_status: newStatus }
+    if (newStatus === 'disapproved') {
+      updatePayload.status = 'cancelled'
+    }
+
     const { error } = await supabase
       .from('appointments')
-      .update({ flag_status: newStatus })
+      .update(updatePayload)
       .eq('id', appointmentId)
 
     if (!error) {

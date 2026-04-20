@@ -89,18 +89,30 @@ export default function Calendar() {
     const [pets, setPets] = useState([])
     const [services, setServices] = useState([])
     const [staffMembers, setStaffMembers] = useState([])
+    const [blockedTimes, setBlockedTimes] = useState([]) // Task #38 — staff time blocks (lunch, errands, etc.)
     const [loading, setLoading] = useState(true)
     const [showAddForm, setShowAddForm] = useState(false)
     const [selectedDate, setSelectedDate] = useState(null)
     const [selectedTime, setSelectedTime] = useState(null)
     const [selectedAppt, setSelectedAppt] = useState(null) // appointment detail popup
     const [apptDetailLoading, setApptDetailLoading] = useState(false)
+    const [statusDropdownOpen, setStatusDropdownOpen] = useState(false) // click-to-change status pill
+    const [showAddPetToApptModal, setShowAddPetToApptModal] = useState(false) // multi-pet: + Add Pet to existing appt
     const [apptNotes, setApptNotes] = useState([]) // paper trail of notes for current appointment
     const [showAddNotePopup, setShowAddNotePopup] = useState(false)
     const [newNoteText, setNewNoteText] = useState('')
     const [savingNote, setSavingNote] = useState(false)
     const [checkingIn, setCheckingIn] = useState(false) // loading state for Check In button
     const [checkingOut, setCheckingOut] = useState(false) // loading state for Check Out button
+
+    // ===== Task #38 — Block Off Time =====
+    // slotChooser: when user clicks an empty slot, we pop up a small chooser (Book vs Block)
+    //   shape: { date: Date, hour: number, staffId: string | null } | null
+    const [slotChooser, setSlotChooser] = useState(null)
+    // blockModal: controls the Block Time create/edit modal
+    //   shape: { mode: 'create'|'edit', date, hour, staffId, block? } | null
+    const [blockModal, setBlockModal] = useState(null)
+    const [savingBlock, setSavingBlock] = useState(false)
 
     // ===== Payment at Checkout state =====
     const [showPaymentPopup, setShowPaymentPopup] = useState(false)
@@ -118,6 +130,11 @@ export default function Calendar() {
     useEffect(() => {
         fetchData()
     }, [currentDate, view])
+
+    // Close the status dropdown whenever the appt detail popup closes or changes appts
+    useEffect(() => {
+        if (!selectedAppt) setStatusDropdownOpen(false)
+    }, [selectedAppt?.id])
 
     // Handle "Book Again" and "Reschedule" URL params from client profile
     useEffect(() => {
@@ -174,10 +191,10 @@ export default function Calendar() {
             endDate = dateToString(monthDates[41])
         }
 
-        const [apptResult, clientResult, petResult, serviceResult, staffResult] = await Promise.all([
+        const [apptResult, clientResult, petResult, serviceResult, staffResult, blockedResult] = await Promise.all([
             supabase
                 .from('appointments')
-                .select('*, clients(first_name, last_name), pets(name, breed), staff_members(id, first_name, last_name, color_code)')
+                .select('*, clients(first_name, last_name), pets(name, breed), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed))')
                 .gte('appointment_date', startDate)
                 .lte('appointment_date', endDate)
                 .order('start_time'),
@@ -185,13 +202,24 @@ export default function Calendar() {
             supabase.from('pets').select('id, name, breed, client_id').eq('groomer_id', user.id).order('name'),
             supabase.from('services').select('id, service_name, price, time_block_minutes').eq('groomer_id', user.id).eq('is_active', true),
             supabase.from('staff_members').select('id, first_name, last_name, color_code').eq('groomer_id', user.id).eq('status', 'active').order('first_name'),
+            // Task #38 — fetch blocked time slots for the visible date range
+            supabase
+                .from('blocked_times')
+                .select('*, staff_members(id, first_name, last_name, color_code)')
+                .gte('block_date', startDate)
+                .lte('block_date', endDate)
+                .order('start_time'),
         ])
+
+        if (apptResult.error) console.error('[fetchData] appointments fetch error:', apptResult.error)
+        if (blockedResult.error) console.error('[fetchData] blocked_times fetch error:', blockedResult.error)
 
         setAppointments(apptResult.data || [])
         setClients(clientResult.data || [])
         setPets(petResult.data || [])
         setServices(serviceResult.data || [])
         setStaffMembers(staffResult.data || [])
+        setBlockedTimes(blockedResult.data || [])
         setLoading(false)
     }
 
@@ -238,20 +266,121 @@ export default function Calendar() {
     }
 
     const handleTimeSlotClick = (date, hour, staffId) => {
+        // Task #38 — empty-slot click now opens a chooser (Book vs Block) instead of jumping
+        // straight to the booking form. Nicole wanted this so she can block lunch/errand time.
+        setSlotChooser({ date: date, hour: hour, staffId: staffId || null })
+    }
+
+    // ===== Task #38 — chooser handlers =====
+    const handleChooseBook = () => {
+        if (!slotChooser) return
+        const { date, hour, staffId } = slotChooser
         setSelectedDate(dateToString(date))
         setSelectedTime(`${String(hour).padStart(2, '0')}:00`)
         if (staffId) {
             setPreFillBooking(prev => ({ ...(prev || {}), staff_id: staffId }))
         }
+        setSlotChooser(null)
         setShowAddForm(true)
     }
 
+    const handleChooseBlock = () => {
+        if (!slotChooser) return
+        const { date, hour, staffId } = slotChooser
+        setBlockModal({
+            mode: 'create',
+            date: dateToString(date),
+            hour: hour,
+            staffId: staffId || null,
+            block: null,
+        })
+        setSlotChooser(null)
+    }
+
+    // Click an existing gray BLOCKED tile → edit it
+    const handleBlockClick = (blk) => {
+        setBlockModal({
+            mode: 'edit',
+            date: blk.block_date,
+            hour: parseInt(blk.start_time.split(':')[0]),
+            staffId: blk.staff_id || null,
+            block: blk,
+        })
+    }
+
+    // ===== Task #38 — save / delete =====
+    const handleSaveBlock = async (payload) => {
+        try {
+            setSavingBlock(true)
+            const { data: { user } } = await supabase.auth.getUser()
+            if (!user) throw new Error('Not logged in')
+
+            if (blockModal && blockModal.mode === 'edit' && blockModal.block) {
+                // UPDATE existing block
+                const { error } = await supabase
+                    .from('blocked_times')
+                    .update({
+                        staff_id: payload.staff_id || null,
+                        block_date: payload.block_date,
+                        start_time: payload.start_time,
+                        end_time: payload.end_time,
+                        note: payload.note || null,
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', blockModal.block.id)
+                if (error) throw error
+            } else {
+                // INSERT new block
+                const { error } = await supabase
+                    .from('blocked_times')
+                    .insert({
+                        groomer_id: user.id,
+                        staff_id: payload.staff_id || null,
+                        block_date: payload.block_date,
+                        start_time: payload.start_time,
+                        end_time: payload.end_time,
+                        note: payload.note || null,
+                    })
+                if (error) throw error
+            }
+            setBlockModal(null)
+            await fetchData()
+        } catch (err) {
+            console.error('[handleSaveBlock] error:', err)
+            alert('Could not save block: ' + (err.message || err))
+        } finally {
+            setSavingBlock(false)
+        }
+    }
+
+    const handleDeleteBlock = async () => {
+        if (!blockModal || !blockModal.block) return
+        if (!window.confirm('Remove this blocked time?')) return
+        try {
+            setSavingBlock(true)
+            const { error } = await supabase
+                .from('blocked_times')
+                .delete()
+                .eq('id', blockModal.block.id)
+            if (error) throw error
+            setBlockModal(null)
+            await fetchData()
+        } catch (err) {
+            console.error('[handleDeleteBlock] error:', err)
+            alert('Could not delete block: ' + (err.message || err))
+        } finally {
+            setSavingBlock(false)
+        }
+    }
+
     const handleApptClick = async (appt, e) => {
-        e.stopPropagation()
+        console.log('[handleApptClick] CLICKED appt id:', appt.id, 'date:', appt.appointment_date, 'has appointment_pets?', !!appt.appointment_pets, 'count:', appt.appointment_pets?.length || 0)
+        if (e && e.stopPropagation) e.stopPropagation()
         setApptDetailLoading(true)
         try {
             // Load full appointment details with pet health info, service, and assigned groomer
-            const { data: fullAppt } = await supabase
+            // Multi-pet: appointment_pets brings ALL pets attached to this booking with their own service + price
+            const { data: fullAppt, error: fetchError } = await supabase
                 .from('appointments')
                 .select(`
                     *,
@@ -259,10 +388,35 @@ export default function Calendar() {
                     pets:pet_id ( id, name, breed, weight, age, sex, allergies, medications, vaccination_status, vaccination_expiry, is_spayed_neutered, is_senior, grooming_notes ),
                     services:service_id ( id, service_name, price, time_block_minutes ),
                     staff_members:staff_id ( id, first_name, last_name, color_code ),
-                    recurring_series:recurring_series_id ( id, interval_weeks, total_count, start_date, status )
+                    recurring_series:recurring_series_id ( id, interval_weeks, total_count, start_date, status ),
+                    appointment_pets (
+                        id,
+                        pet_id,
+                        service_id,
+                        quoted_price,
+                        service_notes,
+                        groomer_notes,
+                        pets:pet_id ( id, name, breed, weight, age, sex, allergies, medications, vaccination_status, vaccination_expiry, is_spayed_neutered, is_senior, grooming_notes ),
+                        services:service_id ( id, service_name, price, time_block_minutes )
+                    )
                 `)
                 .eq('id', appt.id)
                 .single()
+
+            if (fetchError) {
+                console.error('[handleApptClick] Supabase fetch error:', fetchError)
+                // Fall back to whatever basic data we already have on appt
+                setSelectedAppt(appt)
+                setApptDetailLoading(false)
+                return
+            }
+            if (!fullAppt) {
+                console.error('[handleApptClick] No appointment data returned for id', appt.id)
+                setSelectedAppt(appt)
+                setApptDetailLoading(false)
+                return
+            }
+            console.log('[handleApptClick] loaded appt with', fullAppt.appointment_pets?.length || 0, 'pets')
 
             // Task #19 — If this is a recurring appointment, count how many future instances remain
             if (fullAppt?.recurring_series_id) {
@@ -331,6 +485,124 @@ export default function Calendar() {
             console.error('Error loading appointment:', err)
         } finally {
             setApptDetailLoading(false)
+        }
+    }
+
+    // Multi-pet: Remove a pet from an existing appointment (sick dog scenario)
+    // Auto-shrinks appointment end_time by the removed pet's service time block
+    const handleRemovePetFromAppointment = async (apptPetId, petName) => {
+        if (!selectedAppt) return
+        if (!window.confirm('Remove ' + petName + ' from this appointment? The end time will auto-shrink.')) return
+
+        try {
+            // 1. Delete the appointment_pets row
+            const { error: delErr } = await supabase
+                .from('appointment_pets')
+                .delete()
+                .eq('id', apptPetId)
+            if (delErr) throw delErr
+
+            // 2. Compute remaining pets and new end_time
+            var remainingPets = (selectedAppt.appointment_pets || []).filter(function (ap) {
+                return ap.id !== apptPetId
+            })
+
+            if (remainingPets.length === 0) {
+                alert('That was the last pet on this appointment. Consider cancelling the appointment.')
+                fetchData()
+                setSelectedAppt(null)
+                return
+            }
+
+            // Sum time blocks of remaining pets
+            var totalMinutes = 0
+            remainingPets.forEach(function (ap) {
+                totalMinutes += (ap.services?.time_block_minutes || 0)
+            })
+
+            // Compute new end_time = start_time + totalMinutes
+            var startParts = selectedAppt.start_time.split(':').map(Number)
+            var totalStartMin = startParts[0] * 60 + startParts[1] + totalMinutes
+            var endH = Math.floor(totalStartMin / 60)
+            var endM = totalStartMin % 60
+            var newEndTime = String(endH).padStart(2, '0') + ':' + String(endM).padStart(2, '0')
+
+            // 3. Update appointment: end_time + backward-compat fields (first remaining pet, new total)
+            var firstPet = remainingPets[0]
+            var newTotal = remainingPets.reduce(function (sum, ap) {
+                return sum + parseFloat(ap.quoted_price || 0)
+            }, 0)
+
+            await supabase
+                .from('appointments')
+                .update({
+                    end_time: newEndTime,
+                    pet_id: firstPet.pet_id,
+                    service_id: firstPet.service_id,
+                    quoted_price: newTotal,
+                })
+                .eq('id', selectedAppt.id)
+
+            // 4. Refresh popup + calendar
+            await handleApptClick(selectedAppt, { stopPropagation: function () {} })
+            fetchData()
+        } catch (err) {
+            alert('Error removing pet: ' + err.message)
+        }
+    }
+
+    // Multi-pet: Add a pet to an existing appointment (2nd dog added 2 days later scenario)
+    // Auto-extends appointment end_time by the new pet's service time block
+    const handleAddPetToExistingAppointment = async (petData) => {
+        if (!selectedAppt) return
+        try {
+            // 1. Insert the new appointment_pets row
+            const { data: { user } } = await supabase.auth.getUser()
+            const { error: insertErr } = await supabase
+                .from('appointment_pets')
+                .insert({
+                    appointment_id: selectedAppt.id,
+                    pet_id: petData.pet_id,
+                    service_id: petData.service_id || null,
+                    quoted_price: parseFloat(petData.quoted_price || 0),
+                    groomer_id: user.id,
+                })
+            if (insertErr) throw insertErr
+
+            // 2. Compute new end_time = start_time + sum of all pets' time_block_minutes
+            var allPetsTimeMinutes = 0
+            ;(selectedAppt.appointment_pets || []).forEach(function (ap) {
+                allPetsTimeMinutes += (ap.services?.time_block_minutes || 0)
+            })
+            allPetsTimeMinutes += (petData.time_block_minutes || 0)
+
+            var startParts = selectedAppt.start_time.split(':').map(Number)
+            var totalStartMin = startParts[0] * 60 + startParts[1] + allPetsTimeMinutes
+            var endH = Math.floor(totalStartMin / 60)
+            var endM = totalStartMin % 60
+            var newEndTime = String(endH).padStart(2, '0') + ':' + String(endM).padStart(2, '0')
+
+            // 3. Compute new total price (sum of all pets including new one)
+            var newTotal = (selectedAppt.appointment_pets || []).reduce(function (sum, ap) {
+                return sum + parseFloat(ap.quoted_price || 0)
+            }, 0) + parseFloat(petData.quoted_price || 0)
+
+            // 4. Update appointment end_time + backward-compat fields
+            const { error: updateErr } = await supabase
+                .from('appointments')
+                .update({
+                    end_time: newEndTime,
+                    quoted_price: newTotal,
+                })
+                .eq('id', selectedAppt.id)
+            if (updateErr) throw updateErr
+
+            // 5. Close modal + refresh popup + refresh calendar
+            setShowAddPetToApptModal(false)
+            await handleApptClick(selectedAppt, { stopPropagation: function () {} })
+            fetchData()
+        } catch (err) {
+            alert('Error adding pet: ' + err.message)
         }
     }
 
@@ -407,6 +679,26 @@ export default function Calendar() {
         await openPaymentPopup(appt)
     }
 
+    // Manually change appointment status from the detail popup
+    const handleStatusChange = async (newStatus) => {
+        if (!selectedAppt) return
+        if (selectedAppt.status === newStatus) {
+            setStatusDropdownOpen(false)
+            return
+        }
+        const { error } = await supabase
+            .from('appointments')
+            .update({ status: newStatus })
+            .eq('id', selectedAppt.id)
+        if (error) {
+            alert('Error updating status: ' + error.message)
+            return
+        }
+        setSelectedAppt({ ...selectedAppt, status: newStatus })
+        setStatusDropdownOpen(false)
+        await fetchData()
+    }
+
     // Open the payment popup — fetches existing payments and pre-fills balance due
     const openPaymentPopup = async (appt) => {
         setPaymentAppt(appt)
@@ -421,7 +713,16 @@ export default function Calendar() {
         setExistingPayments(payments || [])
 
         // Pre-fill the form with balance due
-        const servicePrice = parseFloat(appt.final_price || appt.quoted_price || 0)
+        // MULTI-PET: if this booking has appointment_pets rows, sum their quoted_price.
+        // LEGACY single-pet: fall back to the parent appointment's price.
+        var servicePrice
+        if (appt.appointment_pets && appt.appointment_pets.length > 0) {
+            servicePrice = appt.appointment_pets.reduce(function (sum, ap) {
+                return sum + parseFloat(ap.quoted_price || 0)
+            }, 0)
+        } else {
+            servicePrice = parseFloat(appt.final_price || appt.quoted_price || 0)
+        }
         const existingDiscount = parseFloat(appt.discount_amount || 0)
         const totalPaid = (payments || []).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0)
         const balance = servicePrice - existingDiscount - totalPaid
@@ -685,9 +986,11 @@ export default function Calendar() {
                             view={view}
                             currentDate={currentDate}
                             appointments={appointments}
+                            blockedTimes={blockedTimes}
                             staff={staffMembers}
                             onSlotClick={handleTimeSlotClick}
                             onApptClick={handleApptClick}
+                            onBlockClick={handleBlockClick}
                             onCheckIn={handleCheckIn}
                             onCheckOut={handleCheckOut}
                             checkingIn={checkingIn}
@@ -763,6 +1066,29 @@ export default function Calendar() {
                 />
             )}
 
+            {/* Task #38 — Chooser popup (Book vs Block) when clicking an empty slot */}
+            {slotChooser && (
+                <SlotChooserModal
+                    slot={slotChooser}
+                    staff={staffMembers}
+                    onBook={handleChooseBook}
+                    onBlock={handleChooseBlock}
+                    onClose={() => setSlotChooser(null)}
+                />
+            )}
+
+            {/* Task #38 — Block Time create / edit modal */}
+            {blockModal && (
+                <BlockTimeModal
+                    modal={blockModal}
+                    staff={staffMembers}
+                    saving={savingBlock}
+                    onSave={handleSaveBlock}
+                    onDelete={handleDeleteBlock}
+                    onClose={() => setBlockModal(null)}
+                />
+            )}
+
             {/* Reschedule Modal (Task #26) */}
             {reschedulingAppt && (
                 <RescheduleModal
@@ -796,9 +1122,73 @@ export default function Calendar() {
                         <div className="appt-detail-header" style={{ borderLeftColor: STATUS_COLORS[selectedAppt.status] || '#2563eb' }}>
                             <div className="appt-detail-header-left">
                                 <h2>🐾 Appointment Details</h2>
-                                <span className="appt-detail-badge" style={{ background: STATUS_COLORS[selectedAppt.status] || '#2563eb' }}>
-                                    {selectedAppt.status ? selectedAppt.status.replace('_', ' ').toUpperCase() : 'UNKNOWN'}
-                                </span>
+                                <div style={{ position: 'relative', display: 'inline-block' }}>
+                                    <span
+                                        className="appt-detail-badge"
+                                        onClick={() => setStatusDropdownOpen(!statusDropdownOpen)}
+                                        style={{
+                                            background: STATUS_COLORS[selectedAppt.status] || '#2563eb',
+                                            cursor: 'pointer',
+                                            userSelect: 'none',
+                                        }}
+                                        title="Click to change status"
+                                    >
+                                        {selectedAppt.status ? selectedAppt.status.replace('_', ' ').toUpperCase() : 'UNKNOWN'} ▾
+                                    </span>
+                                    {statusDropdownOpen && (
+                                        <div
+                                            style={{
+                                                position: 'absolute',
+                                                top: '100%',
+                                                left: 0,
+                                                marginTop: '6px',
+                                                background: '#fff',
+                                                border: '1px solid #e5e7eb',
+                                                borderRadius: '8px',
+                                                boxShadow: '0 6px 16px rgba(0,0,0,0.15)',
+                                                zIndex: 20,
+                                                minWidth: '170px',
+                                                overflow: 'hidden',
+                                            }}
+                                        >
+                                            {['pending', 'confirmed', 'completed', 'cancelled', 'no_show'].map((s, idx, arr) => {
+                                                const isSelected = selectedAppt.status === s
+                                                const label = s.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())
+                                                return (
+                                                    <div
+                                                        key={s}
+                                                        onClick={() => handleStatusChange(s)}
+                                                        style={{
+                                                            padding: '10px 12px',
+                                                            cursor: 'pointer',
+                                                            fontSize: '13px',
+                                                            fontWeight: 500,
+                                                            color: '#1f2937',
+                                                            borderBottom: idx < arr.length - 1 ? '1px solid #f3f4f6' : 'none',
+                                                            background: isSelected ? '#f9fafb' : '#fff',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '8px',
+                                                        }}
+                                                        onMouseEnter={(e) => { e.currentTarget.style.background = '#f3f4f6' }}
+                                                        onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? '#f9fafb' : '#fff' }}
+                                                    >
+                                                        <span style={{
+                                                            display: 'inline-block',
+                                                            width: '10px',
+                                                            height: '10px',
+                                                            borderRadius: '50%',
+                                                            background: STATUS_COLORS[s],
+                                                            flexShrink: 0,
+                                                        }} />
+                                                        <span style={{ flex: 1 }}>{label}</span>
+                                                        {isSelected && <span style={{ color: '#6b7280' }}>✓</span>}
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             <button className="modal-close" onClick={() => setSelectedAppt(null)}>×</button>
                         </div>
@@ -928,86 +1318,172 @@ export default function Calendar() {
                                 )}
                             </div>
 
-                            {/* Service */}
-                            {selectedAppt.services && (
+                            {/* MULTI-PET: Pets in Appointment (each with own service, price, health) */}
+                            {selectedAppt.appointment_pets && selectedAppt.appointment_pets.length > 0 ? (
                                 <div className="appt-detail-section">
-                                    <div className="appt-detail-section-title">✂️ Service</div>
-                                    <div className="appt-detail-service-card">
-                                        <div className="appt-detail-service-name">{selectedAppt.services.service_name}</div>
-                                        <div className="appt-detail-service-meta">
-                                            ${parseFloat(selectedAppt.services.price || 0).toFixed(2)} · {selectedAppt.services.time_block_minutes} mins
-                                        </div>
+                                    <div className="appt-detail-section-title">
+                                        🐕 {selectedAppt.appointment_pets.length === 1 ? 'Pet' : 'Pets (' + selectedAppt.appointment_pets.length + ')'}
                                     </div>
+                                    {selectedAppt.appointment_pets.map(function (ap) {
+                                        return (
+                                            <div key={ap.id} className="appt-detail-pet-card" style={{ marginBottom: '12px', padding: '12px', border: '1px solid #e5e7eb', borderRadius: '8px', background: '#fff' }}>
+                                                {/* Pet header with remove button */}
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                                                    <div className="appt-detail-pet" style={{ flex: 1 }}>
+                                                        <div className="appt-detail-pet-avatar" style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)' }}>
+                                                            {ap.pets?.name ? ap.pets.name.charAt(0).toUpperCase() : '?'}
+                                                        </div>
+                                                        <div>
+                                                            <div className="appt-detail-pet-name">{ap.pets?.name || 'Unknown pet'}</div>
+                                                            <div className="appt-detail-pet-info">
+                                                                {ap.pets?.breed || 'Unknown breed'}
+                                                                {ap.pets?.weight ? ' · ' + ap.pets.weight + ' lbs' : ''}
+                                                                {ap.pets?.age ? ' · ' + ap.pets.age : ''}
+                                                                {ap.pets?.sex ? ' · ' + ap.pets.sex : ''}
+                                                            </div>
+                                                            <div className="appt-detail-pet-tags">
+                                                                {ap.pets?.is_spayed_neutered && <span className="appt-tag appt-tag-green">Spayed/Neutered</span>}
+                                                                {ap.pets && !ap.pets.is_spayed_neutered && <span className="appt-tag appt-tag-yellow">Intact</span>}
+                                                                {ap.pets?.is_senior && <span className="appt-tag appt-tag-blue">Senior</span>}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    {/* × Remove button (auto-shrinks appointment) */}
+                                                    <button
+                                                        onClick={function () { handleRemovePetFromAppointment(ap.id, ap.pets?.name || 'this pet') }}
+                                                        title="Remove pet from appointment (auto-shrinks end time)"
+                                                        style={{
+                                                            background: '#fee2e2',
+                                                            border: '1px solid #fecaca',
+                                                            color: '#dc2626',
+                                                            borderRadius: '6px',
+                                                            padding: '2px 10px',
+                                                            cursor: 'pointer',
+                                                            fontWeight: 700,
+                                                            fontSize: '18px',
+                                                            lineHeight: '1.2',
+                                                        }}
+                                                    >×</button>
+                                                </div>
+
+                                                {/* Service for this pet */}
+                                                {ap.services && (
+                                                    <div className="appt-detail-service-card" style={{ marginBottom: '8px' }}>
+                                                        <div className="appt-detail-service-name">✂️ {ap.services.service_name}</div>
+                                                        <div className="appt-detail-service-meta">
+                                                            ${parseFloat(ap.quoted_price || ap.services.price || 0).toFixed(2)} · {ap.services.time_block_minutes} mins
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Per-pet Health Alerts */}
+                                                {ap.pets?.allergies && (
+                                                    <div className="appt-alert appt-alert-red">
+                                                        <strong>⚠️ ALLERGIES:</strong> {ap.pets.allergies}
+                                                    </div>
+                                                )}
+                                                {ap.pets?.medications && (
+                                                    <div className="appt-alert appt-alert-blue">
+                                                        <strong>💊 MEDICATIONS:</strong> {ap.pets.medications}
+                                                    </div>
+                                                )}
+
+                                                {/* Per-pet Vaccination */}
+                                                {ap.pets?.vaccination_status && (
+                                                    <div className="appt-detail-vax">
+                                                        <span className={'appt-tag ' + (
+                                                            ap.pets.vaccination_status === 'current' ? 'appt-tag-green' :
+                                                            ap.pets.vaccination_status === 'expired' ? 'appt-tag-red' : 'appt-tag-yellow'
+                                                        )}>
+                                                            💉 {ap.pets.vaccination_status.replace('_', ' ').toUpperCase()}
+                                                        </span>
+                                                        {ap.pets.vaccination_expiry && (
+                                                            <span className="appt-detail-vax-date">
+                                                                Exp: {ap.pets.vaccination_expiry}
+                                                                {new Date(ap.pets.vaccination_expiry) < new Date() && <span style={{ color: '#dc2626', fontWeight: 700 }}> — EXPIRED</span>}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                )}
+
+                                                {/* Pet's pinned grooming notes (from pet profile) */}
+                                                {ap.pets?.grooming_notes && (
+                                                    <div className="appt-groom-note appt-groom-note-pinned" style={{ marginTop: '8px' }}>
+                                                        <span className="appt-groom-note-badge">📌 Pet Profile</span>
+                                                        {ap.pets.grooming_notes}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )
+                                    })}
+
+                                    {/* + Add Pet button — for client adding 2nd dog later or surprise extra dog */}
+                                    <button
+                                        onClick={function () { setShowAddPetToApptModal(true) }}
+                                        style={{
+                                            width: '100%',
+                                            padding: '10px',
+                                            background: '#f3f4f6',
+                                            border: '2px dashed #9ca3af',
+                                            borderRadius: '8px',
+                                            color: '#6b7280',
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                            fontSize: '14px',
+                                        }}
+                                    >+ Add Pet to this Appointment</button>
                                 </div>
-                            )}
-
-                            {/* Pet Profile */}
-                            {selectedAppt.pets && (
-                                <div className="appt-detail-section">
-                                    <div className="appt-detail-section-title">🐕 Pet Profile</div>
-                                    <div className="appt-detail-pet">
-                                        <div className="appt-detail-pet-avatar" style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)' }}>
-                                            {selectedAppt.pets.name ? selectedAppt.pets.name.charAt(0).toUpperCase() : '?'}
-                                        </div>
-                                        <div>
-                                            <div className="appt-detail-pet-name">{selectedAppt.pets.name}</div>
-                                            <div className="appt-detail-pet-info">
-                                                {selectedAppt.pets.breed || 'Unknown breed'}
-                                                {selectedAppt.pets.weight ? ' · ' + selectedAppt.pets.weight + ' lbs' : ''}
-                                                {selectedAppt.pets.age ? ' · ' + selectedAppt.pets.age : ''}
-                                                {selectedAppt.pets.sex ? ' · ' + selectedAppt.pets.sex : ''}
-                                            </div>
-                                            <div className="appt-detail-pet-tags">
-                                                {selectedAppt.pets.is_spayed_neutered && <span className="appt-tag appt-tag-green">Spayed/Neutered</span>}
-                                                {!selectedAppt.pets.is_spayed_neutered && <span className="appt-tag appt-tag-yellow">Intact</span>}
-                                                {selectedAppt.pets.is_senior && <span className="appt-tag appt-tag-blue">Senior</span>}
+                            ) : (
+                                /* LEGACY FALLBACK — old appointments without appointment_pets rows */
+                                <>
+                                    {selectedAppt.services && (
+                                        <div className="appt-detail-section">
+                                            <div className="appt-detail-section-title">✂️ Service</div>
+                                            <div className="appt-detail-service-card">
+                                                <div className="appt-detail-service-name">{selectedAppt.services.service_name}</div>
+                                                <div className="appt-detail-service-meta">
+                                                    ${parseFloat(selectedAppt.services.price || 0).toFixed(2)} · {selectedAppt.services.time_block_minutes} mins
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-
-                                    {/* Health Alerts */}
-                                    {selectedAppt.pets.allergies && (
-                                        <div className="appt-alert appt-alert-red">
-                                            <strong>⚠️ ALLERGIES:</strong> {selectedAppt.pets.allergies}
-                                        </div>
                                     )}
-                                    {selectedAppt.pets.medications && (
-                                        <div className="appt-alert appt-alert-blue">
-                                            <strong>💊 MEDICATIONS:</strong> {selectedAppt.pets.medications}
-                                        </div>
-                                    )}
-
-                                    {/* Vaccination */}
-                                    {selectedAppt.pets.vaccination_status && (
-                                        <div className="appt-detail-vax">
-                                            <span className={'appt-tag ' + (
-                                                selectedAppt.pets.vaccination_status === 'current' ? 'appt-tag-green' :
-                                                selectedAppt.pets.vaccination_status === 'expired' ? 'appt-tag-red' : 'appt-tag-yellow'
-                                            )}>
-                                                💉 {selectedAppt.pets.vaccination_status.replace('_', ' ').toUpperCase()}
-                                            </span>
-                                            {selectedAppt.pets.vaccination_expiry && (
-                                                <span className="appt-detail-vax-date">
-                                                    Exp: {selectedAppt.pets.vaccination_expiry}
-                                                    {new Date(selectedAppt.pets.vaccination_expiry) < new Date() && <span style={{ color: '#dc2626', fontWeight: 700 }}> — EXPIRED</span>}
-                                                </span>
+                                    {selectedAppt.pets && (
+                                        <div className="appt-detail-section">
+                                            <div className="appt-detail-section-title">🐕 Pet Profile</div>
+                                            <div className="appt-detail-pet">
+                                                <div className="appt-detail-pet-avatar" style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)' }}>
+                                                    {selectedAppt.pets.name ? selectedAppt.pets.name.charAt(0).toUpperCase() : '?'}
+                                                </div>
+                                                <div>
+                                                    <div className="appt-detail-pet-name">{selectedAppt.pets.name}</div>
+                                                    <div className="appt-detail-pet-info">
+                                                        {selectedAppt.pets.breed || 'Unknown breed'}
+                                                        {selectedAppt.pets.weight ? ' · ' + selectedAppt.pets.weight + ' lbs' : ''}
+                                                        {selectedAppt.pets.age ? ' · ' + selectedAppt.pets.age : ''}
+                                                        {selectedAppt.pets.sex ? ' · ' + selectedAppt.pets.sex : ''}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {selectedAppt.pets.allergies && (
+                                                <div className="appt-alert appt-alert-red">
+                                                    <strong>⚠️ ALLERGIES:</strong> {selectedAppt.pets.allergies}
+                                                </div>
+                                            )}
+                                            {selectedAppt.pets.medications && (
+                                                <div className="appt-alert appt-alert-blue">
+                                                    <strong>💊 MEDICATIONS:</strong> {selectedAppt.pets.medications}
+                                                </div>
                                             )}
                                         </div>
                                     )}
-                                </div>
+                                </>
                             )}
 
-                            {/* Grooming Notes */}
-                            {(selectedAppt.pets?.grooming_notes || (selectedAppt.groomingNotes && selectedAppt.groomingNotes.length > 0)) && (
+                            {/* Grooming Notes — historical (per-pet pinned notes are now shown inside each pet card) */}
+                            {selectedAppt.groomingNotes && selectedAppt.groomingNotes.length > 0 && (
                                 <div className="appt-detail-section">
-                                    <div className="appt-detail-section-title">✂️ Grooming Notes</div>
-                                    {selectedAppt.pets?.grooming_notes && (
-                                        <div className="appt-groom-note appt-groom-note-pinned">
-                                            <span className="appt-groom-note-badge">📌 Pet Profile</span>
-                                            {selectedAppt.pets.grooming_notes}
-                                        </div>
-                                    )}
-                                    {selectedAppt.groomingNotes && selectedAppt.groomingNotes.map(note => (
+                                    <div className="appt-detail-section-title">✂️ Past Grooming Notes</div>
+                                    {selectedAppt.groomingNotes.map(note => (
                                         <div key={note.id} className="appt-groom-note">
                                             <span className="appt-groom-note-badge">✂️ {new Date(note.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                                             {note.note}
@@ -1225,6 +1701,17 @@ export default function Calendar() {
                 </div>
             )}
 
+            {/* + Add Pet to existing appointment modal (multi-pet — for client adding 2nd dog later) */}
+            {showAddPetToApptModal && selectedAppt && (
+                <AddPetToBookingModal
+                    filteredPets={pets.filter(function (p) { return p.client_id === selectedAppt.client_id })}
+                    services={services}
+                    petsAlreadyAdded={(selectedAppt.appointment_pets || []).map(function (ap) { return { pet_id: ap.pet_id } })}
+                    onClose={function () { setShowAddPetToApptModal(false) }}
+                    onAdd={handleAddPetToExistingAppointment}
+                />
+            )}
+
             {/* Loading overlay for appointment detail */}
             {apptDetailLoading && (
                 <div className="modal-overlay">
@@ -1280,7 +1767,16 @@ export default function Calendar() {
 
             {/* Payment at Checkout Popup */}
             {showPaymentPopup && paymentAppt && (() => {
-                const servicePrice = parseFloat(paymentAppt.final_price || paymentAppt.quoted_price || 0)
+                // MULTI-PET: sum appointment_pets prices if present; otherwise use parent appt price (legacy)
+                var isMultiPet = paymentAppt.appointment_pets && paymentAppt.appointment_pets.length > 0
+                var servicePrice
+                if (isMultiPet) {
+                    servicePrice = paymentAppt.appointment_pets.reduce(function (sum, ap) {
+                        return sum + parseFloat(ap.quoted_price || 0)
+                    }, 0)
+                } else {
+                    servicePrice = parseFloat(paymentAppt.final_price || paymentAppt.quoted_price || 0)
+                }
                 const discount = parseFloat(discountAmount || 0)
                 const totalPaid = existingPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0)
                 const amountDue = Math.max(0, servicePrice - discount)
@@ -1289,6 +1785,17 @@ export default function Calendar() {
                 const thisTip = parseFloat(tipAmount || 0)
                 const thisTotal = thisPayment + thisTip
                 const isPaidInFull = balance < 0.01
+
+                // Pet name display: "Bella, Max" for multi-pet; single name for legacy
+                var petNameDisplay
+                if (isMultiPet) {
+                    petNameDisplay = paymentAppt.appointment_pets
+                        .map(function (ap) { return ap.pets && ap.pets.name })
+                        .filter(Boolean)
+                        .join(', ')
+                } else {
+                    petNameDisplay = (paymentAppt.pets && paymentAppt.pets.name) || 'Unknown pet'
+                }
 
                 return (
                     <div className="modal-overlay" onClick={() => !recordingPayment && setShowPaymentPopup(false)} style={{ zIndex: 2000 }}>
@@ -1301,17 +1808,40 @@ export default function Calendar() {
                             <div className="payment-popup-body">
                                 {/* Who */}
                                 <div className="payment-popup-who">
-                                    <span className="payment-popup-pet">{paymentAppt.pets?.name || 'Unknown pet'}</span>
+                                    <span className="payment-popup-pet">{petNameDisplay}</span>
                                     <span className="payment-popup-dot">·</span>
                                     <span className="payment-popup-client">{paymentAppt.clients?.first_name} {paymentAppt.clients?.last_name}</span>
                                 </div>
 
                                 {/* Receipt Breakdown */}
                                 <div className="payment-receipt">
-                                    <div className="payment-receipt-row">
-                                        <span>Service</span>
-                                        <span>${servicePrice.toFixed(2)}</span>
-                                    </div>
+                                    {isMultiPet ? (
+                                        <>
+                                            {/* Per-pet line items */}
+                                            {paymentAppt.appointment_pets.map(function (ap) {
+                                                var petName = (ap.pets && ap.pets.name) || 'Pet'
+                                                var svcName = ''
+                                                // Try to resolve service name from services list if loaded
+                                                var svc = services && services.find ? services.find(function (s) { return s.id === ap.service_id }) : null
+                                                if (svc) svcName = svc.service_name
+                                                return (
+                                                    <div key={ap.id} className="payment-receipt-row">
+                                                        <span>{petName}{svcName ? ' · ' + svcName : ''}</span>
+                                                        <span>${parseFloat(ap.quoted_price || 0).toFixed(2)}</span>
+                                                    </div>
+                                                )
+                                            })}
+                                            <div className="payment-receipt-row payment-receipt-sub" style={{ fontWeight: 600, borderTop: '1px solid #e5e7eb', paddingTop: '6px', marginTop: '4px' }}>
+                                                <span>Subtotal</span>
+                                                <span>${servicePrice.toFixed(2)}</span>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className="payment-receipt-row">
+                                            <span>Service</span>
+                                            <span>${servicePrice.toFixed(2)}</span>
+                                        </div>
+                                    )}
 
                                     {/* Discount field — editable */}
                                     <div className="payment-receipt-row payment-receipt-discount">
@@ -1514,7 +2044,7 @@ export default function Calendar() {
     )
 }
 
-function TimeGridView({ view, currentDate, appointments, staff, onSlotClick, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut }) {
+function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, onSlotClick, onApptClick, onBlockClick, onCheckIn, onCheckOut, checkingIn, checkingOut }) {
     const dates = view === 'day' ? [currentDate] : getWeekDates(currentDate)
     const today = new Date()
     const isDayView = view === 'day'
@@ -1592,12 +2122,23 @@ function TimeGridView({ view, currentDate, appointments, staff, onSlotClick, onA
                                     // Match appointment to this staff column (null = Unassigned)
                                     return (a.staff_id || null) === (col.id || null)
                                 })
+                                // Task #38 — gather blocked_times for this slot+column
+                                const slotBlocks = (blockedTimes || []).filter((b) => {
+                                    if (b.block_date !== dateStr) return false
+                                    const startH = parseInt(b.start_time.split(':')[0])
+                                    if (startH !== hour) return false
+                                    return (b.staff_id || null) === (col.id || null)
+                                })
                                 return (
                                     <div
                                         key={col.id || 'unassigned'}
                                         className="time-cell"
+                                        style={{ position: 'relative' }}
                                         onClick={() => onSlotClick(currentDate, hour, col.id)}
-                                    >{renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut)}</div>
+                                    >
+                                        {renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut)}
+                                        {renderBlockedTimes(slotBlocks, onBlockClick)}
+                                    </div>
                                 )
                             })
                         ) : (
@@ -1609,10 +2150,17 @@ function TimeGridView({ view, currentDate, appointments, staff, onSlotClick, onA
                                 const startH = parseInt(a.start_time.split(':')[0])
                                 return startH === hour
                             })
+                            // Task #38 — gather blocked_times for this date+hour
+                            const slotBlocks = (blockedTimes || []).filter((b) => {
+                                if (b.block_date !== dateStr) return false
+                                const startH = parseInt(b.start_time.split(':')[0])
+                                return startH === hour
+                            })
                             return (
                                 <div
                                     key={i}
                                     className="time-cell"
+                                    style={{ position: 'relative' }}
                                     onClick={() => onSlotClick(date, hour)}
                                 >
                                     {slotAppts.map((appt) => {
@@ -1623,6 +2171,25 @@ function TimeGridView({ view, currentDate, appointments, staff, onSlotClick, onA
                                         const groomerName = appt.staff_members ? appt.staff_members.first_name : 'Unassigned'
                                         const isRecurring = !!appt.recurring_series_id
                                         const hasConflict = !!appt.recurring_conflict
+                                        // Status-based styling (Task: status colors/badges)
+                                        const apptStatus = appt.status || 'confirmed'
+                                        const isPending = apptStatus === 'pending'
+                                        const isCancelled = apptStatus === 'cancelled'
+                                        // Phase 6 — booking-rule flag pending (AI held it for groomer approval)
+                                        const isFlaggedPending = appt.flag_status === 'pending'
+                                        const blockBg = isPending ? '#fbbf24' : (isCancelled ? '#d1d5db' : groomerColor)
+                                        const blockBorder = isPending ? '#d97706' : (isCancelled ? '#9ca3af' : groomerColor)
+                                        // Badge label + colors (only shown pre-check-in, except DONE handled below)
+                                        let statusBadge = null
+                                        if (!appt.checked_in_at && !appt.checked_out_at) {
+                                            if (isPending || isFlaggedPending) statusBadge = { label: '⏳ PENDING', bg: '#78350f', fg: '#fef3c7' }
+                                            else if (isCancelled) statusBadge = { label: '❌ CANCELLED', bg: '#991b1b', fg: '#fee2e2' }
+                                            else if (apptStatus === 'confirmed') statusBadge = { label: '✓ CONFIRMED', bg: '#065f46', fg: '#d1fae5' }
+                                            else if (apptStatus === 'unconfirmed') statusBadge = { label: '❓ UNCONFIRMED', bg: '#92400e', fg: '#fef3c7' }
+                                        }
+                                        // Multi-hour tiles use absolute positioning so they capture clicks across the full
+                                        // visual height (otherwise the time-cells below capture clicks on the overflow area)
+                                        const tallTileStyle = span > 1 ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 } : {}
                                         return (
                                             <div
                                                 key={appt.id}
@@ -1631,22 +2198,46 @@ function TimeGridView({ view, currentDate, appointments, staff, onSlotClick, onA
                                                     (!appt.staff_members ? ' appt-unassigned' : '') +
                                                     (appt.checked_in_at && !appt.checked_out_at ? ' appt-checked-in' : '') +
                                                     (appt.checked_out_at ? ' appt-checked-out' : '') +
-                                                    (hasConflict ? ' appt-recurring-conflict' : '')
+                                                    (hasConflict ? ' appt-recurring-conflict' : '') +
+                                                    (isCancelled ? ' appt-cancelled' : '') +
+                                                    (isPending ? ' appt-pending' : '')
                                                 }
                                                 style={{
-                                                    backgroundColor: groomerColor,
-                                                    borderLeft: '4px solid ' + groomerColor,
+                                                    backgroundColor: blockBg,
+                                                    borderLeft: '4px solid ' + blockBorder,
                                                     height: `${span * 100}%`,
                                                     minHeight: '48px',
                                                     cursor: 'pointer',
+                                                    opacity: isCancelled ? 0.6 : 1,
+                                                    textDecoration: isCancelled ? 'line-through' : 'none',
+                                                    ...tallTileStyle,
                                                 }}
                                                 onClick={(e) => onApptClick(appt, e)}
-                                                title={'Groomer: ' + groomerName + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '')}
+                                                title={'Groomer: ' + groomerName + ' · Status: ' + apptStatus + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '')}
                                             >
                                                 <span className="appt-time">{formatTime(appt.start_time)}</span>
-                                                <span className="appt-pet">{appt.pets?.name}</span>
+                                                <span className="appt-pet">{(appt.appointment_pets && appt.appointment_pets.length > 0) ? appt.appointment_pets.map(function(ap){ return ap.pets?.name }).filter(Boolean).join(', ') : appt.pets?.name}</span>
                                                 <span className="appt-client">{appt.clients?.first_name} {appt.clients?.last_name}</span>
                                                 <span className="appt-groomer-tag">{groomerName}</span>
+                                                {statusBadge && (
+                                                    <span
+                                                        style={{
+                                                            display: 'inline-block',
+                                                            marginTop: '4px',
+                                                            padding: '2px 8px',
+                                                            fontSize: '10px',
+                                                            fontWeight: 700,
+                                                            borderRadius: '4px',
+                                                            background: statusBadge.bg,
+                                                            color: statusBadge.fg,
+                                                            letterSpacing: '0.3px',
+                                                            alignSelf: 'flex-start',
+                                                        }}
+                                                    >
+                                                        {statusBadge.label}
+                                                    </span>
+                                                )}
+                                                {appt.appointment_pets && appt.appointment_pets.length > 1 && <span className="appt-multi-pet-badge" title={appt.appointment_pets.length + ' pets'}>×{appt.appointment_pets.length}</span>}
                                                 {isRecurring && <span className="appt-recurring-icon" title="Recurring">🔄</span>}
                                                 {hasConflict && <span className="appt-conflict-icon" title="Conflict">⚠️</span>}
                                                 {appt.has_flags && <span className="appt-flag">⚠️</span>}
@@ -1677,6 +2268,7 @@ function TimeGridView({ view, currentDate, appointments, staff, onSlotClick, onA
                                             </div>
                                         )
                                     })}
+                                    {renderBlockedTimes(slotBlocks, onBlockClick)}
                                 </div>
                             )
                         })
@@ -1688,6 +2280,40 @@ function TimeGridView({ view, currentDate, appointments, staff, onSlotClick, onA
     )
 }
 
+// Task #38 — render gray "BLOCKED" tiles for staff lunch/errand time
+function renderBlockedTimes(slotBlocks, onBlockClick) {
+    return (slotBlocks || []).map((blk) => {
+        const startH = parseInt(blk.start_time.split(':')[0])
+        const endH = parseInt(blk.end_time.split(':')[0])
+        const span = Math.max(1, endH - startH)
+        const staffName = blk.staff_members ? blk.staff_members.first_name : 'Blocked'
+        const tallTileStyle = span > 1 ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 4 } : {}
+        return (
+            <div
+                key={blk.id}
+                className="appt-block appt-blocked"
+                style={{
+                    backgroundColor: '#9ca3af',
+                    borderLeft: '4px solid #6b7280',
+                    height: `${span * 100}%`,
+                    minHeight: '48px',
+                    cursor: 'pointer',
+                    color: '#fff',
+                    backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 8px, rgba(255,255,255,0.15) 8px, rgba(255,255,255,0.15) 16px)',
+                    ...tallTileStyle,
+                }}
+                onClick={(e) => { e.stopPropagation(); if (onBlockClick) onBlockClick(blk) }}
+                title={'BLOCKED — ' + staffName + (blk.note ? ' (' + blk.note + ')' : '') + ' — click to edit'}
+            >
+                <span className="appt-time">{formatTime(blk.start_time)}</span>
+                <span className="appt-pet">🚫 BLOCKED</span>
+                {blk.note && <span className="appt-client">{blk.note}</span>}
+                <span className="appt-groomer-tag">{staffName}</span>
+            </div>
+        )
+    })
+}
+
 function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut) {
     return slotAppts.map((appt) => {
         const startH = parseInt(appt.start_time.split(':')[0])
@@ -1697,6 +2323,11 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
         const groomerName = appt.staff_members ? appt.staff_members.first_name : 'Unassigned'
         const isRecurring = !!appt.recurring_series_id
         const hasConflict = !!appt.recurring_conflict
+        // Phase 6 — booking-rule flag pending (AI held it for groomer approval)
+        const isFlaggedPending = appt.flag_status === 'pending'
+        // Multi-hour tiles use absolute positioning so they capture clicks across the full
+        // visual height (otherwise the time-cells below capture clicks on the overflow area)
+        const tallTileStyle = span > 1 ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 } : {}
         return (
             <div
                 key={appt.id}
@@ -1713,14 +2344,34 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                     height: `${span * 100}%`,
                     minHeight: '48px',
                     cursor: 'pointer',
+                    ...tallTileStyle,
                 }}
                 onClick={(e) => onApptClick(appt, e)}
-                title={'Groomer: ' + groomerName + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '')}
+                title={'Groomer: ' + groomerName + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '') + (isFlaggedPending ? ' · ⏳ Needs approval' : '')}
             >
                 <span className="appt-time">{formatTime(appt.start_time)}</span>
-                <span className="appt-pet">{appt.pets?.name}</span>
+                <span className="appt-pet">{(appt.appointment_pets && appt.appointment_pets.length > 0) ? appt.appointment_pets.map(function(ap){ return ap.pets?.name }).filter(Boolean).join(', ') : appt.pets?.name}</span>
                 <span className="appt-client">{appt.clients?.first_name} {appt.clients?.last_name}</span>
                 <span className="appt-groomer-tag">{groomerName}</span>
+                {isFlaggedPending && !appt.checked_in_at && !appt.checked_out_at && (
+                    <span
+                        style={{
+                            display: 'inline-block',
+                            marginTop: '4px',
+                            padding: '2px 8px',
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            borderRadius: '4px',
+                            background: '#78350f',
+                            color: '#fef3c7',
+                            letterSpacing: '0.3px',
+                            alignSelf: 'flex-start',
+                        }}
+                    >
+                        ⏳ PENDING
+                    </span>
+                )}
+                {appt.appointment_pets && appt.appointment_pets.length > 1 && <span className="appt-multi-pet-badge" title={appt.appointment_pets.length + ' pets'}>×{appt.appointment_pets.length}</span>}
                 {isRecurring && <span className="appt-recurring-icon" title="Recurring">🔄</span>}
                 {hasConflict && <span className="appt-conflict-icon" title="Conflict">⚠️</span>}
                 {appt.has_flags && <span className="appt-flag">⚠️</span>}
@@ -1863,18 +2514,23 @@ function MiniCalendar({ currentDate, appointments, onDayClick }) {
 }
 
 function AddAppointmentModal({ date, time, clients, pets, services, staffMembers, onClose, onSaved, preFillClientId, preFillPetId, preFillServiceId, preFillStaffId }) {
+    // Multi-pet booking: pets are now stored in a list, each with their own service + price
     const [form, setForm] = useState({
         client_id: preFillClientId || '',
-        pet_id: preFillPetId || '',
-        service_id: preFillServiceId || '',
         staff_id: preFillStaffId || '',
         appointment_date: date || '',
         start_time: time || '09:00',
         end_time: '',
-        quoted_price: '',
         service_notes: '',
-        status: 'confirmed',
+        status: 'unconfirmed',
     })
+    // Multi-pet: array of { pet_id, pet_name, service_id, service_name, quoted_price, time_block_minutes }
+    const [petsInBooking, setPetsInBooking] = useState([])
+    const [showAddPetModal, setShowAddPetModal] = useState(false)
+
+    // Client search (replaces the old dropdown)
+    const [clientSearch, setClientSearch] = useState('')
+    const [showClientResults, setShowClientResults] = useState(false)
     // Task #19 — Recurring series state
     const [isRecurring, setIsRecurring] = useState(false)
     const [intervalWeeks, setIntervalWeeks] = useState(6)
@@ -1894,18 +2550,45 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
         }
     }, [form.client_id, pets])
 
+    // When client changes, clear pets list (they belonged to old client)
     useEffect(() => {
-        if (form.service_id) {
-            const service = services.find((s) => s.id === form.service_id)
-            if (service) {
-                setForm((prev) => ({
-                    ...prev,
-                    quoted_price: service.price,
-                    end_time: calculateEndTime(prev.start_time, service.time_block_minutes),
-                }))
+        setPetsInBooking([])
+    }, [form.client_id])
+
+    // Pre-fill first pet if preFillPetId provided (Book Again / Quick Book flows)
+    useEffect(() => {
+        if (preFillPetId && pets.length > 0 && services.length > 0 && petsInBooking.length === 0) {
+            var pet = pets.find(function (p) { return p.id === preFillPetId })
+            var service = preFillServiceId ? services.find(function (s) { return s.id === preFillServiceId }) : null
+            if (pet) {
+                setPetsInBooking([{
+                    pet_id: pet.id,
+                    pet_name: pet.name,
+                    service_id: service ? service.id : '',
+                    service_name: service ? service.service_name : '',
+                    quoted_price: service ? service.price : '',
+                    time_block_minutes: service ? service.time_block_minutes : 60,
+                }])
             }
         }
-    }, [form.service_id, form.start_time, services])
+    }, [preFillPetId, preFillServiceId, pets, services])
+
+    // Auto-calc end_time based on total time of all pets combined
+    useEffect(() => {
+        if (petsInBooking.length > 0 && form.start_time) {
+            var totalMinutes = petsInBooking.reduce(function (sum, p) {
+                return sum + (p.time_block_minutes || 60)
+            }, 0)
+            setForm(function (prev) {
+                return { ...prev, end_time: calculateEndTime(prev.start_time, totalMinutes) }
+            })
+        }
+    }, [petsInBooking, form.start_time])
+
+    // Total price = sum of all pets' quoted prices
+    var totalPrice = petsInBooking.reduce(function (sum, p) {
+        return sum + (parseFloat(p.quoted_price) || 0)
+    }, 0)
 
     const calculateEndTime = (startTime, minutes) => {
         if (!startTime || !minutes) return ''
@@ -1927,26 +2610,41 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
         setForm({ ...form, [name]: value })
     }
 
-    // Run PetPro AI safety check
+    // Run PetPro AI safety check (checks first pet for now; multi-pet safety check is a future enhancement)
     const runSafetyCheck = async () => {
-        if (!form.pet_id) {
-            setError('Select a pet first so Claude can check their profile.')
+        if (petsInBooking.length === 0) {
+            setError('Add at least one pet first so Claude can check their profile.')
             return
         }
         setChecking(true)
         setError(null)
         setSafetyCheck(null)
 
+        var firstPet = petsInBooking[0]
         const result = await checkBookingSafety({
-            pet_id: form.pet_id,
-            service_id: form.service_id || null,
+            pet_id: firstPet.pet_id,
+            service_id: firstPet.service_id || null,
             appointment_date: form.appointment_date,
             start_time: form.start_time,
             end_time: form.end_time || calculateEndTime(form.start_time, 60),
+            staff_id: form.staff_id || null, // Task #38 — needed to match per-staff blocked_times
         })
 
         setSafetyCheck(result)
         setChecking(false)
+    }
+
+    // Remove a pet from the booking list
+    var removePetFromBooking = function (index) {
+        setPetsInBooking(function (prev) {
+            return prev.filter(function (_, i) { return i !== index })
+        })
+    }
+
+    // Add a pet to the booking (called from AddPetToBookingModal)
+    var addPetToBooking = function (petData) {
+        setPetsInBooking(function (prev) { return [...prev, petData] })
+        setShowAddPetModal(false)
     }
 
     const handleSubmit = async (e) => {
@@ -1954,7 +2652,17 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
         setSaving(true)
         setError(null)
 
+        // Multi-pet validation: must have at least one pet
+        if (petsInBooking.length === 0) {
+            setError('Add at least one pet to the booking.')
+            setSaving(false)
+            return
+        }
+
         const { data: { user } } = await supabase.auth.getUser()
+
+        // First pet is used for backward-compat fields on appointments table
+        var firstPet = petsInBooking[0]
 
         // Build flag data from safety check
         const hasFlags = safetyCheck && safetyCheck.flags && safetyCheck.flags.length > 0
@@ -1965,17 +2673,79 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
 
         const endTime = form.end_time || calculateEndTime(form.start_time, 60)
 
+        // ═══════════ Task #38 — Block off time conflict check ═══════════
+        // Refuse to save if the requested slot overlaps a blocked_times row
+        // for the same staff member (or for "any staff" / null) on this date.
+        // Time overlap rule: appt_start < block_end AND appt_end > block_start
+        try {
+            var staffFilter = form.staff_id || null
+            var blockQuery = supabase
+                .from('blocked_times')
+                .select('id, start_time, end_time, note, staff_id, staff_members(first_name, last_name)')
+                .eq('groomer_id', user.id)
+                .eq('block_date', form.appointment_date)
+
+            // Match blocks for THIS staff member, OR shop-wide blocks (staff_id is null)
+            if (staffFilter) {
+                blockQuery = blockQuery.or('staff_id.eq.' + staffFilter + ',staff_id.is.null')
+            } else {
+                blockQuery = blockQuery.is('staff_id', null)
+            }
+
+            var { data: dayBlocks, error: blockErr } = await blockQuery
+            if (blockErr) throw new Error('Could not check blocked times: ' + blockErr.message)
+
+            var conflict = (dayBlocks || []).find(function (b) {
+                // overlap if appt starts before block ends AND appt ends after block starts
+                return form.start_time < b.end_time && endTime > b.start_time
+            })
+
+            if (conflict) {
+                var who = conflict.staff_members
+                    ? (conflict.staff_members.first_name + (conflict.staff_members.last_name ? ' ' + conflict.staff_members.last_name : ''))
+                    : 'this time'
+                var noteBit = conflict.note ? ' (' + conflict.note + ')' : ''
+                setError(
+                    "🚫 That time isn't available — " + who + ' has it blocked off' + noteBit +
+                    ' from ' + formatTime(conflict.start_time) + ' to ' + formatTime(conflict.end_time) +
+                    '. Please pick a different time.'
+                )
+                setSaving(false)
+                return
+            }
+        } catch (err) {
+            setError(err.message || 'Could not verify availability — please try again.')
+            setSaving(false)
+            return
+        }
+        // ═══════════ End block conflict check ═══════════
+
+        // Helper: insert one row per pet into appointment_pets for a given appointment_id
+        async function insertAppointmentPets(appointmentId) {
+            var rows = petsInBooking.map(function (p) {
+                return {
+                    appointment_id: appointmentId,
+                    pet_id: p.pet_id,
+                    service_id: p.service_id || null,
+                    quoted_price: p.quoted_price ? parseFloat(p.quoted_price) : null,
+                    groomer_id: user.id,
+                }
+            })
+            var { error: petsErr } = await supabase.from('appointment_pets').insert(rows)
+            if (petsErr) throw new Error('Failed to save pets on appointment: ' + petsErr.message)
+        }
+
         // ═══════════ Task #19 — Recurring series path ═══════════
         if (isRecurring) {
             try {
-                // 1. Create the recurring_series row
+                // 1. Create the recurring_series row (uses first pet for backward compat)
                 const { data: seriesRow, error: seriesErr } = await supabase
                     .from('recurring_series')
                     .insert({
                         groomer_id: user.id,
                         client_id: form.client_id,
-                        pet_id: form.pet_id,
-                        service_id: form.service_id || null,
+                        pet_id: firstPet.pet_id,
+                        service_id: firstPet.service_id || null,
                         staff_id: form.staff_id || null,
                         interval_weeks: intervalWeeks,
                         total_count: totalCount,
@@ -2027,13 +2797,13 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                     return {
                         groomer_id: user.id,
                         client_id: form.client_id,
-                        pet_id: form.pet_id,
-                        service_id: form.service_id || null,
+                        pet_id: firstPet.pet_id,
+                        service_id: firstPet.service_id || null,
                         staff_id: form.staff_id || null,
                         appointment_date: g.date_str,
                         start_time: form.start_time,
                         end_time: endTime,
-                        quoted_price: form.quoted_price ? parseFloat(form.quoted_price) : null,
+                        quoted_price: totalPrice ? totalPrice : null,
                         service_notes: form.service_notes || null,
                         status: form.status,
                         has_flags: hasFlags || false,
@@ -2045,14 +2815,33 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                     }
                 })
 
-                // 5. Bulk insert all appointments
-                const { error: bulkErr } = await supabase
+                // 5. Bulk insert all appointments (select back so we have IDs for appointment_pets)
+                const { data: insertedAppts, error: bulkErr } = await supabase
                     .from('appointments')
                     .insert(rowsToInsert)
+                    .select('id')
 
                 if (bulkErr) throw new Error('Failed to create appointments: ' + bulkErr.message)
 
-                // 6. Build summary for user
+                // 6. For each inserted appointment, insert appointment_pets rows
+                if (insertedAppts && insertedAppts.length > 0) {
+                    var allPetRows = []
+                    insertedAppts.forEach(function (appt) {
+                        petsInBooking.forEach(function (p) {
+                            allPetRows.push({
+                                appointment_id: appt.id,
+                                pet_id: p.pet_id,
+                                service_id: p.service_id || null,
+                                quoted_price: p.quoted_price ? parseFloat(p.quoted_price) : null,
+                                groomer_id: user.id,
+                            })
+                        })
+                    })
+                    var { error: petsErr } = await supabase.from('appointment_pets').insert(allPetRows)
+                    if (petsErr) throw new Error('Failed to save pets on recurring appointments: ' + petsErr.message)
+                }
+
+                // 7. Build summary for user
                 const conflicts = rowsToInsert.filter(r => r.recurring_conflict)
                 setRecurringSummary({
                     created: rowsToInsert.length,
@@ -2074,13 +2863,13 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
             .insert({
                 groomer_id: user.id,
                 client_id: form.client_id,
-                pet_id: form.pet_id,
-                service_id: form.service_id || null,
+                pet_id: firstPet.pet_id,
+                service_id: firstPet.service_id || null,
                 staff_id: form.staff_id || null,
                 appointment_date: form.appointment_date,
                 start_time: form.start_time,
                 end_time: endTime,
-                quoted_price: form.quoted_price ? parseFloat(form.quoted_price) : null,
+                quoted_price: totalPrice ? totalPrice : null,
                 service_notes: form.service_notes || null,
                 status: form.status,
                 has_flags: hasFlags || false,
@@ -2096,24 +2885,36 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
             return
         }
 
-        // If notes were entered at booking, also save to notes table for paper trail
+        // Insert pets into appointment_pets
+        try {
+            await insertAppointmentPets(newAppt.id)
+        } catch (petsErr) {
+            setError(petsErr.message)
+            setSaving(false)
+            return
+        }
+
+        // If notes were entered at booking, also save to notes table for paper trail (one per pet)
         if (form.service_notes && form.service_notes.trim() && newAppt) {
-            await supabase.from('notes').insert({
-                pet_id: form.pet_id,
-                client_id: form.client_id,
-                appointment_id: newAppt.id,
-                groomer_id: user.id,
-                note_type: 'booking',
-                content: form.service_notes.trim()
+            var noteRows = petsInBooking.map(function (p) {
+                return {
+                    pet_id: p.pet_id,
+                    client_id: form.client_id,
+                    appointment_id: newAppt.id,
+                    groomer_id: user.id,
+                    note_type: 'booking',
+                    content: form.service_notes.trim()
+                }
             })
+            await supabase.from('notes').insert(noteRows)
         }
 
         // Send email notification if booking has pending flags
         if (hasFlags && flagStatus === 'pending') {
             try {
-                const selectedPet = filteredPets.find(p => p.id === form.pet_id)
+                const selectedPet = filteredPets.find(p => p.id === firstPet.pet_id)
                 const selectedClient = clients.find(c => c.id === form.client_id)
-                const selectedService = services.find(s => s.id === form.service_id)
+                const selectedService = services.find(s => s.id === firstPet.service_id)
 
                 await supabase.functions.invoke('send-flag-email', {
                     body: {
@@ -2134,7 +2935,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
 
             // Send SMS notification too
             try {
-                const selectedPetSms = filteredPets.find(p => p.id === form.pet_id)
+                const selectedPetSms = filteredPets.find(p => p.id === firstPet.pet_id)
                 const selectedClientSms = clients.find(c => c.id === form.client_id)
 
                 await supabase.functions.invoke('send-flag-sms', {
@@ -2207,24 +3008,191 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                     <button className="modal-close" onClick={onClose}>×</button>
                 </div>
                 <form onSubmit={handleSubmit}>
-                    <div className="form-group">
+                    <div className="form-group" style={{ position: 'relative' }}>
                         <label>Client *</label>
-                        <select name="client_id" value={form.client_id} onChange={handleChange} required>
-                            <option value="">Select client...</option>
-                            {clients.map((c) => (
-                                <option key={c.id} value={c.id}>{c.first_name} {c.last_name}</option>
-                            ))}
-                        </select>
+                        {(function () {
+                            var selectedClient = clients.find(function (c) { return c.id === form.client_id })
+                            if (selectedClient) {
+                                return (
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: '8px',
+                                        padding: '10px 12px', background: '#f0f9ff',
+                                        border: '1px solid #90cdf4', borderRadius: '6px',
+                                    }}>
+                                        <span style={{ flex: 1, fontWeight: 600, color: '#1e3a8a' }}>
+                                            👤 {selectedClient.first_name} {selectedClient.last_name}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={function () {
+                                                setForm(function (f) { return { ...f, client_id: '' } })
+                                                setPetsInBooking([])
+                                                setClientSearch('')
+                                            }}
+                                            style={{
+                                                background: '#fff', border: '1px solid #90cdf4',
+                                                borderRadius: '4px', padding: '4px 12px',
+                                                cursor: 'pointer', fontSize: '13px', color: '#1e3a8a',
+                                            }}
+                                        >
+                                            Change
+                                        </button>
+                                    </div>
+                                )
+                            }
+
+                            var q = clientSearch.trim().toLowerCase()
+                            var matches = q
+                                ? clients.filter(function (c) {
+                                    var full = ((c.first_name || '') + ' ' + (c.last_name || '')).toLowerCase()
+                                    return full.indexOf(q) !== -1
+                                }).slice(0, 10)
+                                : []
+
+                            return (
+                                <>
+                                    <input
+                                        type="text"
+                                        placeholder="🔍 Type client name to search..."
+                                        value={clientSearch}
+                                        onChange={function (e) {
+                                            setClientSearch(e.target.value)
+                                            setShowClientResults(true)
+                                        }}
+                                        onFocus={function () { setShowClientResults(true) }}
+                                        onBlur={function () {
+                                            // Small delay so click on result still fires
+                                            setTimeout(function () { setShowClientResults(false) }, 150)
+                                        }}
+                                        autoComplete="off"
+                                        style={{ width: '100%' }}
+                                    />
+                                    {showClientResults && q && matches.length > 0 && (
+                                        <div style={{
+                                            position: 'absolute', top: '100%', left: 0, right: 0,
+                                            background: '#fff', border: '1px solid #dee2e6',
+                                            borderRadius: '6px', boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+                                            maxHeight: '260px', overflowY: 'auto', zIndex: 100,
+                                            marginTop: '4px',
+                                        }}>
+                                            {matches.map(function (c) {
+                                                return (
+                                                    <div
+                                                        key={c.id}
+                                                        onMouseDown={function () {
+                                                            setForm(function (f) { return { ...f, client_id: c.id } })
+                                                            setPetsInBooking([])
+                                                            setClientSearch('')
+                                                            setShowClientResults(false)
+                                                        }}
+                                                        style={{
+                                                            padding: '10px 14px', cursor: 'pointer',
+                                                            borderBottom: '1px solid #f1f3f5', fontSize: '14px',
+                                                        }}
+                                                        onMouseEnter={function (e) { e.currentTarget.style.background = '#f8f9fa' }}
+                                                        onMouseLeave={function (e) { e.currentTarget.style.background = '#fff' }}
+                                                    >
+                                                        {c.first_name} {c.last_name}
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
+                                    {showClientResults && q && matches.length === 0 && (
+                                        <div style={{
+                                            position: 'absolute', top: '100%', left: 0, right: 0,
+                                            background: '#fff', border: '1px solid #dee2e6',
+                                            borderRadius: '6px', padding: '10px 14px',
+                                            color: '#6c757d', fontSize: '13px', zIndex: 100,
+                                            marginTop: '4px',
+                                        }}>
+                                            No clients match "{clientSearch}"
+                                        </div>
+                                    )}
+                                </>
+                            )
+                        })()}
                     </div>
 
                     <div className="form-group">
-                        <label>Pet *</label>
-                        <select name="pet_id" value={form.pet_id} onChange={handleChange} required disabled={!form.client_id}>
-                            <option value="">{form.client_id ? 'Select pet...' : 'Select client first'}</option>
-                            {filteredPets.map((p) => (
-                                <option key={p.id} value={p.id}>{p.name} ({p.breed})</option>
-                            ))}
-                        </select>
+                        <label>Pets * {petsInBooking.length > 0 && <span style={{ color: '#666', fontWeight: 'normal' }}>({petsInBooking.length} added)</span>}</label>
+                        {petsInBooking.length === 0 && (
+                            <p style={{ margin: '4px 0 8px', fontSize: '13px', color: '#888' }}>
+                                {form.client_id ? 'Click + Add Pet to add the first pet' : 'Select a client first'}
+                            </p>
+                        )}
+                        {petsInBooking.length > 0 && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' }}>
+                                {petsInBooking.map(function (p, i) {
+                                    return (
+                                        <div key={i} style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            padding: '10px 12px',
+                                            background: '#f6f6f8',
+                                            borderRadius: '8px',
+                                            border: '1px solid #e5e5ea',
+                                        }}>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{ fontWeight: 600, fontSize: '14px' }}>{p.pet_name}</div>
+                                                <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
+                                                    {p.service_name || 'No service'} · ${parseFloat(p.quoted_price || 0).toFixed(2)} · {p.time_block_minutes || 60} min
+                                                </div>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={function () { removePetFromBooking(i) }}
+                                                style={{
+                                                    background: 'transparent',
+                                                    border: 'none',
+                                                    color: '#c0392b',
+                                                    cursor: 'pointer',
+                                                    fontSize: '18px',
+                                                    padding: '0 4px',
+                                                }}
+                                                title="Remove pet"
+                                            >
+                                                ×
+                                            </button>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
+                        <button
+                            type="button"
+                            onClick={function () { setShowAddPetModal(true) }}
+                            disabled={!form.client_id}
+                            style={{
+                                padding: '10px 14px',
+                                background: form.client_id ? '#0057ff' : '#ccc',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '8px',
+                                fontWeight: 600,
+                                fontSize: '14px',
+                                cursor: form.client_id ? 'pointer' : 'not-allowed',
+                                width: '100%',
+                            }}
+                        >
+                            + Add Pet
+                        </button>
+                        {petsInBooking.length > 0 && (
+                            <div style={{
+                                marginTop: '8px',
+                                padding: '10px 12px',
+                                background: '#eefaf0',
+                                borderRadius: '8px',
+                                fontWeight: 600,
+                                fontSize: '14px',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                            }}>
+                                <span>Total:</span>
+                                <span>${totalPrice.toFixed(2)}</span>
+                            </div>
+                        )}
                     </div>
 
                     <div className="form-group">
@@ -2237,16 +3205,6 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                         </select>
                     </div>
 
-                    <div className="form-group">
-                        <label>Service</label>
-                        <select name="service_id" value={form.service_id} onChange={handleChange}>
-                            <option value="">Select service...</option>
-                            {services.map((s) => (
-                                <option key={s.id} value={s.id}>{s.service_name} - ${s.price}</option>
-                            ))}
-                        </select>
-                    </div>
-
                     <div className="form-row">
                         <div className="form-group">
                             <label>Date *</label>
@@ -2255,6 +3213,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                         <div className="form-group">
                             <label>Status</label>
                             <select name="status" value={form.status} onChange={handleChange}>
+                                <option value="unconfirmed">Unconfirmed</option>
                                 <option value="confirmed">Confirmed</option>
                                 <option value="pending">Pending</option>
                             </select>
@@ -2270,11 +3229,6 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                             <label>End Time</label>
                             <input type="time" name="end_time" value={form.end_time} onChange={handleChange} />
                         </div>
-                    </div>
-
-                    <div className="form-group">
-                        <label>Quoted Price ($)</label>
-                        <input type="number" name="quoted_price" value={form.quoted_price} onChange={handleChange} step="0.01" />
                     </div>
 
                     <div className="form-group">
@@ -2329,7 +3283,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                             type="button"
                             className="btn-claude"
                             onClick={runSafetyCheck}
-                            disabled={checking || !form.pet_id}
+                            disabled={checking || petsInBooking.length === 0}
                         >
                             {checking ? 'PetPro AI is checking...' : 'Check with PetPro AI'}
                         </button>
@@ -2358,20 +3312,138 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
 
                     <div className="form-actions">
                         <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-                        {safetyCheck && !safetyCheck.approved && (
+                        {/* Task #38 — "Book Anyway (Override)" hidden for blocked_time conflicts (hard reject) */}
+                        {safetyCheck && !safetyCheck.approved && !safetyCheck.blocked_time && (
                             <button type="submit" className="btn-warning" disabled={saving}>
                                 {saving ? 'Booking...' : 'Book Anyway (Override)'}
                             </button>
                         )}
-                        <button type="submit" className="btn-primary" disabled={saving}>
+                        <button
+                            type="submit"
+                            className="btn-primary"
+                            disabled={saving || petsInBooking.length === 0 || (safetyCheck && safetyCheck.blocked_time)}
+                            title={safetyCheck && safetyCheck.blocked_time ? 'This time is blocked off — remove the block first' : ''}
+                        >
                             {saving
                                 ? (isRecurring ? `Booking ${totalCount} appointments...` : 'Booking...')
-                                : isRecurring
-                                    ? `🔄 Book ${totalCount} Appointments`
-                                    : safetyCheck && safetyCheck.approved ? 'Book Appointment \u2705' : 'Book Appointment'}
+                                : safetyCheck && safetyCheck.blocked_time
+                                    ? '🚫 Remove Block to Book'
+                                    : isRecurring
+                                        ? `🔄 Book ${totalCount} Appointments`
+                                        : safetyCheck && safetyCheck.approved ? 'Book Appointment \u2705' : 'Book Appointment'}
                         </button>
                     </div>
                 </form>
+            </div>
+
+            {showAddPetModal && (
+                <AddPetToBookingModal
+                    filteredPets={filteredPets}
+                    services={services}
+                    petsAlreadyAdded={petsInBooking}
+                    onClose={function () { setShowAddPetModal(false) }}
+                    onAdd={addPetToBooking}
+                />
+            )}
+        </div>
+    )
+}
+
+// ══════════ AddPetToBookingModal — Multi-pet support ══════════
+// Mini-modal that opens from AddAppointmentModal when user clicks "+ Add Pet".
+// Picks one pet + their service + price (auto-fills from service).
+function AddPetToBookingModal({ filteredPets, services, petsAlreadyAdded, onClose, onAdd }) {
+    const [petId, setPetId] = useState('')
+    const [serviceId, setServiceId] = useState('')
+    const [price, setPrice] = useState('')
+    const [error, setError] = useState(null)
+
+    // Pets that haven't been added yet
+    var availablePets = filteredPets.filter(function (p) {
+        return !petsAlreadyAdded.some(function (added) { return added.pet_id === p.id })
+    })
+
+    // When service changes, auto-fill price
+    useEffect(function () {
+        if (serviceId) {
+            var service = services.find(function (s) { return s.id === serviceId })
+            if (service) {
+                setPrice(service.price || '')
+            }
+        }
+    }, [serviceId])
+
+    var handleAdd = function () {
+        if (!petId) {
+            setError('Select a pet.')
+            return
+        }
+        var pet = filteredPets.find(function (p) { return p.id === petId })
+        var service = serviceId ? services.find(function (s) { return s.id === serviceId }) : null
+        onAdd({
+            pet_id: pet.id,
+            pet_name: pet.name,
+            service_id: service ? service.id : '',
+            service_name: service ? service.service_name : '',
+            quoted_price: price || (service ? service.price : ''),
+            time_block_minutes: service ? service.time_block_minutes : 60,
+        })
+    }
+
+    return (
+        <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={onClose}>
+            <div className="modal" style={{ maxWidth: '450px' }} onClick={function (e) { e.stopPropagation() }}>
+                <div className="modal-header">
+                    <h2>Add Pet to Booking</h2>
+                    <button className="modal-close" onClick={onClose}>×</button>
+                </div>
+                <div style={{ padding: '0 20px 20px' }}>
+                    {availablePets.length === 0 && (
+                        <p style={{ color: '#c0392b', marginBottom: '12px' }}>
+                            All of this client's pets are already added to the booking.
+                        </p>
+                    )}
+
+                    <div className="form-group">
+                        <label>Pet *</label>
+                        <select value={petId} onChange={function (e) { setPetId(e.target.value) }} required>
+                            <option value="">Select pet...</option>
+                            {availablePets.map(function (p) {
+                                return <option key={p.id} value={p.id}>{p.name} ({p.breed})</option>
+                            })}
+                        </select>
+                    </div>
+
+                    <div className="form-group">
+                        <label>Service</label>
+                        <select value={serviceId} onChange={function (e) { setServiceId(e.target.value) }}>
+                            <option value="">Select service...</option>
+                            {services.map(function (s) {
+                                return <option key={s.id} value={s.id}>{s.service_name} - ${s.price}</option>
+                            })}
+                        </select>
+                    </div>
+
+                    <div className="form-group">
+                        <label>Price ($)</label>
+                        <input
+                            type="number"
+                            step="0.01"
+                            value={price}
+                            onChange={function (e) { setPrice(e.target.value) }}
+                            placeholder="Auto-fills when you pick a service"
+                        />
+                    </div>
+
+                    {error && <p className="error">{error}</p>}
+
+                    <div className="form-actions">
+                        <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+                        <button type="button" className="btn-primary" onClick={handleAdd} disabled={availablePets.length === 0}>
+                            Add Pet
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     )
@@ -2959,6 +4031,245 @@ function CancelAppointmentModal({ appt, onClose, onSaved }) {
                                     : '❌ Cancel Appointment')}
                         </button>
                     </div>
+                </form>
+            </div>
+        </div>
+    )
+}
+
+// =====================================================================
+// Task #38 — SlotChooserModal
+// Tiny popup that appears when Nicole clicks an empty time slot.
+// Two big buttons: "📅 Book Appointment" or "🚫 Block Time"
+// =====================================================================
+function SlotChooserModal({ slot, staff, onBook, onBlock, onClose }) {
+    if (!slot) return null
+    const { date, hour, staffId } = slot
+    const hourLabel = formatHour(hour) + ' ' + formatAmPm(hour)
+    const dateLabel = date instanceof Date
+        ? `${DAY_NAMES[date.getDay()]}, ${MONTH_NAMES[date.getMonth()]} ${date.getDate()}`
+        : ''
+    const staffMember = staffId ? (staff || []).find(s => s.id === staffId) : null
+    const staffLabel = staffMember ? (staffMember.first_name + (staffMember.last_name ? ' ' + staffMember.last_name.charAt(0) + '.' : '')) : 'Any staff'
+
+    var overlay = {
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: 'rgba(0,0,0,0.5)', display: 'flex',
+        alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+    }
+    var card = {
+        background: '#fff', borderRadius: '12px', padding: '28px',
+        width: '100%', maxWidth: '380px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+    }
+    var title = { margin: '0 0 6px', fontSize: '20px', fontWeight: 700, color: '#1f2937' }
+    var sub = { margin: '0 0 20px', fontSize: '13px', color: '#6b7280' }
+    var row = { display: 'flex', gap: '12px' }
+    var btnBase = {
+        flex: 1, padding: '20px 12px', border: 'none', borderRadius: '10px',
+        fontSize: '15px', fontWeight: 600, cursor: 'pointer', display: 'flex',
+        flexDirection: 'column', alignItems: 'center', gap: '6px',
+    }
+    var bookBtn = { ...btnBase, background: '#7c3aed', color: '#fff' }
+    var blockBtn = { ...btnBase, background: '#9ca3af', color: '#fff' }
+    var closeBtn = {
+        marginTop: '16px', width: '100%', padding: '10px', border: '1px solid #e5e7eb',
+        borderRadius: '8px', background: '#fff', color: '#6b7280', cursor: 'pointer',
+        fontSize: '14px',
+    }
+
+    return (
+        <div style={overlay} onClick={onClose}>
+            <div style={card} onClick={(e) => e.stopPropagation()}>
+                <h3 style={title}>What would you like to do?</h3>
+                <p style={sub}>{dateLabel} · {hourLabel} · {staffLabel}</p>
+                <div style={row}>
+                    <button style={bookBtn} onClick={onBook}>
+                        <span style={{ fontSize: '28px' }}>📅</span>
+                        <span>Book Appointment</span>
+                    </button>
+                    <button style={blockBtn} onClick={onBlock}>
+                        <span style={{ fontSize: '28px' }}>🚫</span>
+                        <span>Block Time</span>
+                    </button>
+                </div>
+                <button style={closeBtn} onClick={onClose}>Cancel</button>
+            </div>
+        </div>
+    )
+}
+
+// =====================================================================
+// Task #38 — BlockTimeModal
+// Create or edit a gray BLOCKED slot. Fields: staff, date, start, end, note.
+// Edit mode also shows a Delete button.
+// =====================================================================
+function BlockTimeModal({ modal, staff, saving, onSave, onDelete, onClose }) {
+    const isEdit = modal && modal.mode === 'edit'
+    const existing = (modal && modal.block) || null
+
+    // Initial values — use existing block in edit mode, or slot values in create mode
+    var initStaff = isEdit
+        ? (existing.staff_id || '')
+        : (modal.staffId || '')
+    var initDate = isEdit ? existing.block_date : modal.date
+    var initStart = isEdit
+        ? existing.start_time.slice(0, 5)
+        : `${String(modal.hour).padStart(2, '0')}:00`
+    var initEnd = isEdit
+        ? existing.end_time.slice(0, 5)
+        : `${String(modal.hour + 1).padStart(2, '0')}:00`
+    var initNote = isEdit ? (existing.note || '') : ''
+
+    var [staffId, setStaffId] = useState(initStaff)
+    var [blockDate, setBlockDate] = useState(initDate)
+    var [startTime, setStartTime] = useState(initStart)
+    var [endTime, setEndTime] = useState(initEnd)
+    var [note, setNote] = useState(initNote)
+    var [err, setErr] = useState('')
+
+    var handleSubmit = function (e) {
+        e.preventDefault()
+        setErr('')
+        if (!blockDate) { setErr('Pick a date'); return }
+        if (!startTime || !endTime) { setErr('Set a start and end time'); return }
+        if (endTime <= startTime) { setErr('End time must be after start time'); return }
+        onSave({
+            staff_id: staffId || null,
+            block_date: blockDate,
+            start_time: startTime,
+            end_time: endTime,
+            note: note.trim(),
+        })
+    }
+
+    // Styles
+    var overlay = {
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: 'rgba(0,0,0,0.5)', display: 'flex',
+        alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+    }
+    var card = {
+        background: '#fff', borderRadius: '12px', padding: '28px',
+        width: '100%', maxWidth: '460px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+        maxHeight: '90vh', overflowY: 'auto',
+    }
+    var title = { margin: '0 0 4px', fontSize: '20px', fontWeight: 700, color: '#1f2937' }
+    var sub = { margin: '0 0 20px', fontSize: '13px', color: '#6b7280' }
+    var label = {
+        display: 'block', fontSize: '13px', fontWeight: 600,
+        color: '#374151', marginBottom: '6px', marginTop: '14px',
+    }
+    var input = {
+        width: '100%', padding: '10px 12px', fontSize: '14px',
+        border: '1px solid #d1d5db', borderRadius: '8px',
+        background: '#fff', color: '#1f2937', boxSizing: 'border-box',
+    }
+    var errBox = {
+        marginTop: '12px', padding: '10px 12px', background: '#fef2f2',
+        border: '1px solid #fecaca', borderRadius: '8px', color: '#991b1b', fontSize: '13px',
+    }
+    var btnRow = { display: 'flex', gap: '10px', marginTop: '22px' }
+    var saveBtn = {
+        flex: 1, padding: '12px', background: '#7c3aed', color: '#fff',
+        border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: 600,
+        cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
+    }
+    var cancelBtn = {
+        padding: '12px 16px', background: '#fff', color: '#374151',
+        border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '15px',
+        fontWeight: 600, cursor: 'pointer',
+    }
+    var deleteBtn = {
+        marginTop: '10px', width: '100%', padding: '12px', background: '#fff',
+        color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '8px',
+        fontSize: '14px', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer',
+    }
+
+    return (
+        <div style={overlay} onClick={onClose}>
+            <div style={card} onClick={(e) => e.stopPropagation()}>
+                <h3 style={title}>{isEdit ? '🚫 Edit Blocked Time' : '🚫 Block Time'}</h3>
+                <p style={sub}>
+                    Blocked time stays on your calendar and prevents Claude from auto-booking over it.
+                </p>
+
+                <form onSubmit={handleSubmit}>
+                    <label style={label}>Staff member</label>
+                    <select
+                        style={input}
+                        value={staffId}
+                        onChange={function (e) { setStaffId(e.target.value) }}
+                    >
+                        <option value="">— My time (owner) —</option>
+                        {(staff || []).map(function (s) {
+                            return (
+                                <option key={s.id} value={s.id}>
+                                    {s.first_name} {s.last_name || ''}
+                                </option>
+                            )
+                        })}
+                    </select>
+
+                    <label style={label}>Date</label>
+                    <input
+                        type="date"
+                        style={input}
+                        value={blockDate}
+                        onChange={function (e) { setBlockDate(e.target.value) }}
+                    />
+
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                        <div style={{ flex: 1 }}>
+                            <label style={label}>Start</label>
+                            <input
+                                type="time"
+                                style={input}
+                                value={startTime}
+                                onChange={function (e) { setStartTime(e.target.value) }}
+                            />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                            <label style={label}>End</label>
+                            <input
+                                type="time"
+                                style={input}
+                                value={endTime}
+                                onChange={function (e) { setEndTime(e.target.value) }}
+                            />
+                        </div>
+                    </div>
+
+                    <label style={label}>Note (optional)</label>
+                    <input
+                        type="text"
+                        style={input}
+                        value={note}
+                        onChange={function (e) { setNote(e.target.value) }}
+                        placeholder="e.g. Lunch, Vet appt, School pickup"
+                        maxLength={200}
+                    />
+
+                    {err && <div style={errBox}>{err}</div>}
+
+                    <div style={btnRow}>
+                        <button type="button" style={cancelBtn} onClick={onClose} disabled={saving}>
+                            Cancel
+                        </button>
+                        <button type="submit" style={saveBtn} disabled={saving}>
+                            {saving ? 'Saving...' : (isEdit ? 'Save Changes' : 'Block This Time')}
+                        </button>
+                    </div>
+
+                    {isEdit && (
+                        <button
+                            type="button"
+                            style={deleteBtn}
+                            onClick={onDelete}
+                            disabled={saving}
+                        >
+                            🗑 Remove Block
+                        </button>
+                    )}
                 </form>
             </div>
         </div>

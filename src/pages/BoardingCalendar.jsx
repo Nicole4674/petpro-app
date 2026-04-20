@@ -18,6 +18,11 @@ export default function BoardingCalendar() {
   const [pets, setPets] = useState([])
   const [selectedReservation, setSelectedReservation] = useState(null) // for kennel card popup
   const [kennelCardLoading, setKennelCardLoading] = useState(false)
+  const [statusDropdownOpen, setStatusDropdownOpen] = useState(false) // click-to-change status pill
+  const [shopSettings, setShopSettings] = useState(null) // Task #42 — for printed forms
+  const [showIntakePicker, setShowIntakePicker] = useState(false) // Task #42
+  const [hasLastStay, setHasLastStay] = useState(false) // Task #42
+  const [showTopBarPrint, setShowTopBarPrint] = useState(false) // Task #42
 
   // New reservation form
   const [newRes, setNewRes] = useState({
@@ -28,7 +33,22 @@ export default function BoardingCalendar() {
     start_time: '08:00',
     end_time: '12:00',
     notes: '',
-    status: 'confirmed'
+    status: 'unconfirmed',
+    // Feeding & Care
+    feeding_schedule: '',
+    special_diet: '',
+    medications_notes: '',
+    walk_schedule: '',
+    playtime_notes: '',
+    crate_trained: false,
+    // Behavior
+    behaviors_with_dogs: '',
+    // Contacts & Emergency
+    pickup_person: '',
+    vet_emergency_contact: '',
+    // Extras
+    grooming_at_end: false,
+    items_brought: ''
   })
   const [savingRes, setSavingRes] = useState(false)
   const [clientSearch, setClientSearch] = useState('')
@@ -102,11 +122,24 @@ export default function BoardingCalendar() {
     loadData()
   }, [weekStart])
 
+  // Close the status dropdown whenever the kennel card closes or switches reservations
+  useEffect(() => {
+    if (!selectedReservation) setStatusDropdownOpen(false)
+  }, [selectedReservation?.id])
+
   async function loadData() {
     setLoading(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
+
+      // Load shop settings for printed forms (Task #42)
+      const { data: shopData } = await supabase
+        .from('shop_settings')
+        .select('*')
+        .eq('groomer_id', user.id)
+        .maybeSingle()
+      setShopSettings(shopData || null)
 
       // Load categories
       const { data: cats } = await supabase
@@ -200,6 +233,7 @@ export default function BoardingCalendar() {
       case 'checked_in': return '#16a34a'
       case 'pending': return '#f59e0b'
       case 'checked_out': return '#94a3b8'
+      case 'cancelled': return '#dc2626'
       default: return '#7c3aed'
     }
   }
@@ -210,6 +244,7 @@ export default function BoardingCalendar() {
       case 'checked_in': return 'Checked In'
       case 'pending': return 'Pending'
       case 'checked_out': return 'Checked Out'
+      case 'cancelled': return 'Cancelled'
       default: return status
     }
   }
@@ -240,7 +275,7 @@ export default function BoardingCalendar() {
       start_time: '08:00',
       end_time: '12:00',
       notes: '',
-      status: 'confirmed'
+      status: 'unconfirmed'
     })
     setClientSearch('')
   }
@@ -297,6 +332,18 @@ export default function BoardingCalendar() {
           end_time: newRes.end_time,
           status: newRes.status,
           notes: newRes.notes,
+          // New intake fields (Task #40)
+          feeding_schedule: newRes.feeding_schedule || null,
+          special_diet: newRes.special_diet || null,
+          medications_notes: newRes.medications_notes || null,
+          walk_schedule: newRes.walk_schedule || null,
+          playtime_notes: newRes.playtime_notes || null,
+          crate_trained: newRes.crate_trained,
+          behaviors_with_dogs: newRes.behaviors_with_dogs || null,
+          pickup_person: newRes.pickup_person || null,
+          vet_emergency_contact: newRes.vet_emergency_contact || null,
+          grooming_at_end: newRes.grooming_at_end,
+          items_brought: newRes.items_brought || null,
           created_by: user.id
         })
         .select()
@@ -443,6 +490,26 @@ export default function BoardingCalendar() {
 
   function updateWelfare(field, value) {
     setWelfareForm(prev => ({ ...prev, [field]: value }))
+  }
+
+  // Manually change reservation status from the kennel card popup
+  async function handleResStatusChange(newStatus) {
+    if (!selectedReservation) return
+    if (selectedReservation.status === newStatus) {
+      setStatusDropdownOpen(false)
+      return
+    }
+    const { error } = await supabase
+      .from('boarding_reservations')
+      .update({ status: newStatus })
+      .eq('id', selectedReservation.id)
+    if (error) {
+      alert('Error updating status: ' + error.message)
+      return
+    }
+    setSelectedReservation({ ...selectedReservation, status: newStatus })
+    setStatusDropdownOpen(false)
+    await loadData()
   }
 
   async function saveWelfareLog() {
@@ -707,6 +774,223 @@ export default function BoardingCalendar() {
     setShowPrintPicker(false)
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // Task #42 — Smart Printable Check-In Form
+  // ═══════════════════════════════════════════════════════════════
+  async function printCheckInForm(mode) {
+    // mode: 'filled' | 'blank' | 'last_stay'
+    const shop = shopSettings || {}
+    const brandColor = shop.primary_color || '#7c3aed'
+
+    // Source reservation (what to fill fields from)
+    var sourceRes = null
+    var pets = []
+    var client = {}
+    var headerDates = { start: '', end: '' }
+
+    if (selectedReservation) {
+      headerDates.start = selectedReservation.start_date || ''
+      headerDates.end = selectedReservation.end_date || ''
+      pets = (selectedReservation.boarding_reservation_pets || []).map(rp => rp.pets).filter(Boolean)
+      client = selectedReservation.clients || {}
+
+      if (mode === 'filled') {
+        sourceRes = selectedReservation
+      } else if (mode === 'last_stay') {
+        // Fetch previous reservation for this client (before current one)
+        try {
+          const { data: prev } = await supabase
+            .from('boarding_reservations')
+            .select('*')
+            .eq('client_id', selectedReservation.client_id)
+            .neq('id', selectedReservation.id)
+            .lt('start_date', selectedReservation.start_date)
+            .order('start_date', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          sourceRes = prev || null
+        } catch (err) {
+          console.error('Fetch last stay failed:', err)
+        }
+      }
+      // mode === 'blank' — leave sourceRes null
+    }
+
+    const petNames = pets.length > 0 ? pets.map(p => p.name).join(', ') : ''
+    const ownerName = client.first_name ? (client.first_name + ' ' + (client.last_name || '')) : ''
+    const field = (val) => (val ? val : '')
+    const blank = (val) => (val && sourceRes ? val : '')
+
+    // Logo HTML
+    const logoHtml = shop.logo_url
+      ? `<img src="${shop.logo_url}" alt="Logo" style="max-height:60px;max-width:140px;object-fit:contain;" />`
+      : `<div style="font-size:42px;">🏪</div>`
+
+    const shopHeaderHtml = `
+      <div style="display:flex;align-items:center;gap:16px;padding:14px 18px;border-bottom:3px solid ${brandColor};margin-bottom:16px;">
+        ${logoHtml}
+        <div style="flex:1;">
+          <div style="font-size:22px;font-weight:800;color:${brandColor};">${field(shop.shop_name) || 'Your Shop Name'}</div>
+          ${shop.tagline ? `<div style="font-size:11px;color:#64748b;font-style:italic;">${shop.tagline}</div>` : ''}
+          <div style="font-size:10px;color:#475569;margin-top:4px;">
+            ${shop.phone ? '📱 ' + shop.phone : ''}
+            ${shop.email ? ' &nbsp; ✉️ ' + shop.email : ''}
+            ${shop.website ? ' &nbsp; 🌐 ' + shop.website : ''}
+          </div>
+          ${shop.address ? `<div style="font-size:10px;color:#475569;">📍 ${shop.address}</div>` : ''}
+        </div>
+      </div>
+    `
+
+    // Blank-line style for unfilled fields
+    const line = (val) => val ? `<span style="border-bottom:1px solid #cbd5e1;padding:2px 4px;min-width:200px;display:inline-block;">${val}</span>` : `<span style="border-bottom:1px solid #cbd5e1;padding:2px 4px;min-width:200px;display:inline-block;">&nbsp;</span>`
+    const longLine = (val) => val ? `<div style="border:1px solid #cbd5e1;border-radius:4px;padding:6px 10px;min-height:34px;font-size:12px;">${val}</div>` : `<div style="border:1px solid #cbd5e1;border-radius:4px;padding:6px 10px;min-height:34px;"></div>`
+    const cb = (checked) => checked ? '☑' : '☐'
+
+    // Field values — pull from sourceRes if available
+    const vFeeding = sourceRes ? sourceRes.feeding_schedule : ''
+    const vDiet = sourceRes ? sourceRes.special_diet : ''
+    const vMeds = sourceRes ? sourceRes.medications_notes : ''
+    const vWalk = sourceRes ? sourceRes.walk_schedule : ''
+    const vPlay = sourceRes ? sourceRes.playtime_notes : ''
+    const vCrate = sourceRes ? sourceRes.crate_trained : false
+    const vBehavior = sourceRes ? sourceRes.behaviors_with_dogs : ''
+    const vPickup = sourceRes ? sourceRes.pickup_person : ''
+    const vVet = sourceRes ? sourceRes.vet_emergency_contact : ''
+    const vGroom = sourceRes ? sourceRes.grooming_at_end : false
+    const vItems = sourceRes ? sourceRes.items_brought : ''
+
+    const modeBanner = {
+      filled: '<div style="background:#d1fae5;border:1px solid #10b981;border-radius:6px;padding:6px 10px;margin-bottom:12px;font-size:11px;color:#065f46;font-weight:600;">📋 This is a copy of the filled intake form on file.</div>',
+      blank: '<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:6px 10px;margin-bottom:12px;font-size:11px;color:#92400e;font-weight:600;">✍️ Please fill out this form completely.</div>',
+      last_stay: sourceRes
+        ? '<div style="background:#dbeafe;border:1px solid #3b82f6;border-radius:6px;padding:6px 10px;margin-bottom:12px;font-size:11px;color:#1e40af;font-weight:600;">🔄 Pre-filled from last stay. Please review & update anything that changed.</div>'
+        : '<div style="background:#fee2e2;border:1px solid #ef4444;border-radius:6px;padding:6px 10px;margin-bottom:12px;font-size:11px;color:#991b1b;font-weight:600;">⚠️ No previous stay found — please fill out fully.</div>'
+    }[mode] || ''
+
+    const html = `<!DOCTYPE html>
+<html><head><title>Check-In Form${petNames ? ' - ' + petNames : ''}</title>
+<style>
+  @media print { body { margin: 0; } @page { size: letter; margin: 0.4in; } }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1e293b; max-width: 8in; margin: 0 auto; padding: 12px; font-size: 12px; }
+  h2 { color: ${brandColor}; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; margin: 16px 0 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+  .row { display: flex; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+  .field { flex: 1; min-width: 200px; }
+  .field-label { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 2px; }
+  .checkbox-row { font-size: 13px; margin: 6px 0; }
+  .sig-line { border-top: 1px solid #333; width: 280px; padding-top: 4px; font-size: 10px; color: #64748b; margin-top: 32px; }
+</style></head><body>
+
+  ${shopHeaderHtml}
+
+  <div style="text-align:center;margin-bottom:12px;">
+    <div style="font-size:20px;font-weight:800;color:#0f172a;">🐾 Boarding Check-In Form</div>
+  </div>
+
+  ${modeBanner}
+
+  <!-- Pet & Owner Info -->
+  <h2>Pet & Owner</h2>
+  <div class="row">
+    <div class="field">
+      <div class="field-label">Pet Name(s)</div>
+      ${line(petNames)}
+    </div>
+    <div class="field">
+      <div class="field-label">Owner Name</div>
+      ${line(ownerName)}
+    </div>
+  </div>
+  <div class="row">
+    <div class="field">
+      <div class="field-label">Owner Phone</div>
+      ${line(field(client.phone))}
+    </div>
+    <div class="field">
+      <div class="field-label">Owner Email</div>
+      ${line(field(client.email))}
+    </div>
+  </div>
+  <div class="row">
+    <div class="field">
+      <div class="field-label">Check-In Date</div>
+      ${line(headerDates.start)}
+    </div>
+    <div class="field">
+      <div class="field-label">Check-Out Date</div>
+      ${line(headerDates.end)}
+    </div>
+  </div>
+
+  <!-- Feeding & Care -->
+  <h2>🥣 Feeding & Care</h2>
+  <div class="field-label">Feeding Schedule (brand, portion, times)</div>
+  ${longLine(vFeeding)}
+  <div class="field-label" style="margin-top:8px;">Special Diet / Allergies</div>
+  ${longLine(vDiet)}
+  <div class="field-label" style="margin-top:8px;">Medications (name, dose, time — leave blank if none)</div>
+  ${longLine(vMeds)}
+  <div class="field-label" style="margin-top:8px;">Walk Schedule</div>
+  ${longLine(vWalk)}
+  <div class="field-label" style="margin-top:8px;">Playtime Preferences</div>
+  ${longLine(vPlay)}
+  <div class="checkbox-row">${cb(vCrate)} Crate trained</div>
+
+  <!-- Behavior -->
+  <h2>🐕 Behavior</h2>
+  <div class="field-label">Behavior with Other Dogs</div>
+  ${longLine(vBehavior)}
+
+  <!-- Contacts & Emergency -->
+  <h2>📞 Contacts & Emergency</h2>
+  <div class="row">
+    <div class="field">
+      <div class="field-label">Authorized Pickup Person</div>
+      ${line(vPickup)}
+    </div>
+    <div class="field">
+      <div class="field-label">Vet / Emergency Contact</div>
+      ${line(vVet)}
+    </div>
+  </div>
+
+  <!-- Extras -->
+  <h2>✨ Extras</h2>
+  <div class="checkbox-row">${cb(vGroom)} ✂️ Wants grooming at end of stay</div>
+  <div class="field-label" style="margin-top:8px;">Items Brought by Owner (leash, bed, toys, food, etc.)</div>
+  ${longLine(vItems)}
+
+  <!-- Signature -->
+  <div style="margin-top:28px;">
+    <div class="sig-line">Owner Signature &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Date: ______________</div>
+  </div>
+
+  <div style="text-align:center;margin-top:20px;color:${brandColor};font-size:20px;">🐾</div>
+  <div style="text-align:center;font-size:9px;color:#94a3b8;margin-top:4px;">Generated by PetPro</div>
+
+</body></html>`
+
+    const printWindow = window.open('', '_blank')
+    printWindow.document.write(html)
+    printWindow.document.close()
+    setTimeout(() => { printWindow.print() }, 500)
+    setShowIntakePicker(false)
+    setShowTopBarPrint(false)
+  }
+
+  // Check if current client has a previous stay (for "Print from Last Stay" button visibility)
+  useEffect(() => {
+    if (!selectedReservation) { setHasLastStay(false); return }
+    supabase
+      .from('boarding_reservations')
+      .select('id')
+      .eq('client_id', selectedReservation.client_id)
+      .neq('id', selectedReservation.id)
+      .lt('start_date', selectedReservation.start_date)
+      .limit(1)
+      .then(({ data }) => setHasLastStay(Array.isArray(data) && data.length > 0))
+  }, [selectedReservation])
+
   if (loading) {
     return (
       <div className="cal-page">
@@ -749,6 +1033,15 @@ export default function BoardingCalendar() {
             <button className={'cal-filter-btn' + (showFilters === 'occupied' ? ' cal-filter-active' : '')}
               onClick={() => setShowFilters('occupied')}>Occupied</button>
           </div>
+          {/* Task #42 — Top-bar Print Blank Form button */}
+          <button
+            className="cal-filter-btn"
+            style={{ marginLeft: '12px', background: '#7c3aed', color: '#fff', borderColor: '#7c3aed', fontWeight: '600' }}
+            onClick={() => { setSelectedReservation(null); printCheckInForm('blank') }}
+            title="Print a fully blank check-in form for a new client or phone booking"
+          >
+            🖨️ Print Blank Intake
+          </button>
         </div>
       </div>
 
@@ -822,17 +1115,40 @@ export default function BoardingCalendar() {
                       const isEnd = res && isEndDate(res, day)
 
                       if (res) {
+                        // Phase 6 — booking-rule flag pending (AI held it for groomer approval)
+                        const isFlaggedPending = res.flag_status === 'pending'
                         return (
                           <div
                             key={formatDate(day)}
                             className={'cal-cell cal-cell-occupied' + (isToday(day) ? ' cal-cell-today' : '')}
                             style={{ borderLeftColor: isStart ? getStatusColor(res.status) : 'transparent', cursor: 'pointer' }}
-                            title={getPetNames(res) + ' — ' + getClientName(res) + ' (' + getStatusLabel(res.status) + ') · Click for details'}
+                            title={getPetNames(res) + ' — ' + getClientName(res) + ' (' + getStatusLabel(res.status) + ')' + (isFlaggedPending ? ' · ⏳ Needs approval' : '') + ' · Click for details'}
                             onClick={() => openKennelCard(res)}
                           >
                             <div className="cal-cell-bar" style={{ background: getStatusColor(res.status) }}>
                               {isStart && (
-                                <span className="cal-cell-pet">{getPetNames(res)}</span>
+                                <span className="cal-cell-pet">
+                                  {isFlaggedPending && (
+                                    <span
+                                      style={{
+                                        display: 'inline-block',
+                                        marginRight: '4px',
+                                        padding: '1px 5px',
+                                        fontSize: '9px',
+                                        fontWeight: 700,
+                                        borderRadius: '3px',
+                                        background: '#fef3c7',
+                                        color: '#78350f',
+                                        letterSpacing: '0.3px',
+                                        verticalAlign: 'middle',
+                                      }}
+                                      title="Pending groomer approval"
+                                    >
+                                      ⏳ PENDING
+                                    </span>
+                                  )}
+                                  {getPetNames(res)}
+                                </span>
                               )}
                               {!isStart && isEnd && (
                                 <span className="cal-cell-end">◀ out</span>
@@ -888,9 +1204,72 @@ export default function BoardingCalendar() {
             <div className="kc-header">
               <div className="kc-header-left">
                 <h2>🐾 Kennel Card</h2>
-                <span className="kc-status-badge" style={{ background: getStatusColor(selectedReservation.status) }}>
-                  {getStatusLabel(selectedReservation.status)}
-                </span>
+                <div style={{ position: 'relative', display: 'inline-block' }}>
+                  <span
+                    className="kc-status-badge"
+                    onClick={() => setStatusDropdownOpen(!statusDropdownOpen)}
+                    style={{
+                      background: getStatusColor(selectedReservation.status),
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                    }}
+                    title="Click to change status"
+                  >
+                    {getStatusLabel(selectedReservation.status)} ▾
+                  </span>
+                  {statusDropdownOpen && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        marginTop: '6px',
+                        background: '#fff',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        boxShadow: '0 6px 16px rgba(0,0,0,0.15)',
+                        zIndex: 20,
+                        minWidth: '180px',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {['pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled'].map((s, idx, arr) => {
+                        const isSelected = selectedReservation.status === s
+                        return (
+                          <div
+                            key={s}
+                            onClick={() => handleResStatusChange(s)}
+                            style={{
+                              padding: '10px 12px',
+                              cursor: 'pointer',
+                              fontSize: '13px',
+                              fontWeight: 500,
+                              color: '#1f2937',
+                              borderBottom: idx < arr.length - 1 ? '1px solid #f3f4f6' : 'none',
+                              background: isSelected ? '#f9fafb' : '#fff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = '#f3f4f6' }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? '#f9fafb' : '#fff' }}
+                          >
+                            <span style={{
+                              display: 'inline-block',
+                              width: '10px',
+                              height: '10px',
+                              borderRadius: '50%',
+                              background: getStatusColor(s),
+                              flexShrink: 0,
+                            }} />
+                            <span style={{ flex: 1 }}>{getStatusLabel(s)}</span>
+                            {isSelected && <span style={{ color: '#6b7280' }}>✓</span>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
               <button className="cal-modal-close" onClick={() => setSelectedReservation(null)}>✕</button>
             </div>
@@ -1150,6 +1529,82 @@ export default function BoardingCalendar() {
                 <div className="kc-section">
                   <div className="kc-section-title">📝 Stay Notes</div>
                   <div className="kc-notes-text">{selectedReservation.notes}</div>
+                </div>
+              )}
+
+              {/* Intake Info (Task #41) — only shows if at least one field is filled */}
+              {(selectedReservation.feeding_schedule || selectedReservation.special_diet ||
+                selectedReservation.medications_notes || selectedReservation.walk_schedule ||
+                selectedReservation.playtime_notes || selectedReservation.crate_trained ||
+                selectedReservation.behaviors_with_dogs || selectedReservation.pickup_person ||
+                selectedReservation.vet_emergency_contact || selectedReservation.grooming_at_end ||
+                selectedReservation.items_brought) && (
+                <div className="kc-section">
+                  <div className="kc-section-title">📋 Intake Info</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '8px' }}>
+
+                    {/* Feeding & Care */}
+                    {(selectedReservation.feeding_schedule || selectedReservation.special_diet ||
+                      selectedReservation.medications_notes || selectedReservation.walk_schedule ||
+                      selectedReservation.playtime_notes || selectedReservation.crate_trained) && (
+                      <div style={{ background: '#fef3c7', padding: '10px 12px', borderRadius: '8px', border: '1px solid #fbbf24' }}>
+                        <div style={{ fontWeight: '700', fontSize: '13px', color: '#92400e', marginBottom: '6px' }}>🥣 Feeding & Care</div>
+                        {selectedReservation.feeding_schedule && (
+                          <div style={{ fontSize: '13px', marginBottom: '4px' }}><strong>Feeding:</strong> {selectedReservation.feeding_schedule}</div>
+                        )}
+                        {selectedReservation.special_diet && (
+                          <div style={{ fontSize: '13px', marginBottom: '4px' }}><strong>Diet/Allergies:</strong> {selectedReservation.special_diet}</div>
+                        )}
+                        {selectedReservation.medications_notes && (
+                          <div style={{ fontSize: '13px', marginBottom: '4px', color: '#b91c1c' }}><strong>💊 Meds:</strong> {selectedReservation.medications_notes}</div>
+                        )}
+                        {selectedReservation.walk_schedule && (
+                          <div style={{ fontSize: '13px', marginBottom: '4px' }}><strong>Walks:</strong> {selectedReservation.walk_schedule}</div>
+                        )}
+                        {selectedReservation.playtime_notes && (
+                          <div style={{ fontSize: '13px', marginBottom: '4px' }}><strong>Playtime:</strong> {selectedReservation.playtime_notes}</div>
+                        )}
+                        {selectedReservation.crate_trained && (
+                          <div style={{ fontSize: '13px', marginBottom: '4px' }}>✅ Crate trained</div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Behavior */}
+                    {selectedReservation.behaviors_with_dogs && (
+                      <div style={{ background: '#e0f2fe', padding: '10px 12px', borderRadius: '8px', border: '1px solid #38bdf8' }}>
+                        <div style={{ fontWeight: '700', fontSize: '13px', color: '#075985', marginBottom: '6px' }}>🐕 Behavior with Other Dogs</div>
+                        <div style={{ fontSize: '13px' }}>{selectedReservation.behaviors_with_dogs}</div>
+                      </div>
+                    )}
+
+                    {/* Contacts & Emergency */}
+                    {(selectedReservation.pickup_person || selectedReservation.vet_emergency_contact) && (
+                      <div style={{ background: '#fee2e2', padding: '10px 12px', borderRadius: '8px', border: '1px solid #ef4444' }}>
+                        <div style={{ fontWeight: '700', fontSize: '13px', color: '#991b1b', marginBottom: '6px' }}>📞 Contacts & Emergency</div>
+                        {selectedReservation.pickup_person && (
+                          <div style={{ fontSize: '13px', marginBottom: '4px' }}><strong>Pickup:</strong> {selectedReservation.pickup_person}</div>
+                        )}
+                        {selectedReservation.vet_emergency_contact && (
+                          <div style={{ fontSize: '13px', marginBottom: '4px' }}><strong>🏥 Vet:</strong> {selectedReservation.vet_emergency_contact}</div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Extras */}
+                    {(selectedReservation.grooming_at_end || selectedReservation.items_brought) && (
+                      <div style={{ background: '#f3e8ff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #a855f7' }}>
+                        <div style={{ fontWeight: '700', fontSize: '13px', color: '#6b21a8', marginBottom: '6px' }}>✨ Extras</div>
+                        {selectedReservation.grooming_at_end && (
+                          <div style={{ fontSize: '13px', marginBottom: '4px', fontWeight: '600' }}>✂️ Wants grooming at end of stay</div>
+                        )}
+                        {selectedReservation.items_brought && (
+                          <div style={{ fontSize: '13px', marginBottom: '4px' }}><strong>📦 Items brought:</strong> {selectedReservation.items_brought}</div>
+                        )}
+                      </div>
+                    )}
+
+                  </div>
                 </div>
               )}
 
@@ -1484,6 +1939,32 @@ export default function BoardingCalendar() {
                     </div>
                   )}
                 </div>
+
+                {/* Task #42 — Check-In Form print buttons */}
+                <div className="kc-print-wrapper">
+                  <button className="kc-action-btn kc-action-print" onClick={() => setShowIntakePicker(!showIntakePicker)}>
+                    📝 Intake Form
+                  </button>
+                  {showIntakePicker && (
+                    <div className="kc-print-picker">
+                      <button className="kc-print-option" onClick={() => printCheckInForm('filled')}>
+                        ✅ Print Filled
+                        <span className="kc-print-desc">This reservation's data, all filled in</span>
+                      </button>
+                      <button className="kc-print-option" onClick={() => printCheckInForm('blank')}>
+                        ✍️ Print Blank
+                        <span className="kc-print-desc">Same pet & dates, empty intake fields</span>
+                      </button>
+                      {hasLastStay && (
+                        <button className="kc-print-option" onClick={() => printCheckInForm('last_stay')}>
+                          🔄 Pre-Fill from Last Stay
+                          <span className="kc-print-desc">Client reviews what changed — saves time</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <button className="boarding-btn boarding-btn-secondary" onClick={() => setSelectedReservation(null)}>
                   Close
                 </button>
@@ -1627,7 +2108,121 @@ export default function BoardingCalendar() {
                 <textarea className="boarding-textarea" rows={2}
                   value={newRes.notes}
                   onChange={e => setNewRes(prev => ({ ...prev, notes: e.target.value }))}
-                  placeholder="Special instructions, dietary needs, etc." />
+                  placeholder="General notes, flags, anything worth remembering..." />
+              </div>
+
+              {/* ─── Feeding & Care ─── */}
+              <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '2px solid #e5e7eb', fontWeight: '700', fontSize: '14px', color: '#374151' }}>
+                🥣 Feeding & Care
+              </div>
+
+              <div className="boarding-field" style={{ marginTop: '12px' }}>
+                <label className="boarding-label">Feeding Schedule</label>
+                <textarea className="boarding-textarea" rows={2}
+                  value={newRes.feeding_schedule}
+                  onChange={e => setNewRes(prev => ({ ...prev, feeding_schedule: e.target.value }))}
+                  placeholder="e.g. 2 cups kibble at 7am and 5pm" />
+              </div>
+
+              <div className="boarding-field" style={{ marginTop: '12px' }}>
+                <label className="boarding-label">Special Diet / Allergies</label>
+                <textarea className="boarding-textarea" rows={2}
+                  value={newRes.special_diet}
+                  onChange={e => setNewRes(prev => ({ ...prev, special_diet: e.target.value }))}
+                  placeholder="Allergies, sensitive stomach, raw diet, etc." />
+              </div>
+
+              <div className="boarding-field" style={{ marginTop: '12px' }}>
+                <label className="boarding-label">Medications</label>
+                <textarea className="boarding-textarea" rows={2}
+                  value={newRes.medications_notes}
+                  onChange={e => setNewRes(prev => ({ ...prev, medications_notes: e.target.value }))}
+                  placeholder="Leave blank if none. Otherwise include med name, dose, and time." />
+              </div>
+
+              <div className="boarding-field" style={{ marginTop: '12px' }}>
+                <label className="boarding-label">Walk Schedule</label>
+                <textarea className="boarding-textarea" rows={2}
+                  value={newRes.walk_schedule}
+                  onChange={e => setNewRes(prev => ({ ...prev, walk_schedule: e.target.value }))}
+                  placeholder="e.g. 3x daily — morning, noon, evening" />
+              </div>
+
+              <div className="boarding-field" style={{ marginTop: '12px' }}>
+                <label className="boarding-label">Playtime Preferences</label>
+                <textarea className="boarding-textarea" rows={2}
+                  value={newRes.playtime_notes}
+                  onChange={e => setNewRes(prev => ({ ...prev, playtime_notes: e.target.value }))}
+                  placeholder="Loves fetch, nervous around big dogs, etc." />
+              </div>
+
+              <div className="boarding-field" style={{ marginTop: '12px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: '600' }}>
+                  <input
+                    type="checkbox"
+                    checked={newRes.crate_trained}
+                    onChange={e => setNewRes(prev => ({ ...prev, crate_trained: e.target.checked }))}
+                  />
+                  <span>Crate trained</span>
+                </label>
+              </div>
+
+              {/* ─── Behavior ─── */}
+              <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '2px solid #e5e7eb', fontWeight: '700', fontSize: '14px', color: '#374151' }}>
+                🐕 Behavior
+              </div>
+
+              <div className="boarding-field" style={{ marginTop: '12px' }}>
+                <label className="boarding-label">Behavior with Other Dogs</label>
+                <textarea className="boarding-textarea" rows={2}
+                  value={newRes.behaviors_with_dogs}
+                  onChange={e => setNewRes(prev => ({ ...prev, behaviors_with_dogs: e.target.value }))}
+                  placeholder="Good with others / reactive / shy / prefers solo, etc." />
+              </div>
+
+              {/* ─── Contacts & Emergency ─── */}
+              <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '2px solid #e5e7eb', fontWeight: '700', fontSize: '14px', color: '#374151' }}>
+                📞 Contacts & Emergency
+              </div>
+
+              <div className="boarding-field" style={{ marginTop: '12px' }}>
+                <label className="boarding-label">Authorized Pickup Person</label>
+                <input type="text" className="boarding-input"
+                  value={newRes.pickup_person}
+                  onChange={e => setNewRes(prev => ({ ...prev, pickup_person: e.target.value }))}
+                  placeholder="Name + phone (if different from owner)" />
+              </div>
+
+              <div className="boarding-field" style={{ marginTop: '12px' }}>
+                <label className="boarding-label">Vet / Emergency Contact</label>
+                <input type="text" className="boarding-input"
+                  value={newRes.vet_emergency_contact}
+                  onChange={e => setNewRes(prev => ({ ...prev, vet_emergency_contact: e.target.value }))}
+                  placeholder="Vet name + phone number" />
+              </div>
+
+              {/* ─── Extras ─── */}
+              <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '2px solid #e5e7eb', fontWeight: '700', fontSize: '14px', color: '#374151' }}>
+                ✨ Extras
+              </div>
+
+              <div className="boarding-field" style={{ marginTop: '12px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: '600' }}>
+                  <input
+                    type="checkbox"
+                    checked={newRes.grooming_at_end}
+                    onChange={e => setNewRes(prev => ({ ...prev, grooming_at_end: e.target.checked }))}
+                  />
+                  <span>✂️ Wants grooming at end of stay</span>
+                </label>
+              </div>
+
+              <div className="boarding-field" style={{ marginTop: '12px' }}>
+                <label className="boarding-label">Items Brought by Owner</label>
+                <textarea className="boarding-textarea" rows={3}
+                  value={newRes.items_brought}
+                  onChange={e => setNewRes(prev => ({ ...prev, items_brought: e.target.value }))}
+                  placeholder="Leash, bed, favorite toy, food container, blanket, etc. — list everything so nothing gets lost!" />
               </div>
             </div>
 
