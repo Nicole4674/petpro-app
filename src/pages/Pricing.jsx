@@ -4,19 +4,78 @@ import { supabase } from '../lib/supabase'
 
 const CATEGORY_LABELS = {
   full_groom: '✂️ Full Groom',
-  bath_brush: '🛁 Bath & Brush / Outline Trim',
+  mini_groom: '🔹 Mini Groom',
   puppy: '🐶 Puppy Services',
+  bath_brush: '🛁 Bath & Brush / Outline Trim',
+  express_service: '⚡ Express Service',
+  de_matting: '🪢 De-Matting',
+  de_shed: '🌬️ De-Shed',
+  nail_trim: '💅 Nail Trim',
+  nail_filing: '📐 Nail Filing',
+  face_trim: '😊 Face Trim',
+  sanitary_trim: '✂️ Sanitary Trim',
+  paw_pad_trim: '🐾 Paw Pad Trim',
+  hand_scissoring: '✂️ Hand Scissoring',
+  ear_cleaning: '👂 Ear Cleaning',
+  teeth_brushing: '🦷 Teeth Brushing',
+  anal_glands: '⚕️ Anal Glands',
+  flea_bath: '🐛 Flea Bath',
+  special_shampoo: '🧴 Special Shampoo',
+  blueberry_facial: '🫐 Blueberry Facial',
+  bow_bandana: '🎀 Bow & Bandana',
   add_on: '✨ Add-Ons',
+  other: '📦 Other',
 }
 
 const CATEGORY_COLORS = {
-  full_groom: '#7c3aed',
-  bath_brush: '#2563eb',
-  puppy: '#f59e0b',
-  add_on: '#16a34a',
+  full_groom: '#7c3aed',      // purple
+  mini_groom: '#0ea5e9',      // sky blue
+  puppy: '#f59e0b',           // orange
+  bath_brush: '#2563eb',      // blue
+  express_service: '#eab308', // yellow
+  de_matting: '#9333ea',      // purple-pink
+  de_shed: '#0891b2',         // cyan
+  nail_trim: '#ec4899',       // pink
+  nail_filing: '#db2777',     // darker pink
+  face_trim: '#f97316',       // orange-red
+  sanitary_trim: '#14b8a6',   // teal
+  paw_pad_trim: '#a855f7',    // violet
+  hand_scissoring: '#6366f1', // indigo
+  ear_cleaning: '#8b5cf6',    // light purple
+  teeth_brushing: '#06b6d4',  // light cyan
+  anal_glands: '#78716c',     // stone gray
+  flea_bath: '#65a30d',       // lime
+  special_shampoo: '#10b981', // emerald
+  blueberry_facial: '#6d28d9',// deep purple
+  bow_bandana: '#f43f5e',     // rose
+  add_on: '#16a34a',          // green
+  other: '#64748b',           // slate
 }
 
-const CATEGORY_ORDER = ['full_groom', 'bath_brush', 'puppy', 'add_on']
+const CATEGORY_ORDER = [
+  'full_groom',
+  'mini_groom',
+  'puppy',
+  'bath_brush',
+  'express_service',
+  'de_matting',
+  'de_shed',
+  'nail_trim',
+  'nail_filing',
+  'face_trim',
+  'sanitary_trim',
+  'paw_pad_trim',
+  'hand_scissoring',
+  'ear_cleaning',
+  'teeth_brushing',
+  'anal_glands',
+  'flea_bath',
+  'special_shampoo',
+  'blueberry_facial',
+  'bow_bandana',
+  'add_on',
+  'other',
+]
 
 const EMPTY_SERVICE = {
   service_name: '',
@@ -285,10 +344,28 @@ export default function Pricing() {
                 <div className="pr-form-group">
                   <label>Category *</label>
                   <select name="category" value={form.category} onChange={handleChange} className="pr-input">
-                    <option value="full_groom">Full Groom</option>
-                    <option value="bath_brush">Bath & Brush / Outline Trim</option>
-                    <option value="puppy">Puppy Services</option>
-                    <option value="add_on">Add-On</option>
+                    <option value="full_groom">✂️ Full Groom</option>
+                    <option value="mini_groom">🔹 Mini Groom</option>
+                    <option value="puppy">🐶 Puppy Services</option>
+                    <option value="bath_brush">🛁 Bath & Brush / Outline Trim</option>
+                    <option value="express_service">⚡ Express Service</option>
+                    <option value="de_matting">🪢 De-Matting</option>
+                    <option value="de_shed">🌬️ De-Shed</option>
+                    <option value="nail_trim">💅 Nail Trim</option>
+                    <option value="nail_filing">📐 Nail Filing</option>
+                    <option value="face_trim">😊 Face Trim</option>
+                    <option value="sanitary_trim">✂️ Sanitary Trim</option>
+                    <option value="paw_pad_trim">🐾 Paw Pad Trim</option>
+                    <option value="hand_scissoring">✂️ Hand Scissoring</option>
+                    <option value="ear_cleaning">👂 Ear Cleaning</option>
+                    <option value="teeth_brushing">🦷 Teeth Brushing</option>
+                    <option value="anal_glands">⚕️ Anal Glands</option>
+                    <option value="flea_bath">🐛 Flea Bath</option>
+                    <option value="special_shampoo">🧴 Special Shampoo</option>
+                    <option value="blueberry_facial">🫐 Blueberry Facial</option>
+                    <option value="bow_bandana">🎀 Bow & Bandana</option>
+                    <option value="add_on">✨ Add-On</option>
+                    <option value="other">📦 Other</option>
                   </select>
                 </div>
                 <div className="pr-form-group">
