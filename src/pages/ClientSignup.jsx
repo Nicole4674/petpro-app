@@ -8,6 +8,7 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { notifyUser } from '../lib/push'
 
 export default function ClientSignup() {
   var [searchParams] = useSearchParams()
@@ -115,6 +116,22 @@ export default function ClientSignup() {
 
       // Success — show email check screen
       setSuccess(true)
+
+      // Fire-and-forget push to the groomer: "New client signed up"
+      // Non-blocking — never let a push failure interfere with signup UX.
+      ;(function notifyGroomerOfSignup() {
+        try {
+          notifyUser({
+            userId: groomerId,
+            title: '🎉 New client signed up',
+            body: fullName.trim() + ' joined — ' + email.trim().toLowerCase(),
+            url: '/clients',
+            tag: 'signup-' + Date.now(),
+          })
+        } catch (e) {
+          console.warn('[push] notify groomer of signup failed (non-fatal):', e)
+        }
+      })()
     } catch (err) {
       console.error('Signup error:', err)
       setError('Something went wrong. Please try again.')

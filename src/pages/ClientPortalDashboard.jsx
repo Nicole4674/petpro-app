@@ -10,6 +10,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { getBreedDefaults } from '../lib/breedDefaults'
+import EnableNotifications from '../components/EnableNotifications'
 
 const TABS = [
   { key: 'overview', label: '🐾 Overview' },
@@ -588,6 +589,9 @@ export default function ClientPortalDashboard() {
         {/* ═══════ OVERVIEW TAB ═══════ */}
         {activeTab === 'overview' && (
           <div className="cp-overview">
+
+            {/* Push Notifications Prompt (big blue card — first thing clients see) */}
+            <EnableNotifications variant="hero" userType="client" />
 
             {/* Contact Information */}
             <div className="cp-card">

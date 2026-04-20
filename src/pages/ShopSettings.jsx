@@ -6,6 +6,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import EnableNotifications from '../components/EnableNotifications'
 
 export default function ShopSettings() {
   var navigate = useNavigate()
@@ -249,6 +250,17 @@ export default function ShopSettings() {
             {copiedLink ? '✓ Copied!' : '📋 Copy Link'}
           </button>
         </div>
+      </div>
+
+      {/* Notifications */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
+        <div style={{ fontWeight: '700', fontSize: '14px', color: '#374151', marginBottom: '12px' }}>
+          🔔 Notifications
+        </div>
+        <p style={{ margin: '0 0 12px', fontSize: '13px', color: '#6b7280' }}>
+          Get pinged when a client books, sends a message, or PetPro AI flags an appointment — even when PetPro isn't open. Turn this on in every browser you use.
+        </p>
+        <EnableNotifications variant="settings" userType="groomer" />
       </div>
 
       {/* Logo upload */}

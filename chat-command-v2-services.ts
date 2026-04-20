@@ -376,11 +376,11 @@ var toolDefinitions = [
       type: 'object',
       properties: {
         service_name: { type: 'string', description: 'Name of the service (e.g., "Full Groom Small Dog", "Bath & Brush", "Nail Trim")' },
-        category: { type: 'string', description: 'Category: "Full Groom", "Bath", "Nail Trim", "Teeth Brushing", "De-shed", "Add-on", or custom category the shop uses.' },
+        category: { type: 'string', description: 'REQUIRED lowercase snake_case. Must be exactly one of: "full_groom", "bath_brush", "puppy", "add_on", "nail_trim", "nail_filing", "de_shed", "teeth_brushing", "ear_cleaning", "anal_glands", "flea_bath", "face_trim", "paw_pad_trim", "sanitary_trim", "hand_scissoring", "mini_groom", "express_service", "special_shampoo", "blueberry_facial", "de_matting", "bow_bandana", or "other" (escape hatch for anything unusual). NEVER use pretty labels like "Full Groom" or "Nail Trim" — the DB will reject them.' },
         price: { type: 'number', description: 'Base price in dollars' },
         time_block_minutes: { type: 'number', description: 'How many minutes this service takes (time block). Common: 15, 30, 45, 60, 90, 120.' },
         description: { type: 'string', description: 'Optional description of what is included' },
-        price_type: { type: 'string', description: 'Optional. "Fixed Price", "Starting At", "Range". Defaults to "Fixed Price".' },
+        price_type: { type: 'string', description: 'Optional. Lowercase only: "fixed", "range", or "starting_at". Defaults to "fixed". NEVER send capitalized labels — DB will reject.' },
         price_max: { type: 'number', description: 'Optional. Upper bound when price_type is "Range".' },
         weight_min: { type: 'number', description: 'Optional. Minimum weight in lbs for this service (e.g., small-dog service = 0-10).' },
         weight_max: { type: 'number', description: 'Optional. Maximum weight in lbs for this service.' },
@@ -399,11 +399,11 @@ var toolDefinitions = [
       properties: {
         service_id: { type: 'string', description: 'The UUID of the service to update' },
         service_name: { type: 'string', description: 'New service name' },
-        category: { type: 'string', description: 'New category' },
+        category: { type: 'string', description: 'New category. Lowercase snake_case only. Must be one of: "full_groom", "bath_brush", "puppy", "add_on", "nail_trim", "nail_filing", "de_shed", "teeth_brushing", "ear_cleaning", "anal_glands", "flea_bath", "face_trim", "paw_pad_trim", "sanitary_trim", "hand_scissoring", "mini_groom", "express_service", "special_shampoo", "blueberry_facial", "de_matting", "bow_bandana", or "other".' },
         price: { type: 'number', description: 'New base price' },
         time_block_minutes: { type: 'number', description: 'New duration in minutes' },
         description: { type: 'string', description: 'New description' },
-        price_type: { type: 'string', description: '"Fixed Price", "Starting At", or "Range"' },
+        price_type: { type: 'string', description: 'Lowercase only: "fixed", "starting_at", or "range"' },
         price_max: { type: 'number', description: 'New upper bound if range' },
         weight_min: { type: 'number', description: 'New min weight' },
         weight_max: { type: 'number', description: 'New max weight' },
@@ -1434,7 +1434,7 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
           category: toolInput.category,
           price: toolInput.price,
           time_block_minutes: toolInput.time_block_minutes,
-          price_type: toolInput.price_type || 'Fixed Price',
+          price_type: toolInput.price_type || 'fixed',
           is_active: true,
         }
         if (toolInput.description !== undefined) newService.description = toolInput.description || null
@@ -1444,6 +1444,55 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
         if (toolInput.coat_type !== undefined) newService.coat_type = toolInput.coat_type || null
         if (toolInput.age_min_months !== undefined) newService.age_min_months = toolInput.age_min_months
         if (toolInput.age_max_months !== undefined) newService.age_max_months = toolInput.age_max_months
+
+        // ─── Safety net: normalize pretty labels to DB-safe snake_case ───
+        // DB CHECK constraint only accepts these exact values. If Claude
+        // slips and sends "Full Groom" or "Fixed Price", convert it here.
+        var categoryMap: any = {
+          // Original 4
+          'Full Groom': 'full_groom', 'full groom': 'full_groom', 'FullGroom': 'full_groom',
+          'Bath': 'bath_brush', 'bath': 'bath_brush',
+          'Bath & Brush': 'bath_brush', 'Bath and Brush': 'bath_brush', 'Bath Brush': 'bath_brush',
+          'Puppy': 'puppy', 'Puppy Groom': 'puppy', 'puppy groom': 'puppy',
+          'Add-on': 'add_on', 'Add On': 'add_on', 'add-on': 'add_on', 'Addon': 'add_on',
+          // Nails
+          'Nail Trim': 'nail_trim', 'nail trim': 'nail_trim', 'Nails': 'nail_trim',
+          'Nail Filing': 'nail_filing', 'Nail File': 'nail_filing', 'nail filing': 'nail_filing', 'Nail Grinding': 'nail_filing',
+          // De-shed
+          'De-shed': 'de_shed', 'De-Shed': 'de_shed', 'Deshed': 'de_shed', 'de shed': 'de_shed', 'De Shed': 'de_shed', 'Deshedding': 'de_shed',
+          // Teeth / ear / glands
+          'Teeth Brushing': 'teeth_brushing', 'Teeth Cleaning': 'teeth_brushing', 'teeth brushing': 'teeth_brushing', 'Teeth': 'teeth_brushing',
+          'Ear Cleaning': 'ear_cleaning', 'Ear Clean': 'ear_cleaning', 'ear cleaning': 'ear_cleaning', 'Ears': 'ear_cleaning',
+          'Anal Glands': 'anal_glands', 'Anal Gland': 'anal_glands', 'Gland Expression': 'anal_glands', 'Glands': 'anal_glands',
+          // Flea
+          'Flea Bath': 'flea_bath', 'flea bath': 'flea_bath', 'Flea Treatment': 'flea_bath',
+          // Trims
+          'Face Trim': 'face_trim', 'face trim': 'face_trim',
+          'Paw Pad Trim': 'paw_pad_trim', 'Paw Pads': 'paw_pad_trim', 'paw pad trim': 'paw_pad_trim', 'Pad Trim': 'paw_pad_trim',
+          'Sanitary Trim': 'sanitary_trim', 'Sanitary': 'sanitary_trim', 'sanitary trim': 'sanitary_trim',
+          'Hand Scissoring': 'hand_scissoring', 'Hand Scissor': 'hand_scissoring', 'hand scissoring': 'hand_scissoring', 'Scissoring': 'hand_scissoring',
+          // Alt groom options
+          'Mini Groom': 'mini_groom', 'mini groom': 'mini_groom', 'Mini': 'mini_groom',
+          'Express': 'express_service', 'Express Service': 'express_service', 'Rush': 'express_service', 'express': 'express_service',
+          // Specialty
+          'Special Shampoo': 'special_shampoo', 'Medicated Shampoo': 'special_shampoo', 'Oatmeal Shampoo': 'special_shampoo', 'Medicated Bath': 'special_shampoo',
+          'Blueberry Facial': 'blueberry_facial', 'blueberry facial': 'blueberry_facial', 'Facial': 'blueberry_facial',
+          'De-matting': 'de_matting', 'Dematting': 'de_matting', 'De Matting': 'de_matting', 'de-matting': 'de_matting', 'Demat': 'de_matting',
+          'Bow': 'bow_bandana', 'Bandana': 'bow_bandana', 'Bow/Bandana': 'bow_bandana', 'Bow & Bandana': 'bow_bandana', 'Bows': 'bow_bandana',
+          // Escape hatch
+          'Other': 'other', 'OTHER': 'other',
+        }
+        var priceTypeMap: any = {
+          'Fixed Price': 'fixed', 'Fixed': 'fixed', 'FIXED': 'fixed', 'Flat': 'fixed', 'Flat Rate': 'fixed',
+          'Starting At': 'starting_at', 'starting at': 'starting_at', 'Starts At': 'starting_at', 'From': 'starting_at',
+          'Range': 'range', 'RANGE': 'range', 'Price Range': 'range',
+        }
+        if (newService.category && categoryMap[newService.category]) {
+          newService.category = categoryMap[newService.category]
+        }
+        if (newService.price_type && priceTypeMap[newService.price_type]) {
+          newService.price_type = priceTypeMap[newService.price_type]
+        }
 
         var { data: created, error } = await supabaseAdmin
           .from('services')
@@ -1470,6 +1519,53 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
         if (toolInput.age_max_months !== undefined) updates.age_max_months = toolInput.age_max_months
         if (toolInput.is_active !== undefined) updates.is_active = toolInput.is_active
         if (Object.keys(updates).length === 0) return { success: false, error: 'No fields to update' }
+
+        // ─── Safety net: normalize pretty labels to DB-safe snake_case ───
+        var updateCategoryMap: any = {
+          // Original 4
+          'Full Groom': 'full_groom', 'full groom': 'full_groom', 'FullGroom': 'full_groom',
+          'Bath': 'bath_brush', 'bath': 'bath_brush',
+          'Bath & Brush': 'bath_brush', 'Bath and Brush': 'bath_brush', 'Bath Brush': 'bath_brush',
+          'Puppy': 'puppy', 'Puppy Groom': 'puppy', 'puppy groom': 'puppy',
+          'Add-on': 'add_on', 'Add On': 'add_on', 'add-on': 'add_on', 'Addon': 'add_on',
+          // Nails
+          'Nail Trim': 'nail_trim', 'nail trim': 'nail_trim', 'Nails': 'nail_trim',
+          'Nail Filing': 'nail_filing', 'Nail File': 'nail_filing', 'nail filing': 'nail_filing', 'Nail Grinding': 'nail_filing',
+          // De-shed
+          'De-shed': 'de_shed', 'De-Shed': 'de_shed', 'Deshed': 'de_shed', 'de shed': 'de_shed', 'De Shed': 'de_shed', 'Deshedding': 'de_shed',
+          // Teeth / ear / glands
+          'Teeth Brushing': 'teeth_brushing', 'Teeth Cleaning': 'teeth_brushing', 'teeth brushing': 'teeth_brushing', 'Teeth': 'teeth_brushing',
+          'Ear Cleaning': 'ear_cleaning', 'Ear Clean': 'ear_cleaning', 'ear cleaning': 'ear_cleaning', 'Ears': 'ear_cleaning',
+          'Anal Glands': 'anal_glands', 'Anal Gland': 'anal_glands', 'Gland Expression': 'anal_glands', 'Glands': 'anal_glands',
+          // Flea
+          'Flea Bath': 'flea_bath', 'flea bath': 'flea_bath', 'Flea Treatment': 'flea_bath',
+          // Trims
+          'Face Trim': 'face_trim', 'face trim': 'face_trim',
+          'Paw Pad Trim': 'paw_pad_trim', 'Paw Pads': 'paw_pad_trim', 'paw pad trim': 'paw_pad_trim', 'Pad Trim': 'paw_pad_trim',
+          'Sanitary Trim': 'sanitary_trim', 'Sanitary': 'sanitary_trim', 'sanitary trim': 'sanitary_trim',
+          'Hand Scissoring': 'hand_scissoring', 'Hand Scissor': 'hand_scissoring', 'hand scissoring': 'hand_scissoring', 'Scissoring': 'hand_scissoring',
+          // Alt groom options
+          'Mini Groom': 'mini_groom', 'mini groom': 'mini_groom', 'Mini': 'mini_groom',
+          'Express': 'express_service', 'Express Service': 'express_service', 'Rush': 'express_service', 'express': 'express_service',
+          // Specialty
+          'Special Shampoo': 'special_shampoo', 'Medicated Shampoo': 'special_shampoo', 'Oatmeal Shampoo': 'special_shampoo', 'Medicated Bath': 'special_shampoo',
+          'Blueberry Facial': 'blueberry_facial', 'blueberry facial': 'blueberry_facial', 'Facial': 'blueberry_facial',
+          'De-matting': 'de_matting', 'Dematting': 'de_matting', 'De Matting': 'de_matting', 'de-matting': 'de_matting', 'Demat': 'de_matting',
+          'Bow': 'bow_bandana', 'Bandana': 'bow_bandana', 'Bow/Bandana': 'bow_bandana', 'Bow & Bandana': 'bow_bandana', 'Bows': 'bow_bandana',
+          // Escape hatch
+          'Other': 'other', 'OTHER': 'other',
+        }
+        var updatePriceTypeMap: any = {
+          'Fixed Price': 'fixed', 'Fixed': 'fixed', 'FIXED': 'fixed', 'Flat': 'fixed', 'Flat Rate': 'fixed',
+          'Starting At': 'starting_at', 'starting at': 'starting_at', 'Starts At': 'starting_at', 'From': 'starting_at',
+          'Range': 'range', 'RANGE': 'range', 'Price Range': 'range',
+        }
+        if (updates.category && updateCategoryMap[updates.category]) {
+          updates.category = updateCategoryMap[updates.category]
+        }
+        if (updates.price_type && updatePriceTypeMap[updates.price_type]) {
+          updates.price_type = updatePriceTypeMap[updates.price_type]
+        }
 
         updates.updated_at = new Date().toISOString()
 

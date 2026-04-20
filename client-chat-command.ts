@@ -19,6 +19,66 @@ var supabaseAdmin = createClient(
 var claudeKey = Deno.env.get('CLAUDE_API_KEY') ?? ''
 
 // ============================================================
+// PUSH NOTIFICATION HELPER — fires a browser push to a user.
+// Fire-and-forget: we NEVER want a push failure to block a
+// user's action (like booking). All errors are logged + swallowed.
+// ============================================================
+async function sendPushToUser(userId: string, title: string, body: string, url: string, tag?: string) {
+  if (!userId || !title) return
+  try {
+    var supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+    var serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    if (!supabaseUrl || !serviceKey) {
+      console.warn('[push] SUPABASE_URL or SERVICE_ROLE_KEY missing — skipping push')
+      return
+    }
+    var res = await fetch(supabaseUrl + '/functions/v1/send-push', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + serviceKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        title: title,
+        body: body || '',
+        url: url || '/',
+        tag: tag || undefined,
+      }),
+    })
+    if (!res.ok) {
+      var txt = await res.text().catch(function () { return '' })
+      console.warn('[push] send-push returned', res.status, txt)
+    }
+  } catch (err) {
+    console.warn('[push] sendPushToUser failed (non-fatal):', err)
+  }
+}
+
+// Format a 24h "HH:MM" time into "h:MM am/pm" for notification previews
+function formatTimeForPush(hhmm: string): string {
+  if (!hhmm) return ''
+  var p = String(hhmm).split(':')
+  var h = parseInt(p[0], 10)
+  var m = parseInt(p[1] || '0', 10)
+  var ampm = h >= 12 ? 'pm' : 'am'
+  var h12 = h % 12 === 0 ? 12 : h % 12
+  var mm = m < 10 ? '0' + m : String(m)
+  return h12 + ':' + mm + ampm
+}
+
+// Format a YYYY-MM-DD into a short "Mon Apr 22" style label
+function formatDateForPush(ymd: string): string {
+  if (!ymd) return ''
+  var parts = String(ymd).split('-')
+  if (parts.length !== 3) return ymd
+  var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  var mIdx = parseInt(parts[1], 10) - 1
+  if (mIdx < 0 || mIdx > 11) return ymd
+  return months[mIdx] + ' ' + parseInt(parts[2], 10)
+}
+
+// ============================================================
 // BOOKING RULES CHECKER — enforces shop_settings.booking_rules
 // Mirror of /src/lib/bookingRules.js for this edge function runtime.
 // Phase 6 Step 3c.
@@ -595,6 +655,56 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
             service_id: toolInput.service_id || null,
           })
         if (junctionErr) console.error('[BOOK] junction insert error:', junctionErr.message)
+
+        // ================================================================
+        // PUSH NOTIFY GROOMER — Triggers #2 (new booking) + #4 (AI flagged)
+        // Fire-and-forget: swallow all errors so push never blocks booking.
+        // ================================================================
+        try {
+          // Look up client first name + service name for a nice preview
+          var { data: clientRowForPush } = await supabaseAdmin
+            .from('clients')
+            .select('first_name, last_name')
+            .eq('id', clientId)
+            .maybeSingle()
+          var clientNameForPush = clientRowForPush
+            ? ((clientRowForPush.first_name || '') + (clientRowForPush.last_name ? ' ' + clientRowForPush.last_name : '')).trim()
+            : ''
+          if (!clientNameForPush) clientNameForPush = 'A client'
+
+          var serviceNameForPush = ''
+          if (toolInput.service_id) {
+            var { data: svcRowForPush } = await supabaseAdmin
+              .from('services')
+              .select('service_name')
+              .eq('id', toolInput.service_id)
+              .maybeSingle()
+            serviceNameForPush = (svcRowForPush && svcRowForPush.service_name) || ''
+          }
+
+          var petNameForPush = (petCheck && petCheck.name) || 'pet'
+          var whenForPush = formatDateForPush(toolInput.appointment_date) + ' @ ' + formatTimeForPush(toolInput.start_time)
+
+          var pushTitle: string
+          var pushUrl: string
+          var pushTag: string
+          if (shouldAutoBook) {
+            pushTitle = '🐾 New booking — ' + clientNameForPush
+            pushUrl = '/calendar'
+            pushTag = 'booking-' + newAppt.id
+          } else {
+            pushTitle = '⚠️ PetPro AI flagged a booking'
+            pushUrl = '/flagged'
+            pushTag = 'flagged-' + newAppt.id
+          }
+          var pushBody = petNameForPush
+            + (serviceNameForPush ? ' — ' + serviceNameForPush : '')
+            + ' — ' + whenForPush
+
+          await sendPushToUser(groomerId, pushTitle, pushBody, pushUrl, pushTag)
+        } catch (pushErr) {
+          console.warn('[push] notify groomer of booking failed (non-fatal):', pushErr)
+        }
 
         return {
           success: true,

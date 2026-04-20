@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import MessageBubble from '../components/MessageBubble'
 import MessageComposer from '../components/MessageComposer'
+import { notifyUser } from '../lib/push'
 
 export default function Messages() {
   var [user, setUser] = useState(null)
@@ -225,6 +226,34 @@ export default function Messages() {
       .update({ last_message_at: data.created_at })
       .eq('id', selectedThreadId)
 
+    // ─── Push notify the client (fire and forget — never blocks send) ───
+    ;(async function notifyClient() {
+      try {
+        var { data: clientRow } = await supabase
+          .from('clients')
+          .select('user_id')
+          .eq('id', selected.client_id)
+          .maybeSingle()
+        if (!clientRow?.user_id) return // client has no portal account, skip
+        var { data: shopRow } = await supabase
+          .from('shop_settings')
+          .select('shop_name')
+          .eq('groomer_id', user.id)
+          .maybeSingle()
+        var shopName = (shopRow && shopRow.shop_name) || 'Your groomer'
+        var preview = text ? text.slice(0, 100) : '📷 Sent a photo'
+        notifyUser({
+          userId: clientRow.user_id,
+          title: shopName,
+          body: preview,
+          url: '/portal/messages/' + selectedThreadId,
+          tag: 'thread-' + selectedThreadId,
+        })
+      } catch (e) {
+        console.warn('[push] notify client failed (non-fatal):', e)
+      }
+    })()
+
     // Optimistic append + thread bump
     setMessages(function (prev) {
       if (prev.find(function (m) { return m.id === data.id })) return prev
@@ -303,6 +332,34 @@ export default function Messages() {
         .from('threads')
         .update({ last_message_at: msg.created_at })
         .eq('id', thread.id)
+
+      // ─── Push notify the client (fire and forget) ───
+      ;(async function notifyNewChatClient() {
+        try {
+          var { data: clientRow } = await supabase
+            .from('clients')
+            .select('user_id')
+            .eq('id', newChatClientId)
+            .maybeSingle()
+          if (!clientRow?.user_id) return
+          var { data: shopRow } = await supabase
+            .from('shop_settings')
+            .select('shop_name')
+            .eq('groomer_id', user.id)
+            .maybeSingle()
+          var shopName = (shopRow && shopRow.shop_name) || 'Your groomer'
+          var preview = newChatMessage.trim().slice(0, 100)
+          notifyUser({
+            userId: clientRow.user_id,
+            title: shopName,
+            body: preview,
+            url: '/portal/messages/' + thread.id,
+            tag: 'thread-' + thread.id,
+          })
+        } catch (e) {
+          console.warn('[push] notify new-chat client failed (non-fatal):', e)
+        }
+      })()
 
       closeNewChatModal()
       await loadAll(user.id)

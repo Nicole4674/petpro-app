@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import MessageBubble from '../components/MessageBubble'
 import MessageComposer from '../components/MessageComposer'
+import { notifyUser } from '../lib/push'
 
 export default function ClientPortalThread() {
   var navigate = useNavigate()
@@ -348,6 +349,23 @@ export default function ClientPortalThread() {
       .from('threads')
       .update({ last_message_at: data.created_at })
       .eq('id', thread.id)
+
+    // ─── Push notify the groomer (fire and forget) ───
+    ;(function notifyGroomer() {
+      try {
+        var senderName = (clientRow.first_name || 'Client')
+        var preview = text ? text.slice(0, 100) : '📷 Sent a photo'
+        notifyUser({
+          userId: thread.groomer_id,
+          title: 'Message from ' + senderName,
+          body: preview,
+          url: '/messages',
+          tag: 'thread-' + thread.id,
+        })
+      } catch (e) {
+        console.warn('[push] notify groomer failed (non-fatal):', e)
+      }
+    })()
 
     // Optimistic append
     setMessages(function (prev) {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { notifyUser } from '../lib/push'
 
 function formatTime(timeStr) {
   if (!timeStr) return ''
@@ -66,6 +67,51 @@ export default function FlaggedBookings() {
       .eq('id', appointmentId)
 
     if (!error) {
+      // ============================================================
+      // PUSH NOTIFY CLIENT — Trigger #7: booking approved / declined
+      // Fire-and-forget: swallow all errors so push never blocks UI.
+      // ============================================================
+      ;(async function notifyClientOfDecision() {
+        try {
+          const appt = appointments.find((a) => a.id === appointmentId)
+          if (!appt || !appt.client_id) return
+
+          // Look up the client's auth user_id (push recipient)
+          const { data: clientRow } = await supabase
+            .from('clients')
+            .select('user_id')
+            .eq('id', appt.client_id)
+            .maybeSingle()
+          if (!clientRow || !clientRow.user_id) return
+
+          const petName = (appt.pets && appt.pets.name) || 'your pet'
+          const svcName = (appt.services && appt.services.service_name) || ''
+          const whenStr = formatDate(appt.appointment_date) + ' @ ' + formatTime(appt.start_time)
+
+          let pushTitle
+          let pushBody
+          if (newStatus === 'approved') {
+            pushTitle = '✅ Booking confirmed'
+            pushBody = petName + (svcName ? ' — ' + svcName : '') + ' is set for ' + whenStr
+          } else if (newStatus === 'disapproved') {
+            pushTitle = '❌ Booking couldn\'t be approved'
+            pushBody = petName + ' on ' + whenStr + ' — message your groomer to pick another time.'
+          } else {
+            return
+          }
+
+          notifyUser({
+            userId: clientRow.user_id,
+            title: pushTitle,
+            body: pushBody,
+            url: '/portal',
+            tag: 'decision-' + appointmentId,
+          })
+        } catch (e) {
+          console.warn('[push] notify client of decision failed (non-fatal):', e)
+        }
+      })()
+
       fetchFlaggedAppointments()
     }
   }
