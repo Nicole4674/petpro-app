@@ -117,7 +117,7 @@ export default function ClientLogin() {
               borderRadius: '8px',
               color: '#991b1b',
               marginBottom: '16px',
-              fontSize: '14px'
+              fontSize: '15px'
             }}>
               {error}
             </div>
@@ -202,7 +202,7 @@ function LoginField({ label, value, onChange, placeholder, type }) {
           padding: '11px 12px',
           border: '1px solid #d1d5db',
           borderRadius: '8px',
-          fontSize: '14px',
+          fontSize: '16px',
           boxSizing: 'border-box'
         }}
       />

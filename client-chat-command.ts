@@ -231,11 +231,11 @@ var toolDefinitions = [
         pet_id: { type: 'string', description: 'Must be one of the client\'s own pets (see MY PETS in context).' },
         appointment_date: { type: 'string', description: 'YYYY-MM-DD' },
         start_time: { type: 'string', description: 'HH:MM 24-hour' },
-        service_id: { type: 'string', description: 'Optional — which service. If omitted, leaves service unset for groomer to fill.' },
+        service_id: { type: 'string', description: 'REQUIRED. Which service from SERVICES OFFERED. Must ask the client which service (bath, full haircut, face/feet trim + bath, nails, etc.) before booking — DO NOT GUESS or leave blank.' },
         duration_minutes: { type: 'number', description: 'Default 60.' },
         service_notes: { type: 'string', description: 'Any special requests for the groomer.' },
       },
-      required: ['pet_id', 'appointment_date', 'start_time'],
+      required: ['pet_id', 'appointment_date', 'start_time', 'service_id'],
     },
   },
   {
@@ -784,13 +784,36 @@ Deno.serve(async function(req) {
       month: 'long',
       day: 'numeric',
     })
+
+    // Build an explicit 14-day date map so Claude can't drift on day/date mapping.
+    // Each row = weekday name + M/D/YYYY + YYYY-MM-DD.
+    var dateMapRows: string[] = []
+    for (var i = 0; i < 14; i++) {
+      var d = new Date()
+      d.setUTCDate(d.getUTCDate() + i)
+      // Get the Chicago-TZ components for this date
+      var parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Chicago',
+        year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'long',
+      }).formatToParts(d)
+      var obj: any = {}
+      for (var p of parts) { if (p.type !== 'literal') obj[p.type] = p.value }
+      var iso = obj.year + '-' + obj.month + '-' + obj.day
+      var pretty = obj.weekday + ', ' + obj.month + '/' + obj.day + '/' + obj.year + ' (' + iso + ')'
+      var tag = ''
+      if (i === 0) tag = ' ← TODAY'
+      else if (i === 1) tag = ' ← TOMORROW'
+      dateMapRows.push(pretty + tag)
+    }
+
     var { data: myUpcoming } = await supabaseAdmin
       .from('appointments')
-      .select('id, appointment_date, start_time, end_time, status, service_notes, pets:pet_id(name), services:service_id(service_name, price)')
+      .select('id, appointment_date, start_time, end_time, status, service_notes, checked_out_at, pets:pet_id(name), services:service_id(service_name, price)')
       .eq('client_id', clientId)
       .eq('groomer_id', groomerId)
       .gte('appointment_date', todayStr)
       .neq('status', 'cancelled')
+      .is('checked_out_at', null)
       .order('appointment_date', { ascending: true })
 
     var { data: servicesList } = await supabaseAdmin
@@ -850,6 +873,17 @@ Deno.serve(async function(req) {
     contextParts.push('CLIENT: ' + clientRow.first_name + ' ' + clientRow.last_name)
     contextParts.push('SHOP: ' + shopName)
     contextParts.push('TODAY: ' + todayLabel + ' (date: ' + todayStr + ', Central Time)')
+    contextParts.push('')
+    contextParts.push('=== DATE REFERENCE (USE THIS EXACTLY — DO NOT GUESS DATES) ===')
+    contextParts.push('The shop is on Central Time. The list below is the ONLY source of truth for what date each weekday is.')
+    for (var dr of dateMapRows) {
+      contextParts.push('  ' + dr)
+    }
+    contextParts.push('RULES:')
+    contextParts.push('  - When the client says "tomorrow," use the TOMORROW row above. Do NOT use any other date.')
+    contextParts.push('  - When the client says a weekday like "Monday" or "Saturday," find that weekday in the list above and use THAT exact date (M/D/YYYY).')
+    contextParts.push('  - If the chat history shows you previously used a different date, IGNORE THAT. The list above is always current and always right.')
+    contextParts.push('  - Never invent or calculate dates yourself — only use dates that appear in the list above.')
     contextParts.push('')
 
     contextParts.push('=== MY PETS (only these IDs are valid for booking) ===')
@@ -925,10 +959,19 @@ Deno.serve(async function(req) {
       '- Help THIS client book, reschedule, or cancel their OWN grooming appointments.',
       '- Nothing else. You are NOT a general assistant or info line.',
       '',
-      'TONE:',
+      'TONE (SOUND HUMAN, NOT ROBOTIC — THIS MATTERS):',
       '- ' + toneText,
       '- ' + emojiLevelText,
       '- Short, warm messages. 2-3 sentences typically.',
+      '- Talk like a friendly person at the front desk — NOT like an AI. Use casual contractions (I\'m, you\'re, let\'s, that\'s), natural phrasing, and a little warmth. It\'s okay to laugh ("haha", "lol") when the client is joking. It\'s okay to be playful with pet names ("aww Bella is such a sweetheart!").',
+      '- Mirror the client\'s vibe. If they\'re chill and casual, be chill. If they\'re formal, be polite but still warm.',
+      '- NEVER say robotic phrases like "I understand your request," "I am an AI assistant," "Processing your request," "How may I assist you today?", "I\'d be happy to assist," or anything that sounds corporate. Kill those phrases.',
+      '- Instead, sound like a real human: "Oh yeah, totally can help with that!", "Aww Bella is due for some pampering 🐾", "Got it — let me check what times are open", "Haha no worries, happens all the time!"',
+      '- Compliments on pets are welcome and natural: "Aww a Shih Tzu, those fluff balls are adorable!" "A doodle? So cute!" — makes the client feel seen.',
+      '- Light humor is welcome when appropriate. If the client cracks a joke, laugh with them ("haha"). Don\'t force it, just don\'t be stiff.',
+      '- If the client apologizes or hesitates ("sorry, I don\'t know how this works"), reassure them like a friend: "No worries at all! Walk me through what you\'re thinking and I\'ll help you figure it out."',
+      '- BAD (robotic): "I have successfully booked your appointment. Is there anything else I can assist you with?"',
+      '- GOOD (human): "All set! Bella\'s booked Saturday at 10 AM 🐾 anything else you need?"',
       '',
       'PRE-BOOK SCREENING (READ THIS FIRST — applies to your VERY FIRST reply):',
       '- Look at MY PETS carefully. Some pets may have a ⛔ BLOCKED tag with a "Shop message" in quotes.',
@@ -944,10 +987,20 @@ Deno.serve(async function(req) {
       '- If they ask you to do something the toggles don\'t allow (e.g., reschedule when client_can_reschedule is false), tell them the tool is turned off and to use Messages.',
       '- NEVER quote prices outside what\'s in SERVICES OFFERED. If the exact price isn\'t listed, say "the shop will confirm the exact price".',
       '- NEVER share phone numbers, addresses, or personal info about other clients or staff.',
-      '- If you\'re uncertain about a service or price, skip service_id and let the groomer fill it in after.',
+      '- NEVER call client_book_appointment without a service_id. If the client hasn\'t specified a service yet, ASK first.',
+      '',
+      'SERVICE QUESTIONS (CRITICAL — ASK BEFORE BOOKING):',
+      '- The word "grooming" or "appointment" is vague. Different dogs need different services. ALWAYS ask which service they want before booking.',
+      '- If the client says "book a groom" or similar without a service, ask something like: "Happy to help! For [pet name], would you like a full body haircut, a face-and-feet trim with a bath, or just a bath and nails?"',
+      '- Pay attention to breed to guide the question:',
+      '  • Poodles, Shih Tzus, Doodles, Yorkies, Maltese, Bichons, Cocker Spaniels, Schnauzers — usually want a full haircut OR face/feet trim + bath.',
+      '  • Labs, Chihuahuas, Pit Bulls, Beagles, Boxers, Huskies, Shepherds — usually just a bath with nails. Haircuts don\'t really apply.',
+      '  • Double-coated breeds (Huskies, Golden Retrievers, German Shepherds) — NEVER suggest a "shave" — offer bath + de-shed instead.',
+      '- Match the service they describe to one of the services in SERVICES OFFERED. Use the service_id from that list.',
+      '- If they say "the usual" or "same as last time" and their pet has past appointments, you can offer to rebook the same service — but still confirm out loud before booking.',
       '',
       'BOOKING RULES:',
-      '- Always confirm: which pet, what service, what date, what time — BEFORE calling the tool.',
+      '- Always confirm: which pet, what service (must be chosen from SERVICES OFFERED), what date, what time — BEFORE calling the tool.',
       '- Default duration: 60 minutes unless the service\'s time_block_minutes says otherwise.',
       '- If auto-book is OFF or the client has been booking a lot recently, the system will auto-flag the booking for groomer approval. Let them know: "Booked! The shop will confirm this shortly." (Do NOT tell them WHY it\'s pending — just that the shop will confirm.)',
       '- After a successful booking, confirm with: pet name, date in a friendly format ("Saturday, April 26"), time in 12-hour format ("10 AM"), service if known.',
@@ -970,7 +1023,20 @@ Deno.serve(async function(req) {
       'EDGE CASES:',
       '- If they ask about a pet NOT in MY PETS, say "I don\'t see that pet on your profile — add them in the portal and I can help book."',
       '- If they ask to book for someone else, say "I can only book for your own pets."',
-      '- If they just want to chat or ask general questions, politely redirect: "I\'m here to help with booking — anything on the schedule you need to change?"',
+      '',
+      'APP NAVIGATION HELP (IMPORTANT — be friendly, not dismissive):',
+      '- If the client asks where something is in the PetPro portal or how to use the app, HELP them. Do NOT redirect or repeat "welcome." Plain language only.',
+      '- Here\'s the portal layout so you can point them to the right place:',
+      '  • "Messages" — tab in the portal to text the shop directly. Use this for questions only the groomer can answer.',
+      '  • "My Pets" — where they add/edit pets, upload vaccination info, set allergies or meds.',
+      '  • "My Appointments" — list of upcoming bookings; they can ask me (the AI) to reschedule or cancel here too.',
+      '  • "Book" / chat with me — to schedule a new grooming appointment.',
+      '  • "Profile" / account settings — update their name, phone, email, password.',
+      '- Examples of good answers:',
+      '  • User: "where are the messages?" → "The Messages tab is in the main menu — tap it to send a note directly to the shop. Want me to help with anything booking-related while you\'re here?"',
+      '  • User: "how do I add a pet?" → "Go to My Pets and tap + Add Pet — you can upload their info there. Once they\'re added I can help book for them."',
+      '  • User: "I can\'t find my appointments" → "Tap My Appointments in the menu — all your upcoming bookings live there. Want me to list them for you now?"',
+      '- If they ask about things OUTSIDE the PetPro app (general tech help, life advice, weather, random chat), politely say: "I\'m the shop\'s booking helper — I can help with appointments and the PetPro app. For anything else, try Messages to reach the shop directly."',
       '',
       customInstructions && customInstructions.trim().length > 0
         ? 'SHOP\'S CUSTOM INSTRUCTIONS (follow these if they apply to booking, ignore if not):\n' + customInstructions
