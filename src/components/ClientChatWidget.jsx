@@ -12,6 +12,107 @@ export default function ClientChatWidget() {
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
+  // --- Draggable widget state ---
+  // position = { x, y } (top-left corner in px) or null = use default CSS (bottom-right)
+  const [position, setPosition] = useState(null)
+  const [dragging, setDragging] = useState(false)
+  const dragOffsetRef = useRef({ x: 0, y: 0 })
+  const widgetSizeRef = useRef({ w: 380, h: 520 })
+
+  // Load saved position from localStorage on mount
+  useEffect(() => {
+    try {
+      var saved = localStorage.getItem('petpro_client_chat_pos')
+      if (saved) {
+        var parsed = JSON.parse(saved)
+        if (parsed && typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+          setPosition(parsed)
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }, [])
+
+  // Clamp position so widget always stays visible
+  function clampPosition(x, y) {
+    var w = widgetSizeRef.current.w
+    var h = widgetSizeRef.current.h
+    var maxX = window.innerWidth - w
+    var maxY = window.innerHeight - h
+    if (maxX < 0) maxX = 0
+    if (maxY < 0) maxY = 0
+    if (x < 0) x = 0
+    if (y < 0) y = 0
+    if (x > maxX) x = maxX
+    if (y > maxY) y = maxY
+    return { x: x, y: y }
+  }
+
+  // Mouse/touch event helpers
+  function getPoint(e) {
+    if (e.touches && e.touches[0]) return { x: e.touches[0].clientX, y: e.touches[0].clientY }
+    return { x: e.clientX, y: e.clientY }
+  }
+
+  function onDragStart(e) {
+    // Don't start drag if they clicked a button in the header (close, clear)
+    if (e.target && e.target.closest && e.target.closest('button')) return
+
+    var point = getPoint(e)
+    // Find the current widget position on screen
+    var widgetEl = e.currentTarget.parentElement // .chat-window
+    if (widgetEl) {
+      var rect = widgetEl.getBoundingClientRect()
+      widgetSizeRef.current = { w: rect.width, h: rect.height }
+      dragOffsetRef.current = { x: point.x - rect.left, y: point.y - rect.top }
+      // Snap position to current location before dragging (so first move doesn't jump)
+      setPosition({ x: rect.left, y: rect.top })
+    }
+    setDragging(true)
+    if (e.preventDefault) e.preventDefault()
+  }
+
+  // Attach global listeners while dragging
+  useEffect(() => {
+    if (!dragging) return
+    function onMove(e) {
+      var point = getPoint(e)
+      var newX = point.x - dragOffsetRef.current.x
+      var newY = point.y - dragOffsetRef.current.y
+      setPosition(clampPosition(newX, newY))
+      if (e.preventDefault) e.preventDefault()
+    }
+    function onEnd() {
+      setDragging(false)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onEnd)
+    window.addEventListener('touchmove', onMove, { passive: false })
+    window.addEventListener('touchend', onEnd)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onEnd)
+      window.removeEventListener('touchmove', onMove)
+      window.removeEventListener('touchend', onEnd)
+    }
+  }, [dragging])
+
+  // Persist position whenever it settles (not while actively dragging, to avoid spam)
+  useEffect(() => {
+    if (!dragging && position) {
+      try { localStorage.setItem('petpro_client_chat_pos', JSON.stringify(position)) } catch (e) { /* ignore */ }
+    }
+  }, [dragging, position])
+
+  // Re-clamp on window resize so the widget doesn't end up off-screen
+  useEffect(() => {
+    function onResize() {
+      if (position) setPosition(function(p) { return p ? clampPosition(p.x, p.y) : p })
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [position])
+
   // On mount: check if client Claude is enabled for this client's groomer
   useEffect(() => {
     async function checkEnabled() {
@@ -135,9 +236,23 @@ export default function ClientChatWidget() {
 
       {/* Chat Window */}
       {isOpen && (
-        <div className="chat-window">
-          {/* Chat Header */}
-          <div className="chat-header">
+        <div
+          className="chat-window"
+          style={position ? {
+            left: position.x + 'px',
+            top: position.y + 'px',
+            bottom: 'auto',
+            right: 'auto',
+          } : undefined}
+        >
+          {/* Chat Header — also the drag handle */}
+          <div
+            className="chat-header"
+            onMouseDown={onDragStart}
+            onTouchStart={onDragStart}
+            style={{ cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none', userSelect: 'none' }}
+            title="Drag to move"
+          >
             <div className="chat-header-info">
               <span className="chat-header-dot"></span>
               <span className="chat-header-title">Shop AI Assistant</span>
