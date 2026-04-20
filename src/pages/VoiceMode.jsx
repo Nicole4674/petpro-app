@@ -34,6 +34,11 @@ export default function VoiceMode() {
     // Mirror of partialTranscript so closures (like handleMicClick) can read
     // the live interim text without stale React state.
     const partialTranscriptRef = useRef('')
+    // Tracks the TOTAL final text we've already processed from the current
+    // recognition session. Android Chrome keeps expanding the same result
+    // (hey → hey Pepper → hey Pepper do…) and we must only process the NEW
+    // portion each time, not re-append the whole thing.
+    const prevFinalsTextRef = useRef('')
 
     // Keep refs in sync with state
     useEffect(() => {
@@ -71,15 +76,18 @@ export default function VoiceMode() {
         recognition.maxAlternatives = 3 // get more guesses for fuzzy wake word matching
 
         recognition.onresult = function (event) {
-            var finalTranscript = ''
+            // Build the TOTAL final text across all results. Android Chrome
+            // mutates already-final results as more words come in, so we have
+            // to compare against what we've already processed and only act on
+            // the delta (the brand-new portion).
+            var allFinalText = ''
             var interimTranscript = ''
             var alternates = []
 
-            for (var i = event.resultIndex; i < event.results.length; i++) {
+            for (var i = 0; i < event.results.length; i++) {
                 var primary = event.results[i][0].transcript
                 if (event.results[i].isFinal) {
-                    finalTranscript += primary
-                    // Collect alternatives for wake word fuzzy matching
+                    allFinalText += primary
                     for (var a = 0; a < event.results[i].length; a++) {
                         alternates.push(event.results[i][a].transcript)
                     }
@@ -88,21 +96,26 @@ export default function VoiceMode() {
                 }
             }
 
+            // Delta = the new final text since the last event fired
+            var prev = prevFinalsTextRef.current || ''
+            var deltaFinalText = ''
+            if (allFinalText.indexOf(prev) === 0) {
+                deltaFinalText = allFinalText.substring(prev.length)
+            } else {
+                // Recognition restarted or diverged — treat everything as new
+                deltaFinalText = allFinalText
+            }
+            prevFinalsTextRef.current = allFinalText
+
             if (interimTranscript) {
                 setPartialTranscript(interimTranscript)
                 partialTranscriptRef.current = interimTranscript
-                // Check interim too — catches wake word faster (don't wait for final)
                 if (handsFreeRef.current && !wakeWordRef.current && statusRef.current === 'listening') {
                     if (detectWakeWord(interimTranscript)) {
                         // Will be handled when final arrives
                     }
                 }
-                // Keep the silence timer alive while the mic is still picking
-                // up speech. Applies in BOTH modes:
-                //   - hands-free after wake word is active
-                //   - push-to-talk while the mic is open
-                // Prevents cutting the user off mid-sentence ("hey..." before
-                // they finish "...what's my schedule today").
+                // Keep silence timer alive while mic is still picking up speech
                 if (
                     (wakeWordRef.current && commandTimerRef.current) ||
                     (!handsFreeRef.current && statusRef.current === 'listening')
@@ -111,12 +124,11 @@ export default function VoiceMode() {
                 }
             }
 
-            if (finalTranscript) {
+            if (deltaFinalText.trim()) {
                 setPartialTranscript('')
                 partialTranscriptRef.current = ''
-                // Reset restart attempts on successful result
                 restartAttemptsRef.current = 0
-                handleFinalTranscript(finalTranscript.trim(), alternates)
+                handleFinalTranscript(deltaFinalText.trim(), alternates)
             }
         }
 
@@ -210,6 +222,7 @@ export default function VoiceMode() {
         setTimeout(function () {
             if (handsFreeRef.current && recognitionRef.current && !document.hidden) {
                 try {
+                    prevFinalsTextRef.current = '' // fresh recognition session
                     recognitionRef.current.start()
                     setStatus('listening')
                     restartAttemptsRef.current = 0 // reset on success
@@ -633,6 +646,7 @@ export default function VoiceMode() {
             setPartialTranscript('')
             partialTranscriptRef.current = ''
             commandBufferRef.current = '' // clear any stale text
+            prevFinalsTextRef.current = '' // fresh session — nothing processed yet
             processingRef.current = false
             // Kill any lingering browser speech so we don't dump queued
             // replies when mic turns on.
@@ -679,6 +693,7 @@ export default function VoiceMode() {
             processingRef.current = false
             setPartialTranscript('')
             partialTranscriptRef.current = ''
+            prevFinalsTextRef.current = '' // fresh recognition session
             // Prime AudioContext for beep (browsers require user gesture)
             try {
                 if (!audioCtxRef.current) {
