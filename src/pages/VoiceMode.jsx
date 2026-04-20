@@ -76,18 +76,28 @@ export default function VoiceMode() {
         recognition.maxAlternatives = 3 // get more guesses for fuzzy wake word matching
 
         recognition.onresult = function (event) {
-            // Build the TOTAL final text across all results. Android Chrome
-            // mutates already-final results as more words come in, so we have
-            // to compare against what we've already processed and only act on
-            // the delta (the brand-new portion).
-            var allFinalText = ''
+            // ----------------------------------------------------------------
+            // Android Chrome quirk: in continuous+interim mode, each new final
+            // result at a higher index often CONTAINS the previous finals as a
+            // prefix (cumulative growth of the same utterance). Concatenating
+            // all final results therefore produces "heyhey pethey pet Pro..."
+            //
+            // Strategy: only look at the LATEST (highest-index) final result.
+            // That's the most complete view of the current utterance. We then
+            // take the delta vs. what we already committed, so we only
+            // process the brand-new words.
+            // ----------------------------------------------------------------
+            var latestFinal = ''
             var interimTranscript = ''
             var alternates = []
 
             for (var i = 0; i < event.results.length; i++) {
                 var primary = event.results[i][0].transcript
                 if (event.results[i].isFinal) {
-                    allFinalText += primary
+                    // Latest final wins — we reset alternates so we only
+                    // collect alts for the freshest utterance (wake-word match).
+                    latestFinal = primary
+                    alternates = []
                     for (var a = 0; a < event.results[i].length; a++) {
                         alternates.push(event.results[i][a].transcript)
                     }
@@ -96,16 +106,23 @@ export default function VoiceMode() {
                 }
             }
 
-            // Delta = the new final text since the last event fired
+            // Compute the delta: new words since we last committed.
             var prev = prevFinalsTextRef.current || ''
             var deltaFinalText = ''
-            if (allFinalText.indexOf(prev) === 0) {
-                deltaFinalText = allFinalText.substring(prev.length)
-            } else {
-                // Recognition restarted or diverged — treat everything as new
-                deltaFinalText = allFinalText
+            if (latestFinal) {
+                if (prev.length > 0 && latestFinal.indexOf(prev) === 0) {
+                    // Growth of same utterance (Android cumulative) — take tail
+                    deltaFinalText = latestFinal.substring(prev.length)
+                    prevFinalsTextRef.current = latestFinal
+                } else if (prev.length > 0 && prev.indexOf(latestFinal) === 0) {
+                    // Latest is SHORTER than prev (out-of-order event) — skip
+                    deltaFinalText = ''
+                } else {
+                    // Brand new utterance (first word, or after a pause)
+                    deltaFinalText = latestFinal
+                    prevFinalsTextRef.current = latestFinal
+                }
             }
-            prevFinalsTextRef.current = allFinalText
 
             if (interimTranscript) {
                 setPartialTranscript(interimTranscript)
