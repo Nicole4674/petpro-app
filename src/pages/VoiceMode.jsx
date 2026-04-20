@@ -93,11 +93,16 @@ export default function VoiceMode() {
                         // Will be handled when final arrives
                     }
                 }
-                // If wake word is active and interim speech is STILL coming in,
-                // the user is mid-sentence — keep the silence timer alive so we
-                // don't cut them off at a natural pause like "what's..." before
-                // they finish "...my schedule today".
-                if (wakeWordRef.current && commandTimerRef.current) {
+                // Keep the silence timer alive while the mic is still picking
+                // up speech. Applies in BOTH modes:
+                //   - hands-free after wake word is active
+                //   - push-to-talk while the mic is open
+                // Prevents cutting the user off mid-sentence ("hey..." before
+                // they finish "...what's my schedule today").
+                if (
+                    (wakeWordRef.current && commandTimerRef.current) ||
+                    (!handsFreeRef.current && statusRef.current === 'listening')
+                ) {
                     armSilenceTimer()
                 }
             }
@@ -412,8 +417,16 @@ export default function VoiceMode() {
             return
         }
 
-        // Push-to-talk mode: everything is a command
-        processCommand(text)
+        // Push-to-talk mode: accumulate chunks into buffer instead of firing
+        // each one. Fires when the user taps stop OR goes silent for 6 sec.
+        // This prevents the mic cutting you off after just "hey" when you
+        // were about to say "hey what's my schedule".
+        if (commandBufferRef.current) {
+            commandBufferRef.current += ' ' + text
+        } else {
+            commandBufferRef.current = text
+        }
+        armSilenceTimer()
     }
 
     async function processCommand(text) {
@@ -577,11 +590,24 @@ export default function VoiceMode() {
 
     function handleMicClick() {
         if (status === 'listening') {
+            // User tapped stop — fire whatever they said as one full command
             try { recognitionRef.current.stop() } catch (e) { }
-            setStatus('idle')
+            var buffered = (commandBufferRef.current || '').trim()
+            commandBufferRef.current = ''
+            if (silenceTimerRef.current) {
+                clearTimeout(silenceTimerRef.current)
+                silenceTimerRef.current = null
+            }
+            if (buffered.length > 0) {
+                processCommand(buffered)
+            } else {
+                setStatus('idle')
+            }
         } else if (status === 'idle') {
             setError(null)
             setPartialTranscript('')
+            commandBufferRef.current = '' // clear any stale text
+            processingRef.current = false
             try {
                 recognitionRef.current.start()
                 setStatus('listening')
