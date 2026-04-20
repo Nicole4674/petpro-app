@@ -2291,8 +2291,10 @@
 /* Mobile responsive */
 @media (max-width: 480px) {
     .chat-window {
-        width: calc(100vw - 16px);
-        height: calc(100vh - 80px);
+        width: 90vw;
+        max-width: 380px;
+        height: 60vh;
+        max-height: 520px;
         bottom: 8px;
         right: 8px;
         border-radius: 12px;
