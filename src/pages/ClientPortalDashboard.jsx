@@ -664,7 +664,7 @@ export default function ClientPortalDashboard() {
                         padding: '10px 12px',
                         border: '1px solid #d1d5db',
                         borderRadius: '8px',
-                        fontSize: '14px',
+                        fontSize: '16px',
                         boxSizing: 'border-box'
                       }}
                     />
@@ -684,7 +684,7 @@ export default function ClientPortalDashboard() {
                         padding: '10px 12px',
                         border: '1px solid #e5e7eb',
                         borderRadius: '8px',
-                        fontSize: '14px',
+                        fontSize: '16px',
                         boxSizing: 'border-box',
                         background: '#f3f4f6',
                         color: '#6b7280',
@@ -706,7 +706,7 @@ export default function ClientPortalDashboard() {
                         padding: '10px 12px',
                         border: '1px solid #d1d5db',
                         borderRadius: '8px',
-                        fontSize: '14px',
+                        fontSize: '16px',
                         boxSizing: 'border-box',
                         background: '#fff'
                       }}
@@ -732,7 +732,7 @@ export default function ClientPortalDashboard() {
                         padding: '10px 12px',
                         border: '1px solid #d1d5db',
                         borderRadius: '8px',
-                        fontSize: '14px',
+                        fontSize: '16px',
                         boxSizing: 'border-box'
                       }}
                     />
@@ -1413,7 +1413,7 @@ export default function ClientPortalDashboard() {
                     padding: '10px 12px',
                     border: '1px solid #d1d5db',
                     borderRadius: '8px',
-                    fontSize: '14px',
+                    fontSize: '16px',
                     boxSizing: 'border-box',
                     fontFamily: 'inherit',
                     resize: 'vertical'
@@ -1436,7 +1436,7 @@ export default function ClientPortalDashboard() {
                     padding: '10px 12px',
                     border: '1px solid #d1d5db',
                     borderRadius: '8px',
-                    fontSize: '14px',
+                    fontSize: '16px',
                     boxSizing: 'border-box',
                     fontFamily: 'inherit',
                     resize: 'vertical'
@@ -1458,7 +1458,7 @@ export default function ClientPortalDashboard() {
                     padding: '10px 12px',
                     border: '1px solid #d1d5db',
                     borderRadius: '8px',
-                    fontSize: '14px',
+                    fontSize: '16px',
                     boxSizing: 'border-box',
                     fontFamily: 'inherit'
                   }}
@@ -1500,7 +1500,7 @@ export default function ClientPortalDashboard() {
                     padding: '10px 12px',
                     border: '1px solid #d1d5db',
                     borderRadius: '8px',
-                    fontSize: '14px',
+                    fontSize: '16px',
                     boxSizing: 'border-box',
                     fontFamily: 'inherit',
                     resize: 'vertical'
@@ -1624,7 +1624,7 @@ export default function ClientPortalDashboard() {
                   padding: '10px 12px',
                   border: '1px solid #d1d5db',
                   borderRadius: '8px',
-                  fontSize: '14px',
+                  fontSize: '16px',
                   boxSizing: 'border-box',
                   fontFamily: 'inherit',
                   resize: 'vertical'
@@ -1648,7 +1648,7 @@ export default function ClientPortalDashboard() {
                   padding: '10px 12px',
                   border: '1px solid #d1d5db',
                   borderRadius: '8px',
-                  fontSize: '14px',
+                  fontSize: '16px',
                   boxSizing: 'border-box',
                   fontFamily: 'inherit',
                   resize: 'vertical'
@@ -1671,7 +1671,7 @@ export default function ClientPortalDashboard() {
                   padding: '10px 12px',
                   border: '1px solid #d1d5db',
                   borderRadius: '8px',
-                  fontSize: '14px',
+                  fontSize: '16px',
                   boxSizing: 'border-box',
                   fontFamily: 'inherit'
                 }}
@@ -1694,7 +1694,7 @@ export default function ClientPortalDashboard() {
                   padding: '10px 12px',
                   border: '1px solid #d1d5db',
                   borderRadius: '8px',
-                  fontSize: '14px',
+                  fontSize: '16px',
                   boxSizing: 'border-box',
                   fontFamily: 'inherit'
                 }}
@@ -1717,7 +1717,7 @@ export default function ClientPortalDashboard() {
                   padding: '10px 12px',
                   border: '1px solid #d1d5db',
                   borderRadius: '8px',
-                  fontSize: '14px',
+                  fontSize: '16px',
                   boxSizing: 'border-box',
                   fontFamily: 'inherit'
                 }}
@@ -1797,7 +1797,7 @@ function PetField({ label, value, onChange, placeholder, type, required }) {
           padding: '10px 12px',
           border: '1px solid #d1d5db',
           borderRadius: '8px',
-          fontSize: '14px',
+          fontSize: '16px',
           boxSizing: 'border-box'
         }}
       />

@@ -165,7 +165,7 @@ export default function MessageComposer({ onSend, disabled }) {
     padding: '8px 12px',
     border: '1px solid #dee2e6',
     borderRadius: '20px',
-    fontSize: '15px',
+    fontSize: '16px',
     fontFamily: 'inherit',
     resize: 'none',
     outline: 'none',

@@ -271,6 +271,18 @@ var toolDefinitions = [
       required: [],
     },
   },
+  {
+    name: 'client_check_availability',
+    description: 'REQUIRED before suggesting a specific time to a client. Returns the list of ALREADY-BOOKED time slots on a given date so you can pick a time that does not overlap. Shop hours default to 8 AM - 5 PM. Any time NOT in booked_slots is available.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'YYYY-MM-DD — use the DATE REFERENCE table in the system prompt to compute this.' },
+        duration_minutes: { type: 'number', description: 'How long the service will take. Default 60.' },
+      },
+      required: ['date'],
+    },
+  },
 ]
 
 // ============================================================
@@ -441,6 +453,50 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         var endMM = String(endMin % 60).padStart(2, '0')
         var endTime = endHH + ':' + endMM
 
+        // ================================================================
+        // CONFLICT CHECK — prevent double-booking
+        // Query existing non-cancelled appointments on the same date and
+        // refuse if any overlap the requested time slot (same groomer_id,
+        // same or unassigned staff).
+        // ================================================================
+        var { data: dayApptsForConflict } = await supabaseAdmin
+          .from('appointments')
+          .select('id, start_time, end_time, staff_id, pets:pet_id(name)')
+          .eq('groomer_id', groomerId)
+          .eq('appointment_date', toolInput.appointment_date)
+          .neq('status', 'cancelled')
+
+        var conflicts: any[] = []
+        for (var existing of (dayApptsForConflict || [])) {
+          var exStartParts = String(existing.start_time).split(':')
+          var exEndParts = String(existing.end_time).split(':')
+          var exStartMin = parseInt(exStartParts[0], 10) * 60 + parseInt(exStartParts[1], 10)
+          var exEndMin = parseInt(exEndParts[0], 10) * 60 + parseInt(exEndParts[1], 10)
+          // Overlap: new starts before existing ends AND new ends after existing starts
+          if (startMin < exEndMin && endMin > exStartMin) {
+            // Distinct staff assigned → different groomer, no conflict
+            if (regularStaffId && existing.staff_id && regularStaffId !== existing.staff_id) {
+              continue
+            }
+            conflicts.push(existing)
+          }
+        }
+
+        if (conflicts.length > 0) {
+          var conflictTimes = conflicts.map(function (c: any) {
+            return c.start_time + '-' + c.end_time
+          }).join(', ')
+          console.log('[BOOK] CONFLICT — refusing. Existing:', conflictTimes)
+          return {
+            success: false,
+            error: 'That time is already booked (' + conflictTimes + '). Please pick another time — call client_check_availability to see open slots.',
+            conflict: true,
+            conflicting_slots: conflicts.map(function (c: any) {
+              return { start: c.start_time, end: c.end_time }
+            }),
+          }
+        }
+
         // Spam check: count this client's non-recurring appointments in last 30 days
         var thirtyAgo = new Date()
         thirtyAgo.setDate(thirtyAgo.getDate() - 30)
@@ -591,6 +647,43 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         var rEndMM = String(rEndMin % 60).padStart(2, '0')
         var rEndTime = rEndHH + ':' + rEndMM
 
+        // ================================================================
+        // CONFLICT CHECK — prevent reschedule into a busy slot
+        // Exclude the appointment BEING RESCHEDULED (it would match itself).
+        // ================================================================
+        var { data: resDayAppts } = await supabaseAdmin
+          .from('appointments')
+          .select('id, start_time, end_time, staff_id')
+          .eq('groomer_id', groomerId)
+          .eq('appointment_date', toolInput.new_date)
+          .neq('status', 'cancelled')
+          .neq('id', toolInput.appointment_id)
+
+        var resConflicts: any[] = []
+        for (var rex of (resDayAppts || [])) {
+          var rexSP = String(rex.start_time).split(':')
+          var rexEP = String(rex.end_time).split(':')
+          var rexSM = parseInt(rexSP[0], 10) * 60 + parseInt(rexSP[1], 10)
+          var rexEM = parseInt(rexEP[0], 10) * 60 + parseInt(rexEP[1], 10)
+          if (rStartMin < rexEM && rEndMin > rexSM) {
+            resConflicts.push(rex)
+          }
+        }
+        if (resConflicts.length > 0) {
+          var resConflictTimes = resConflicts.map(function (c: any) {
+            return c.start_time + '-' + c.end_time
+          }).join(', ')
+          console.log('[RESCHED] CONFLICT — refusing. Existing:', resConflictTimes)
+          return {
+            success: false,
+            error: 'That new time is already booked (' + resConflictTimes + '). Please pick a different time — call client_check_availability to see open slots.',
+            conflict: true,
+            conflicting_slots: resConflicts.map(function (c: any) {
+              return { start: c.start_time, end: c.end_time }
+            }),
+          }
+        }
+
         // If auto-book is off, flag the reschedule for groomer review
         var resUpdate: any = {
           appointment_date: toolInput.new_date,
@@ -674,6 +767,41 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
               notes: a.service_notes,
             }
           }),
+        }
+      }
+
+      // --- CHECK AVAILABILITY ---
+      case 'client_check_availability': {
+        if (!toolInput.date) return { success: false, error: 'date required' }
+        var { data: availDayAppts } = await supabaseAdmin
+          .from('appointments')
+          .select('start_time, end_time, staff_id')
+          .eq('groomer_id', groomerId)
+          .eq('appointment_date', toolInput.date)
+          .neq('status', 'cancelled')
+          .order('start_time', { ascending: true })
+
+        // Also pull shop hours if configured
+        var { data: shopHoursRow } = await supabaseAdmin
+          .from('shop_settings')
+          .select('shop_open_time, shop_close_time')
+          .eq('groomer_id', groomerId)
+          .maybeSingle()
+        var openT = (shopHoursRow && shopHoursRow.shop_open_time) || '08:00'
+        var closeT = (shopHoursRow && shopHoursRow.shop_close_time) || '17:00'
+
+        var bookedSlots = (availDayAppts || []).map(function (a: any) {
+          return { start: a.start_time, end: a.end_time }
+        })
+
+        return {
+          success: true,
+          date: toolInput.date,
+          shop_open: openT,
+          shop_close: closeT,
+          booked_slots: bookedSlots,
+          booked_count: bookedSlots.length,
+          note: 'These are the time ranges ALREADY BOOKED. Any time that does NOT overlap these is available. Shop hours are ' + openT + ' to ' + closeT + '. Pick a time within shop hours that does not overlap any booked slot.',
         }
       }
 
@@ -988,6 +1116,15 @@ Deno.serve(async function(req) {
       '- NEVER quote prices outside what\'s in SERVICES OFFERED. If the exact price isn\'t listed, say "the shop will confirm the exact price".',
       '- NEVER share phone numbers, addresses, or personal info about other clients or staff.',
       '- NEVER call client_book_appointment without a service_id. If the client hasn\'t specified a service yet, ASK first.',
+      '',
+      'AVAILABILITY CHECKING (CRITICAL — PREVENT DOUBLE BOOKINGS):',
+      '- You DO NOT automatically see the shop\'s schedule. To see what times are already booked on a given day, you MUST call the `client_check_availability` tool.',
+      '- ALWAYS call `client_check_availability` BEFORE you suggest a specific time OR call `client_book_appointment`. No exceptions.',
+      '- The tool returns `booked_slots` (times already taken) and `shop_open` / `shop_close` (shop hours). Pick a time within shop hours that does NOT overlap ANY booked slot.',
+      '- If the client asks for a specific time (e.g., "9 AM tomorrow"), call `client_check_availability` first. If 9 AM overlaps a booked slot, tell them honestly: "9 AM is already booked — I have [list 2-3 actual open times] if any of those work?"',
+      '- If `client_book_appointment` returns `conflict: true`, the slot just got taken. Apologize briefly, call `client_check_availability` again, and offer a real open time.',
+      '- NEVER tell a client "the shop will let you know if there\'s a conflict" — that is WRONG. The system will NOT catch it later; you must prevent the conflict NOW by using the availability tool.',
+      '- NEVER say "I can\'t see the current schedule" — you CAN see it by calling `client_check_availability`. Always use the tool.',
       '',
       'SERVICE QUESTIONS (CRITICAL — ASK BEFORE BOOKING):',
       '- The word "grooming" or "appointment" is vague. Different dogs need different services. ALWAYS ask which service they want before booking.',

@@ -271,7 +271,7 @@ function FormField({ label, value, onChange, placeholder, type }) {
           padding: '11px 12px',
           border: '1px solid #d1d5db',
           borderRadius: '8px',
-          fontSize: '14px',
+          fontSize: '16px',
           boxSizing: 'border-box'
         }}
       />

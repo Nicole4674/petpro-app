@@ -16,6 +16,13 @@ export default function ClientPortalThread() {
   var [loading, setLoading] = useState(true)
   var [error, setError] = useState('')
   var [pendingConfirms, setPendingConfirms] = useState([])
+  // Mobile detect — flips styles when viewport is phone-sized
+  var [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 768)
+  useEffect(function () {
+    function onResize() { setIsMobile(window.innerWidth < 768) }
+    window.addEventListener('resize', onResize)
+    return function () { window.removeEventListener('resize', onResize) }
+  }, [])
   var messagesEndRef = useRef(null)
   var originalTitleRef = useRef(document.title)
   var titleFlashIntervalRef = useRef(null)
@@ -429,24 +436,24 @@ export default function ClientPortalThread() {
 
   // ---------- STYLES ----------
   var pageStyle = {
-    maxWidth: '720px',
-    margin: '20px auto',
+    maxWidth: isMobile ? 'none' : '720px',
+    margin: isMobile ? '0' : '20px auto',
     background: '#fff',
-    border: '1px solid #e5e7eb',
-    borderRadius: '12px',
+    border: isMobile ? 'none' : '1px solid #e5e7eb',
+    borderRadius: isMobile ? '0' : '12px',
     overflow: 'hidden',
-    height: 'calc(100vh - 40px)',
+    height: isMobile ? '100vh' : 'calc(100vh - 40px)',
     display: 'flex',
     flexDirection: 'column',
   }
 
   var headerStyle = {
-    padding: '14px 20px',
+    padding: isMobile ? '10px 12px' : '14px 20px',
     borderBottom: '1px solid #e5e7eb',
     background: '#fff',
     display: 'flex',
     alignItems: 'center',
-    gap: '12px',
+    gap: isMobile ? '8px' : '12px',
   }
 
   var backBtnStyle = {
