@@ -368,36 +368,19 @@ export default function ClientPortalThread() {
     })()
 
     // ─── Waitlist reply check (fire and forget) ───
-    // If this client has a pending waitlist offer and their message looks like
-    // a YES/NO response, the waitlist-reply edge function handles it.
-    // On no pending offer, the edge function returns quickly with { handled: false }
-    // and no AI is called. On YES/NO, it posts a reply and updates the waitlist.
+    // Always call the edge function — it checks internally (using service role,
+    // which bypasses RLS) whether this client has a pending waitlist offer.
+    // If none, it returns { handled: false } quickly with no AI cost. If yes,
+    // it handles the YES/NO and posts a reply in the thread.
     if (text && text.trim()) {
       ;(async function checkWaitlistReply() {
         try {
-          console.log('[waitlist-reply] STEP 1: checking. clientRow.id =', clientRow.id)
-          // Cheap pre-check: only invoke if this client has a pending offer.
-          // waitlist-notify sets status='notified' when it sends the offer message.
-          var { data: pending, error: preErr } = await supabase
-            .from('grooming_waitlist')
-            .select('id, status, client_id')
-            .eq('client_id', clientRow.id)
-            .eq('status', 'notified')
-            .limit(1)
-          console.log('[waitlist-reply] STEP 2: pre-check result:', { pending: pending, error: preErr })
-          if (!pending || pending.length === 0) {
-            console.log('[waitlist-reply] STEP 3: no pending offer for this client — skipping')
-            return
-          }
-
-          console.log('[waitlist-reply] STEP 4: invoking edge function with:', { thread_id: thread.id, message_text: text })
           var invokeResp = await supabase.functions.invoke('waitlist-reply', {
             body: {
               thread_id: thread.id,
               message_text: text,
             },
           })
-          console.log('[waitlist-reply] STEP 5: edge function response:', invokeResp)
           if (invokeResp.error) {
             console.warn('[waitlist-reply] non-fatal:', invokeResp.error)
           }
