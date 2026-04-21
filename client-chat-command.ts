@@ -211,11 +211,14 @@ async function handleWaitlistResponse(
 
     // --- Mode A: AUTO-BOOK the appointment ---
     if (onYes === 'auto_book') {
-      var slotStart = offer.offered_slot_start   // ISO
+      var slotStart = offer.offered_slot_start   // ISO "YYYY-MM-DDTHH:MM:SS"
       var slotEnd = offer.offered_slot_end
       var apptDate = slotStart.split('T')[0]
-      var startTime = (slotStart.split('T')[1] || '').slice(0, 8) || (slotStart.split('T')[1] || '').slice(0, 5)
-      var endTime = (slotEnd.split('T')[1] || '').slice(0, 8) || (slotEnd.split('T')[1] || '').slice(0, 5)
+      // Calendar expects HH:MM (no seconds)
+      var startTime = (slotStart.split('T')[1] || '').slice(0, 5)
+      var endTime = (slotEnd.split('T')[1] || '').slice(0, 5)
+
+      console.log('[waitlist] attempting auto-book:', apptDate, startTime, '-', endTime)
 
       var { data: newAppt, error: apptErr } = await supabaseAdmin
         .from('appointments')
@@ -223,7 +226,7 @@ async function handleWaitlistResponse(
           groomer_id: groomerId,
           client_id: clientId,
           pet_id: offer.pet_id,
-          service_id: offer.service_id,
+          service_id: offer.service_id || null,
           appointment_date: apptDate,
           start_time: startTime,
           end_time: endTime,
@@ -234,7 +237,7 @@ async function handleWaitlistResponse(
         .single()
 
       if (apptErr) {
-        console.error('[waitlist] auto-book insert failed:', apptErr)
+        console.error('[waitlist] auto-book insert failed:', apptErr.message, 'details:', JSON.stringify(apptErr))
         // Fall back to notify_groomer flow so we still capture the YES
         await supabaseAdmin
           .from('grooming_waitlist')
@@ -250,6 +253,19 @@ async function handleWaitlistResponse(
         )
 
         return { text: 'Got it! The groomer will confirm your booking shortly 🐾' }
+      }
+
+      // Insert the appointment_pets junction row so Calendar.jsx picks up
+      // the pet details (the calendar query joins through this table).
+      var { error: junctionErr } = await supabaseAdmin
+        .from('appointment_pets')
+        .insert({
+          appointment_id: newAppt.id,
+          pet_id: offer.pet_id,
+          service_id: offer.service_id || null,
+        })
+      if (junctionErr) {
+        console.warn('[waitlist] appointment_pets insert failed (non-fatal):', junctionErr.message)
       }
 
       // Success — mark waitlist done and ping groomer
