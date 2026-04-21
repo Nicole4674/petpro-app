@@ -12,6 +12,10 @@ export default function ClientChatWidget() {
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
+  // 📎 Image attachments — clients can send photos (matted spot, vax cert, hair length, meds bottle)
+  const [pendingImages, setPendingImages] = useState([])
+  const fileInputRef = useRef(null)
+
   // --- Draggable widget state ---
   // position = { x, y } (top-left corner in px) or null = use default CSS (bottom-right)
   const [position, setPosition] = useState(null)
@@ -175,15 +179,72 @@ export default function ClientChatWidget() {
     }
   }, [isOpen])
 
+  // 📎 Pick image(s) from disk/camera, validate, convert to base64, stash in pendingImages
+  const handleFilePick = async (e) => {
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
+
+    const newPending = []
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue
+      if (file.size > 5 * 1024 * 1024) {
+        alert('Photo "' + file.name + '" is too big (5MB max). Try a smaller one.')
+        continue
+      }
+
+      try {
+        const result = await new Promise((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => {
+            const data = reader.result
+            const comma = data.indexOf(',')
+            resolve(comma >= 0 ? data.substring(comma + 1) : data)
+          }
+          reader.onerror = reject
+          reader.readAsDataURL(file)
+        })
+
+        let mediaType = file.type
+        if (mediaType === 'image/heic' || mediaType === 'image/heif') mediaType = 'image/jpeg'
+
+        newPending.push({
+          media_type: mediaType,
+          data: result,
+          preview: URL.createObjectURL(file),
+          name: file.name,
+        })
+      } catch (err) {
+        console.error('Failed to read image:', err)
+      }
+    }
+
+    if (newPending.length) {
+      setPendingImages(prev => [...prev, ...newPending])
+    }
+    e.target.value = ''   // allow re-picking same file
+  }
+
+  const removePendingImage = (idx) => {
+    setPendingImages(prev => prev.filter((_, i) => i !== idx))
+  }
+
   const sendMessage = async () => {
-    if (!input.trim() || sending) return
+    const hasText = input.trim().length > 0
+    const hasImages = pendingImages.length > 0
+    if ((!hasText && !hasImages) || sending) return
 
     const userMessage = input.trim()
+    const imagesForSend = pendingImages
     setInput('')
+    setPendingImages([])
     setSending(true)
 
-    // Add user message to chat
-    setMessages(prev => [...prev, { role: 'user', text: userMessage }])
+    // Add user message to chat with any image previews
+    setMessages(prev => [...prev, {
+      role: 'user',
+      text: userMessage || (hasImages ? '📷 Sent a photo' : ''),
+      images: imagesForSend.map(i => i.preview),
+    }])
 
     try {
       // Build conversation history (last 10 exchanges, in-memory only)
@@ -201,8 +262,9 @@ export default function ClientChatWidget() {
 
       const { data, error } = await supabase.functions.invoke('client-chat-command', {
         body: {
-          message: userMessage,
+          message: userMessage || 'Please look at this photo.',
           history: recentHistory,
+          images: imagesForSend.map(i => ({ media_type: i.media_type, data: i.data })),
         },
       })
 
@@ -283,6 +345,13 @@ export default function ClientChatWidget() {
               <div key={i} className={`chat-msg ${msg.role === 'user' ? 'chat-msg-user' : 'chat-msg-ai'}`}>
                 {msg.role === 'assistant' && <span className="chat-msg-avatar">🐾</span>}
                 <div className={`chat-msg-bubble ${msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'}`}>
+                  {msg.images && msg.images.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: msg.text ? '6px' : '0' }}>
+                      {msg.images.map((src, ii) => (
+                        <img key={ii} src={src} alt="attachment" style={{ maxWidth: '140px', maxHeight: '140px', borderRadius: '8px', objectFit: 'cover' }} />
+                      ))}
+                    </div>
+                  )}
                   {msg.text}
                 </div>
               </div>
@@ -298,8 +367,43 @@ export default function ClientChatWidget() {
             <div ref={messagesEndRef} />
           </div>
 
+          {/* Pending image previews (above input) */}
+          {pendingImages.length > 0 && (
+            <div style={{ display: 'flex', gap: '6px', padding: '6px 10px', background: '#f8f9fa', borderTop: '1px solid #e5e7eb', overflowX: 'auto' }}>
+              {pendingImages.map((img, idx) => (
+                <div key={idx} style={{ position: 'relative', flexShrink: 0 }}>
+                  <img src={img.preview} alt="preview" style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '6px' }} />
+                  <button
+                    onClick={() => removePendingImage(idx)}
+                    style={{ position: 'absolute', top: '-4px', right: '-4px', background: '#dc3545', color: '#fff', border: 'none', borderRadius: '50%', width: '18px', height: '18px', fontSize: '11px', cursor: 'pointer', lineHeight: '1' }}
+                    title="Remove"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Chat Input */}
           <div className="chat-input-area">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleFilePick}
+              style={{ display: 'none' }}
+            />
+            <button
+              className="chat-send-btn"
+              onClick={() => { if (fileInputRef.current) fileInputRef.current.click() }}
+              disabled={sending}
+              title="Attach a photo (hair length, matted spot, vax cert, meds)"
+              style={{ background: '#f1f3f5', color: '#6c757d' }}
+            >
+              📎
+            </button>
             <textarea
               ref={inputRef}
               className="chat-input"
@@ -313,7 +417,7 @@ export default function ClientChatWidget() {
             <button
               className="chat-send-btn"
               onClick={sendMessage}
-              disabled={sending || !input.trim()}
+              disabled={sending || (!input.trim() && pendingImages.length === 0)}
             >
               ➤
             </button>

@@ -31,6 +31,8 @@ export default function Waitlist() {
   var [saving, setSaving] = useState(false)
   var [filterStatus, setFilterStatus] = useState('waiting')
   var [filterDate, setFilterDate] = useState('')
+  var [clientSearchText, setClientSearchText] = useState('')
+  var [showClientDropdown, setShowClientDropdown] = useState(false)
   var [newEntry, setNewEntry] = useState({
     client_id: '',
     pet_id: '',
@@ -38,10 +40,37 @@ export default function Waitlist() {
     preferred_date: '',
     preferred_time_start: '',
     preferred_time_end: '',
+    preferred_days: [],
     flexible_dates: false,
     any_time: false,
     notes: ''
   })
+
+  var DAYS_OF_WEEK = [
+    { value: 'monday', label: 'Mon' },
+    { value: 'tuesday', label: 'Tue' },
+    { value: 'wednesday', label: 'Wed' },
+    { value: 'thursday', label: 'Thu' },
+    { value: 'friday', label: 'Fri' },
+    { value: 'saturday', label: 'Sat' },
+    { value: 'sunday', label: 'Sun' }
+  ]
+
+  function toggleDay(day) {
+    var current = newEntry.preferred_days || []
+    var updated = current.indexOf(day) >= 0
+      ? current.filter(function(d) { return d !== day })
+      : current.concat([day])
+    setNewEntry(Object.assign({}, newEntry, { preferred_days: updated }))
+  }
+
+  function toggleAnyDay() {
+    var allDays = DAYS_OF_WEEK.map(function(d) { return d.value })
+    var isAllSelected = (newEntry.preferred_days || []).length === 7
+    setNewEntry(Object.assign({}, newEntry, {
+      preferred_days: isAllSelected ? [] : allDays
+    }))
+  }
 
   useEffect(function() {
     fetchAll()
@@ -61,10 +90,10 @@ export default function Waitlist() {
     if (wlError) console.error('Waitlist fetch error:', wlError)
     setWaitlist(wlData || [])
 
-    // Fetch clients for form
+    // Fetch clients for form (include phone for searchable typeahead)
     var { data: clientData } = await supabase
       .from('clients')
-      .select('id, first_name, last_name')
+      .select('id, first_name, last_name, phone')
       .eq('groomer_id', user.id)
       .order('last_name')
 
@@ -94,6 +123,13 @@ export default function Waitlist() {
 
   async function handleAdd(e) {
     e.preventDefault()
+
+    // Required: at least one preferred day
+    if (!newEntry.preferred_days || newEntry.preferred_days.length === 0) {
+      alert('Please pick at least one day the client is available. PetPro AI needs this to know who to offer open slots to.')
+      return
+    }
+
     setSaving(true)
 
     var { data: { user } } = await supabase.auth.getUser()
@@ -102,13 +138,17 @@ export default function Waitlist() {
     // Get next position
     var waitingCount = waitlist.filter(function(w) { return w.status === 'waiting' }).length
 
+    // Back-compat: if all 7 days picked, mark flexible_dates true
+    var allDaysPicked = newEntry.preferred_days.length === 7
+
     var record = {
       groomer_id: user.id,
       client_id: newEntry.client_id,
       pet_id: newEntry.pet_id,
       position: waitingCount + 1,
       status: 'waiting',
-      flexible_dates: newEntry.flexible_dates,
+      preferred_days: newEntry.preferred_days,
+      flexible_dates: allDaysPicked,
       any_time: newEntry.any_time
     }
 
@@ -130,8 +170,11 @@ export default function Waitlist() {
       setNewEntry({
         client_id: '', pet_id: '', service_id: '',
         preferred_date: '', preferred_time_start: '', preferred_time_end: '',
+        preferred_days: [],
         flexible_dates: false, any_time: false, notes: ''
       })
+      setClientSearchText('')
+      setShowClientDropdown(false)
       fetchAll()
     } else {
       alert('Error adding to waitlist: ' + error.message)
@@ -350,9 +393,18 @@ export default function Waitlist() {
 
                   {/* Preferences */}
                   <div className="wl-prefs">
-                    <span className="wl-pref-tag">
-                      📅 {w.flexible_dates ? 'Flexible dates' : formatDate(w.preferred_date)}
-                    </span>
+                    {w.preferred_days && w.preferred_days.length > 0 && (
+                      <span className="wl-pref-tag">
+                        📅 {w.preferred_days.length === 7
+                          ? '⭐ Any day'
+                          : w.preferred_days.map(function(d) {
+                              return d.charAt(0).toUpperCase() + d.slice(1, 3)
+                            }).join(', ')}
+                      </span>
+                    )}
+                    {w.preferred_date && (
+                      <span className="wl-pref-tag">📆 {formatDate(w.preferred_date)}</span>
+                    )}
                     <span className="wl-pref-tag">{getTimePreference(w)}</span>
                     {w.services && (
                       <span className="wl-pref-tag">✂️ {w.services.service_name}</span>
@@ -432,20 +484,150 @@ export default function Waitlist() {
             </div>
 
             <form onSubmit={handleAdd} className="sl-form">
-              {/* Client */}
-              <div className="sl-form-group">
+              {/* Client (searchable typeahead — name OR phone) */}
+              <div className="sl-form-group" style={{ position: 'relative' }}>
                 <label className="sl-label">Client *</label>
-                <select
+                {newEntry.client_id ? (
+                  // Selected client chip
+                  (function() {
+                    var selectedClient = clients.find(function(c) { return c.id === newEntry.client_id })
+                    return (
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '10px 14px',
+                        background: '#ede9fe',
+                        border: '2px solid #7c3aed',
+                        borderRadius: 8,
+                        color: '#6b21a8',
+                        fontWeight: 600,
+                      }}>
+                        <span>
+                          👤 {selectedClient ? selectedClient.first_name + ' ' + selectedClient.last_name : 'Unknown'}
+                          {selectedClient && selectedClient.phone ? ' · ' + selectedClient.phone : ''}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={function() {
+                            setNewEntry(Object.assign({}, newEntry, { client_id: '', pet_id: '' }))
+                            setClientSearchText('')
+                            setShowClientDropdown(false)
+                          }}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#6b21a8',
+                            cursor: 'pointer',
+                            fontSize: 16,
+                            fontWeight: 700,
+                          }}
+                          title="Clear selection"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )
+                  })()
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      value={clientSearchText}
+                      onChange={function(e) {
+                        setClientSearchText(e.target.value)
+                        setShowClientDropdown(true)
+                      }}
+                      onFocus={function() { setShowClientDropdown(true) }}
+                      onBlur={function() {
+                        // Small delay so click on dropdown item registers
+                        setTimeout(function() { setShowClientDropdown(false) }, 150)
+                      }}
+                      placeholder="🔍 Search by name or phone..."
+                      className="sl-input"
+                      autoComplete="off"
+                    />
+                    {showClientDropdown && (
+                      <div style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        background: '#fff',
+                        border: '1px solid #d1d5db',
+                        borderRadius: 8,
+                        maxHeight: 240,
+                        overflowY: 'auto',
+                        zIndex: 1000,
+                        marginTop: 4,
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+                      }}>
+                        {(function() {
+                          var q = clientSearchText.trim().toLowerCase()
+                          var matches = clients.filter(function(c) {
+                            if (!q) return true
+                            var first = (c.first_name || '').toLowerCase()
+                            var last = (c.last_name || '').toLowerCase()
+                            var phone = (c.phone || '').toLowerCase().replace(/\D/g, '')
+                            var qDigits = q.replace(/\D/g, '')
+                            return first.indexOf(q) >= 0 ||
+                                   last.indexOf(q) >= 0 ||
+                                   (first + ' ' + last).indexOf(q) >= 0 ||
+                                   (qDigits && phone.indexOf(qDigits) >= 0)
+                          }).slice(0, 50)
+
+                          if (matches.length === 0) {
+                            return (
+                              <div style={{ padding: 12, color: '#6b7280', fontSize: 14, textAlign: 'center' }}>
+                                No clients match "{clientSearchText}"
+                              </div>
+                            )
+                          }
+
+                          return matches.map(function(c) {
+                            return (
+                              <div
+                                key={c.id}
+                                onMouseDown={function(e) {
+                                  e.preventDefault() // prevent blur before click
+                                  setNewEntry(Object.assign({}, newEntry, { client_id: c.id, pet_id: '' }))
+                                  setClientSearchText('')
+                                  setShowClientDropdown(false)
+                                }}
+                                style={{
+                                  padding: '10px 14px',
+                                  cursor: 'pointer',
+                                  borderBottom: '1px solid #f3f4f6',
+                                  fontSize: 14,
+                                }}
+                                onMouseEnter={function(e) { e.currentTarget.style.background = '#f3f4f6' }}
+                                onMouseLeave={function(e) { e.currentTarget.style.background = '#fff' }}
+                              >
+                                <div style={{ fontWeight: 600, color: '#111827' }}>
+                                  {c.first_name} {c.last_name}
+                                </div>
+                                {c.phone && (
+                                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                                    📱 {c.phone}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })
+                        })()}
+                      </div>
+                    )}
+                  </>
+                )}
+                {/* Hidden input so HTML5 form validation catches required */}
+                <input
+                  type="text"
                   value={newEntry.client_id}
-                  onChange={function(e) { setNewEntry(Object.assign({}, newEntry, { client_id: e.target.value, pet_id: '' })) }}
-                  className="sl-input"
                   required
-                >
-                  <option value="">Select client...</option>
-                  {clients.map(function(c) {
-                    return <option key={c.id} value={c.id}>{c.last_name}, {c.first_name}</option>
-                  })}
-                </select>
+                  tabIndex={-1}
+                  style={{ opacity: 0, height: 0, width: 0, position: 'absolute', pointerEvents: 'none' }}
+                  onChange={function() {}}
+                />
               </div>
 
               {/* Pet */}
@@ -479,27 +661,64 @@ export default function Waitlist() {
                 </select>
               </div>
 
-              {/* Date Preference */}
-              <div className="sl-form-row">
-                <div className="sl-form-group">
-                  <label className="sl-label">Preferred Date</label>
-                  <input
-                    type="date"
-                    value={newEntry.preferred_date}
-                    onChange={function(e) { setNewEntry(Object.assign({}, newEntry, { preferred_date: e.target.value })) }}
-                    className="sl-input"
-                    disabled={newEntry.flexible_dates}
-                  />
+              {/* Preferred Days of Week — REQUIRED for PetPro AI auto-notify */}
+              <div className="sl-form-group">
+                <label className="sl-label">Preferred Days *</label>
+                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+                  Which days is this client available? PetPro AI will only offer open slots on these days.
                 </div>
-                <div className="sl-form-group" style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: '10px' }}>
-                  <label className="wl-checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={newEntry.flexible_dates}
-                      onChange={function(e) { setNewEntry(Object.assign({}, newEntry, { flexible_dates: e.target.checked })) }}
-                    />
-                    Flexible on dates
-                  </label>
+                <div style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 8,
+                  marginBottom: 8
+                }}>
+                  {DAYS_OF_WEEK.map(function(d) {
+                    var isSelected = (newEntry.preferred_days || []).indexOf(d.value) >= 0
+                    return (
+                      <button
+                        key={d.value}
+                        type="button"
+                        onClick={function() { toggleDay(d.value) }}
+                        style={{
+                          padding: '8px 14px',
+                          borderRadius: 20,
+                          border: isSelected ? '2px solid #7c3aed' : '1px solid #d1d5db',
+                          background: isSelected ? '#ede9fe' : '#fff',
+                          color: isSelected ? '#6b21a8' : '#374151',
+                          fontWeight: isSelected ? 700 : 500,
+                          fontSize: 14,
+                          cursor: 'pointer',
+                          minWidth: 58
+                        }}
+                      >
+                        {d.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <label className="wl-checkbox-label" style={{ fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={(newEntry.preferred_days || []).length === 7}
+                    onChange={toggleAnyDay}
+                  />
+                  ⭐ Any day works — first pick of any open slot
+                </label>
+              </div>
+
+              {/* Optional specific date (still supported for "I want Oct 15") */}
+              <div className="sl-form-group">
+                <label className="sl-label">Specific Date (optional)</label>
+                <input
+                  type="date"
+                  value={newEntry.preferred_date}
+                  onChange={function(e) { setNewEntry(Object.assign({}, newEntry, { preferred_date: e.target.value })) }}
+                  className="sl-input"
+                  placeholder="Only if they want a specific date"
+                />
+                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                  Leave blank unless the client wants a specific calendar date.
                 </div>
               </div>
 

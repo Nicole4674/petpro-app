@@ -79,6 +79,218 @@ function formatDateForPush(ymd: string): string {
 }
 
 // ============================================================
+// WAITLIST RESPONSE HANDLER — Task #84 Step 5
+// ------------------------------------------------------------
+// When the Waitlist Auto-Notify edge function offers a client
+// an open slot, the client replies in chat. This helper checks
+// if there's a pending offer for this client. If yes, it uses
+// Claude Haiku to classify the reply (yes/no/unclear) and:
+//   - YES + auto_book setting  -> creates the appointment
+//   - YES + notify_groomer     -> marks 'accepted', pings groomer
+//   - NO                        -> releases the entry back to 'waiting'
+//   - unclear                   -> returns null (falls through to normal chat)
+// All groomer-facing copy says "PetPro AI" (global branding rule).
+// ============================================================
+async function classifyWaitlistReply(messageText: string): Promise<string> {
+  // Cheap local heuristic first — skip Haiku if reply is obviously yes/no
+  var t = (messageText || '').trim().toLowerCase()
+  if (!t) return 'unclear'
+  var literalYes = ['y', 'yes', 'yes!', 'yep', 'yeah', 'yup', 'sure', 'ok', 'okay']
+  var literalNo = ['n', 'no', 'no!', 'nope', 'nah', 'pass', 'cant', "can't"]
+  if (literalYes.indexOf(t) >= 0) return 'yes'
+  if (literalNo.indexOf(t) >= 0) return 'no'
+
+  // Fallback: ask Haiku
+  try {
+    var resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 10,
+        system: 'You are classifying a reply to an appointment-slot offer. The client was asked if they want an open grooming slot. Reply with EXACTLY one word, lowercase, no punctuation: "yes" if they accept the slot, "no" if they decline it, or "unclear" if the reply is a question, confusion, or anything else.',
+        messages: [{ role: 'user', content: messageText }],
+      }),
+    })
+    if (!resp.ok) return 'unclear'
+    var data = await resp.json()
+    var out = ''
+    if (data && data.content) {
+      for (var b of data.content) { if (b.type === 'text') out += b.text }
+    }
+    out = (out || '').trim().toLowerCase().replace(/[^a-z]/g, '')
+    if (out === 'yes' || out === 'no' || out === 'unclear') return out
+    return 'unclear'
+  } catch (err) {
+    console.warn('[waitlist] classify failed (non-fatal):', err)
+    return 'unclear'
+  }
+}
+
+// Format ISO timestamp (e.g. "2026-04-27T10:00:00") into a friendly
+// "Mon Apr 27 at 10:00am" string for client-facing reply copy.
+function formatSlotForReply(isoStr: string): string {
+  if (!isoStr) return ''
+  var datePart = isoStr.split('T')[0] || ''
+  var timePart = (isoStr.split('T')[1] || '').slice(0, 5)
+  return formatDateForPush(datePart) + ' at ' + formatTimeForPush(timePart)
+}
+
+async function handleWaitlistResponse(
+  clientId: string,
+  groomerId: string,
+  messageText: string
+): Promise<{ text: string } | null> {
+  try {
+    // 1) Is there a pending waitlist offer for this client?
+    var nowIso = new Date().toISOString()
+    var { data: offers } = await supabaseAdmin
+      .from('grooming_waitlist')
+      .select('id, pet_id, service_id, offered_slot_start, offered_slot_end, expires_at, pets:pet_id(name), clients:client_id(first_name, last_name, user_id)')
+      .eq('client_id', clientId)
+      .eq('groomer_id', groomerId)
+      .eq('status', 'notified')
+      .gt('expires_at', nowIso)
+      .order('notified_at', { ascending: false })
+      .limit(1)
+
+    if (!offers || offers.length === 0) return null
+    var offer = offers[0]
+    if (!offer.offered_slot_start || !offer.offered_slot_end) return null
+
+    // 2) Classify the reply
+    var verdict = await classifyWaitlistReply(messageText)
+    if (verdict === 'unclear') return null  // let normal chat handle it
+
+    var petName = (offer.pets && offer.pets.name) || 'your pet'
+    var clientFirst = (offer.clients && offer.clients.first_name) || 'Client'
+    var clientLast = (offer.clients && offer.clients.last_name) || ''
+    var slotLabel = formatSlotForReply(offer.offered_slot_start)
+
+    // -----------------------------------------------------------
+    // CLIENT SAID NO — release entry back to the waitlist
+    // -----------------------------------------------------------
+    if (verdict === 'no') {
+      await supabaseAdmin
+        .from('grooming_waitlist')
+        .update({
+          status: 'waiting',
+          expires_at: null,
+          offered_slot_start: null,
+          offered_slot_end: null,
+          offered_appointment_id: null,
+        })
+        .eq('id', offer.id)
+
+      // Heads-up push to groomer (non-blocking)
+      sendPushToUser(
+        groomerId,
+        'ℹ️ Waitlist pass',
+        clientFirst + ' ' + clientLast + ' passed on the ' + slotLabel + ' slot — back on the waitlist.',
+        '/waitlist',
+        'waitlist-pass-' + offer.id
+      )
+
+      return { text: 'No worries! You\'re still on the waitlist for the next opening 🐾' }
+    }
+
+    // -----------------------------------------------------------
+    // CLIENT SAID YES — check groomer's on-yes preference
+    // -----------------------------------------------------------
+    var { data: prefs } = await supabaseAdmin
+      .from('ai_personalization')
+      .select('waitlist_on_yes_action')
+      .eq('groomer_id', groomerId)
+      .maybeSingle()
+
+    var onYes = (prefs && prefs.waitlist_on_yes_action) || 'notify_groomer'
+
+    // --- Mode A: AUTO-BOOK the appointment ---
+    if (onYes === 'auto_book') {
+      var slotStart = offer.offered_slot_start   // ISO
+      var slotEnd = offer.offered_slot_end
+      var apptDate = slotStart.split('T')[0]
+      var startTime = (slotStart.split('T')[1] || '').slice(0, 8) || (slotStart.split('T')[1] || '').slice(0, 5)
+      var endTime = (slotEnd.split('T')[1] || '').slice(0, 8) || (slotEnd.split('T')[1] || '').slice(0, 5)
+
+      var { data: newAppt, error: apptErr } = await supabaseAdmin
+        .from('appointments')
+        .insert({
+          groomer_id: groomerId,
+          client_id: clientId,
+          pet_id: offer.pet_id,
+          service_id: offer.service_id,
+          appointment_date: apptDate,
+          start_time: startTime,
+          end_time: endTime,
+          status: 'confirmed',
+          service_notes: 'Auto-booked from waitlist by PetPro AI',
+        })
+        .select('id')
+        .single()
+
+      if (apptErr) {
+        console.error('[waitlist] auto-book insert failed:', apptErr)
+        // Fall back to notify_groomer flow so we still capture the YES
+        await supabaseAdmin
+          .from('grooming_waitlist')
+          .update({ status: 'accepted' })
+          .eq('id', offer.id)
+
+        sendPushToUser(
+          groomerId,
+          '🎉 Waitlist YES — needs manual booking',
+          clientFirst + ' ' + clientLast + ' said YES to ' + slotLabel + ' (auto-book failed, please book manually)',
+          '/portal/messages',
+          'waitlist-yes-' + offer.id
+        )
+
+        return { text: 'Got it! The groomer will confirm your booking shortly 🐾' }
+      }
+
+      // Success — mark waitlist done and ping groomer
+      await supabaseAdmin
+        .from('grooming_waitlist')
+        .update({ status: 'booked' })
+        .eq('id', offer.id)
+
+      sendPushToUser(
+        groomerId,
+        '✅ Waitlist auto-booked!',
+        clientFirst + ' ' + clientLast + ' (' + petName + ') is on the books for ' + slotLabel,
+        '/calendar',
+        'waitlist-book-' + offer.id
+      )
+
+      return { text: 'You\'re all set! ' + petName + ' is booked for ' + slotLabel + '. See you then 🐾' }
+    }
+
+    // --- Mode B: NOTIFY GROOMER (default, safer) ---
+    await supabaseAdmin
+      .from('grooming_waitlist')
+      .update({ status: 'accepted' })
+      .eq('id', offer.id)
+
+    sendPushToUser(
+      groomerId,
+      '🎉 Waitlist YES!',
+      clientFirst + ' ' + clientLast + ' (' + petName + ') said YES to ' + slotLabel + ' — tap to book',
+      '/portal/messages',
+      'waitlist-yes-' + offer.id
+    )
+
+    return { text: 'Awesome! The groomer has been notified and will confirm your ' + slotLabel + ' spot shortly 🐾' }
+  } catch (err) {
+    console.error('[waitlist] handleWaitlistResponse failed:', err)
+    return null  // never block normal chat on waitlist errors
+  }
+}
+
+// ============================================================
 // BOOKING RULES CHECKER — enforces shop_settings.booking_rules
 // Mirror of /src/lib/bookingRules.js for this edge function runtime.
 // Phase 6 Step 3c.
@@ -966,6 +1178,18 @@ Deno.serve(async function(req) {
     var groomerId = clientRow.groomer_id
     var body = await req.json()
 
+    // --- Waitlist YES/NO intercept (Task #84 Step 5) ---
+    // If the client has a pending waitlist offer, handle the reply
+    // directly instead of running full chat. Unclear replies fall
+    // through to normal chat.
+    var waitlistResult = await handleWaitlistResponse(clientId, groomerId, body.message || '')
+    if (waitlistResult) {
+      return new Response(JSON.stringify({ text: waitlistResult.text }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
     // --- Pull groomer's toggles ---
     var { data: personalizationRow } = await supabaseAdmin
       .from('ai_personalization')
@@ -1326,7 +1550,28 @@ Deno.serve(async function(req) {
         messages.push({ role: 'assistant', content: h.assistant })
       }
     }
-    messages.push({ role: 'user', content: body.message || '' })
+
+    // Support image attachments — if body.images is an array of { media_type, data (base64) },
+    // send them as a mixed content array alongside the text message.
+    if (body.images && Array.isArray(body.images) && body.images.length > 0) {
+      var userContent = []
+      for (var img of body.images) {
+        if (img && img.data && img.media_type) {
+          userContent.push({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: img.media_type,
+              data: img.data,
+            },
+          })
+        }
+      }
+      userContent.push({ type: 'text', text: body.message || 'Please look at this image.' })
+      messages.push({ role: 'user', content: userContent })
+    } else {
+      messages.push({ role: 'user', content: body.message || '' })
+    }
 
     // --- Tool loop ---
     var maxLoops = 6
@@ -1342,7 +1587,7 @@ Deno.serve(async function(req) {
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-6',
           max_tokens: 1200,
           system: systemPrompt,
           messages: messages,

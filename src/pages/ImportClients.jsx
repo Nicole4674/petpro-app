@@ -666,6 +666,34 @@ export default function ImportClients() {
       {/* UPLOAD STEP */}
       {step === 'upload' && (
         <div className="import-content">
+
+          {/* AI MIGRATION CLAUDE — hero card */}
+          <div className="import-card" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', border: 'none' }}>
+            <h2 style={{ color: 'white', marginTop: 0 }}>🤖 Start AI Migration (Recommended)</h2>
+            <p style={{ color: 'rgba(255,255,255,0.95)' }}>
+              Let Claude walk you through migrating from <strong>any software</strong> — Moe Go, Gingr, Pawfinity,
+              even paper notebooks. Just take photos or screenshots of your client list, pets, vax certs, or
+              anything else, and Claude will read them, pull the data, and import it for you. No spreadsheets needed.
+            </p>
+            <ul style={{ color: 'rgba(255,255,255,0.95)', marginBottom: '16px' }}>
+              <li>Works with screenshots, photos, PDFs, or CSVs</li>
+              <li>Claude reads it for you — no manual typing</li>
+              <li>Preview everything before anything saves</li>
+              <li>Friendly, patient, and will never judge your paper notebook 💜</li>
+            </ul>
+            <button
+              className="import-btn"
+              style={{ background: 'white', color: '#667eea', fontWeight: 'bold', fontSize: '16px', padding: '14px 28px' }}
+              onClick={function() { window.dispatchEvent(new CustomEvent('petpro:start-migration')) }}
+            >
+              🤖 Start AI Migration
+            </button>
+          </div>
+
+          <div className="import-divider" style={{ textAlign: 'center', margin: '24px 0', color: '#888', fontSize: '14px' }}>
+            — or do it manually below —
+          </div>
+
           <div className="import-card">
             <h2>Import from MoeGo</h2>
             <p>Export your client list from MoeGo as a CSV or TSV file, then upload it here. PetPro will automatically parse your clients and pets.</p>

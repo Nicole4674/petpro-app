@@ -9,6 +9,9 @@ export default function AIChatWidget() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [adminMode, setAdminMode] = useState(false)
+  const [migrationMode, setMigrationMode] = useState(false)
+  const [pendingImages, setPendingImages] = useState([]) // [{ name, data, media_type, preview }]
+  const fileInputRef = useRef(null)
   const [loaded, setLoaded] = useState(false)
   // Classic Mode: hide widget if groomer_ai_enabled is OFF in shop_settings.
   // Starts as null (unknown) so we don't flash the widget before the check resolves.
@@ -38,6 +41,23 @@ export default function AIChatWidget() {
     checkToggle()
     return function () { cancelled = true }
   }, [])
+
+  // Listen for 'petpro:start-migration' custom event (dispatched from /import page button)
+  // and auto-open the widget in migration mode.
+  useEffect(function () {
+    function handleStartMigration() {
+      setIsOpen(true)
+      setMigrationMode(true)
+      setMessages([
+        { role: 'assistant', text: 'Hey! I\'m going to help you move your shop over — this is the easy part, promise. Quick question to start: what software (or system) are you coming from? Moe Go, Gingr, Pawfinity, paper notebook, spreadsheet — whatever it is, I can work with it.' }
+      ])
+    }
+    window.addEventListener('petpro:start-migration', handleStartMigration)
+    return function () {
+      window.removeEventListener('petpro:start-migration', handleStartMigration)
+    }
+  }, [])
+
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -198,10 +218,13 @@ export default function AIChatWidget() {
   }, [isOpen])
 
   const sendMessage = async () => {
-    if (!input.trim() || sending) return
+    // Allow sending if there's text OR pending images
+    if ((!input.trim() && pendingImages.length === 0) || sending) return
 
     const userMessage = input.trim()
+    const imagesToSend = pendingImages.slice() // snapshot
     setInput('')
+    setPendingImages([])
     setSending(true)
 
     // Check for admin mode toggle
@@ -218,19 +241,38 @@ export default function AIChatWidget() {
       }
     }
 
-    // Check for switching back to business mode
-    if (adminMode && userMessage.toLowerCase().trim() === 'business mode') {
+    // Check for switching back to business mode (works for admin AND migration mode)
+    var lowerMsg = userMessage.toLowerCase().trim()
+    if ((adminMode || migrationMode) && (lowerMsg === 'business mode' || lowerMsg === 'done with migration' || lowerMsg === 'exit migration')) {
       setAdminMode(false)
+      setMigrationMode(false)
       setMessages(prev => [...prev,
         { role: 'user', text: userMessage },
-        { role: 'assistant', text: 'Back to business mode. How can I help with your schedule, clients, or pets?' }
+        { role: 'assistant', text: 'Got it! I\'m back to your regular assistant. Say \'help me migrate\' anytime to come back to migration mode.' }
       ])
       setSending(false)
       return
     }
 
-    // Add user message to chat
-    setMessages(prev => [...prev, { role: 'user', text: userMessage }])
+    // Detect "help me migrate" / "start migration" phrases — flip INTO migration mode
+    var migrationTriggers = [
+      'help me migrate', 'start migration', 'migrate my', 'migration mode',
+      'im switching from', "i'm switching from", 'switching from moego',
+      'switching from gingr', 'switching from pawfinity', 'import my clients',
+      'import my business', 'move from moego', 'move from gingr'
+    ]
+    var shouldTriggerMigration = !migrationMode && migrationTriggers.some(function (t) { return lowerMsg.indexOf(t) !== -1 })
+    if (shouldTriggerMigration) {
+      setMigrationMode(true)
+      // Still continue to send the message below with migration_mode: true
+    }
+
+    // Add user message to chat (show image previews inline)
+    setMessages(prev => [...prev, {
+      role: 'user',
+      text: userMessage || '(sent an image)',
+      images: imagesToSend.map(function (img) { return img.preview })
+    }])
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
@@ -249,12 +291,19 @@ export default function AIChatWidget() {
       // Keep only last 10 exchanges
       const recentHistory = history.slice(-10)
 
+      // Strip the preview field before sending — only send { media_type, data } to the edge function
+      var imagesPayload = imagesToSend.map(function (img) {
+        return { media_type: img.media_type, data: img.data }
+      })
+
       const { data, error } = await supabase.functions.invoke('chat-command', {
         body: {
           message: userMessage,
           groomer_id: user.id,
           history: recentHistory,
           admin_mode: adminMode,
+          migration_mode: migrationMode || shouldTriggerMigration || false,
+          images: imagesPayload.length > 0 ? imagesPayload : undefined,
         },
       })
 
@@ -270,6 +319,60 @@ export default function AIChatWidget() {
     }
 
     setSending(false)
+  }
+
+  // Handle file picker — converts images to base64 and adds to pendingImages
+  const handleFilePick = async (e) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+
+    var newImages = []
+    for (var file of files) {
+      // Only images — Claude API supports jpeg/png/gif/webp
+      if (!file.type.startsWith('image/')) {
+        alert('Only image files are supported right now (jpg, png, webp, heic). For PDFs, screenshot the page first.')
+        continue
+      }
+      // 5MB limit per image to stay well under edge function request size limits
+      if (file.size > 5 * 1024 * 1024) {
+        alert(file.name + ' is too large (max 5MB per image).')
+        continue
+      }
+      // Convert to base64
+      try {
+        var base64 = await new Promise(function (resolve, reject) {
+          var reader = new FileReader()
+          reader.onload = function () {
+            // reader.result is "data:image/jpeg;base64,XXXX" — strip the prefix
+            var result = reader.result
+            var commaIdx = result.indexOf(',')
+            resolve(result.substring(commaIdx + 1))
+          }
+          reader.onerror = reject
+          reader.readAsDataURL(file)
+        })
+        var mediaType = file.type
+        // Normalize heic/heif to jpeg-compatible media type if browser can't handle it natively
+        if (mediaType === 'image/heic' || mediaType === 'image/heif') {
+          mediaType = 'image/jpeg' // Claude treats this as a best-effort read
+        }
+        newImages.push({
+          name: file.name,
+          data: base64,
+          media_type: mediaType,
+          preview: 'data:' + mediaType + ';base64,' + base64,
+        })
+      } catch (err) {
+        console.error('Failed to read image:', err)
+      }
+    }
+    setPendingImages(prev => [...prev, ...newImages])
+    // Reset the input so the same file can be picked again
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const removePendingImage = (idx) => {
+    setPendingImages(prev => prev.filter(function (_, i) { return i !== idx }))
   }
 
   const handleKeyPress = (e) => {
@@ -326,7 +429,11 @@ export default function AIChatWidget() {
           >
             <div className="chat-header-info">
               <span className="chat-header-dot"></span>
-              <span className="chat-header-title">PetPro AI{adminMode ? ' (Admin)' : ''}</span>
+              <span className="chat-header-title">
+                PetPro AI
+                {adminMode ? ' (Admin)' : ''}
+                {migrationMode ? ' 🤖 Migration Mode' : ''}
+              </span>
             </div>
             <div className="chat-header-actions">
               <button className="chat-clear-btn" onClick={clearChat} title="Clear chat">🗑</button>
@@ -340,6 +447,13 @@ export default function AIChatWidget() {
               <div key={i} className={`chat-msg ${msg.role === 'user' ? 'chat-msg-user' : 'chat-msg-ai'}`}>
                 {msg.role === 'assistant' && <span className="chat-msg-avatar">🐾</span>}
                 <div className={`chat-msg-bubble ${msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'}`}>
+                  {msg.images && msg.images.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: msg.text ? '6px' : 0 }}>
+                      {msg.images.map(function (src, k) {
+                        return <img key={k} src={src} alt="attachment" style={{ maxWidth: '160px', maxHeight: '160px', borderRadius: '6px', border: '1px solid rgba(0,0,0,0.1)' }} />
+                      })}
+                    </div>
+                  )}
                   {msg.text}
                 </div>
               </div>
@@ -355,22 +469,57 @@ export default function AIChatWidget() {
             <div ref={messagesEndRef} />
           </div>
 
+          {/* Pending image previews (before send) */}
+          {pendingImages.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '8px 12px 0', borderTop: '1px solid #eee' }}>
+              {pendingImages.map(function (img, idx) {
+                return (
+                  <div key={idx} style={{ position: 'relative' }}>
+                    <img src={img.preview} alt={img.name} style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '6px', border: '1px solid #ccc' }} />
+                    <button
+                      onClick={function () { removePendingImage(idx) }}
+                      style={{ position: 'absolute', top: '-6px', right: '-6px', width: '20px', height: '20px', borderRadius: '50%', border: 'none', background: '#e74c3c', color: 'white', cursor: 'pointer', fontSize: '12px', lineHeight: 1, padding: 0 }}
+                      title="Remove"
+                    >×</button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
           {/* Chat Input */}
           <div className="chat-input-area">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleFilePick}
+              style={{ display: 'none' }}
+            />
+            <button
+              className="chat-send-btn"
+              onClick={function () { if (fileInputRef.current) fileInputRef.current.click() }}
+              disabled={sending}
+              title="Attach image (screenshot, photo, cert)"
+              style={{ background: migrationMode ? '#10b981' : undefined }}
+            >
+              📎
+            </button>
             <textarea
               ref={inputRef}
               className="chat-input"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Ask PetPro AI anything..."
+              placeholder={migrationMode ? 'Chat or drop a screenshot...' : 'Ask PetPro AI anything...'}
               rows={1}
               disabled={sending}
             />
             <button
               className="chat-send-btn"
               onClick={sendMessage}
-              disabled={sending || !input.trim()}
+              disabled={sending || (!input.trim() && pendingImages.length === 0)}
             >
               ➤
             </button>

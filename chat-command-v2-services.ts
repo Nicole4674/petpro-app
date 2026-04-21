@@ -18,6 +18,43 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// ============================================================
+// PUSH NOTIFICATION HELPER — fires a browser push to a user.
+// Fire-and-forget: we NEVER want a push failure to break a
+// Claude tool call. All errors are logged + swallowed.
+// ============================================================
+async function sendPushToUser(userId, title, body, url, tag) {
+  if (!userId || !title) return
+  try {
+    var supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+    var serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    if (!supabaseUrl || !serviceKey) {
+      console.warn('[push] SUPABASE_URL or SERVICE_ROLE_KEY missing — skipping push')
+      return
+    }
+    var res = await fetch(supabaseUrl + '/functions/v1/send-push', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + serviceKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        title: title,
+        body: body || '',
+        url: url || '/',
+        tag: tag || undefined,
+      }),
+    })
+    if (!res.ok) {
+      var txt = await res.text().catch(function() { return '' })
+      console.warn('[push] send-push returned', res.status, txt)
+    }
+  } catch (err) {
+    console.warn('[push] sendPushToUser failed (non-fatal):', err)
+  }
+}
+
 // Tools Claude can use - search first, then act
 var toolDefinitions = [
   {
@@ -804,6 +841,18 @@ var toolDefinitions = [
         notes: { type: 'string' },
       },
       required: ['reservation_id', 'start_time'],
+    },
+  },
+  {
+    name: 'send_client_message',
+    description: 'Send a text message to a client from the groomer. This inserts a message into the existing groomer↔client thread (creating the thread if needed) and fires a push notification to the client. CRITICAL SAFETY: BEFORE calling this tool, you MUST (1) show the groomer the exact message you are about to send, (2) confirm WHICH client (full name + phone) if there is any chance of ambiguity, (3) get an explicit "yes / send it / do it" from the groomer. Never send without that confirmation. After sending, confirm it was delivered. Use search_clients FIRST if you only have a partial name. Sender is always "groomer" — the message appears as if the groomer typed it themselves.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'The exact client UUID from search_clients results.' },
+        message_text: { type: 'string', description: 'The full message text to send. Keep it friendly and professional — write it like the groomer would say it.' },
+      },
+      required: ['client_id', 'message_text'],
     },
   },
 ]
@@ -2636,6 +2685,114 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
         }
       }
 
+      case 'send_client_message': {
+        // Safety: client_id + message_text are required
+        if (!toolInput.client_id || !toolInput.message_text) {
+          return { success: false, error: 'Both client_id and message_text are required.' }
+        }
+
+        var msgText = String(toolInput.message_text).trim()
+        if (!msgText) {
+          return { success: false, error: 'Message text cannot be empty.' }
+        }
+        if (msgText.length > 1500) {
+          return { success: false, error: 'Message is too long (1500 character max).' }
+        }
+
+        // Verify this client belongs to this groomer (security)
+        var { data: clientRow, error: clientErr } = await supabaseAdmin
+          .from('clients')
+          .select('id, first_name, last_name, user_id, groomer_id')
+          .eq('id', toolInput.client_id)
+          .eq('groomer_id', groomerId)
+          .maybeSingle()
+
+        if (clientErr || !clientRow) {
+          return { success: false, error: 'Client not found or not yours.' }
+        }
+
+        // Find existing thread or create one
+        var { data: existingThread } = await supabaseAdmin
+          .from('threads')
+          .select('id')
+          .eq('groomer_id', groomerId)
+          .eq('client_id', clientRow.id)
+          .maybeSingle()
+
+        var threadId = existingThread ? existingThread.id : null
+
+        if (!threadId) {
+          var { data: newThread, error: threadErr } = await supabaseAdmin
+            .from('threads')
+            .insert({
+              groomer_id: groomerId,
+              client_id: clientRow.id,
+              last_message_at: new Date().toISOString(),
+            })
+            .select('id')
+            .single()
+
+          if (threadErr || !newThread) {
+            console.error('Thread create error:', threadErr)
+            return { success: false, error: 'Could not start a conversation thread with ' + clientRow.first_name + '.' }
+          }
+          threadId = newThread.id
+        }
+
+        // Insert the message (sender_type = 'groomer' — looks like it came from the groomer themselves)
+        var { data: newMsg, error: msgErr } = await supabaseAdmin
+          .from('messages')
+          .insert({
+            thread_id: threadId,
+            groomer_id: groomerId,
+            client_id: clientRow.id,
+            sender_type: 'groomer',
+            text: msgText,
+            attachment_url: null,
+            read_by_groomer: true,   // groomer sent it
+            read_by_client: false,
+          })
+          .select()
+          .single()
+
+        if (msgErr || !newMsg) {
+          console.error('Message insert error:', msgErr)
+          return { success: false, error: 'Could not send the message. Try again.' }
+        }
+
+        // Bump thread last_message_at
+        await supabaseAdmin
+          .from('threads')
+          .update({ last_message_at: newMsg.created_at })
+          .eq('id', threadId)
+
+        // Fire push notification to client (fire-and-forget)
+        if (clientRow.user_id) {
+          var { data: shopRow } = await supabaseAdmin
+            .from('shop_settings')
+            .select('shop_name')
+            .eq('groomer_id', groomerId)
+            .maybeSingle()
+          var shopName = (shopRow && shopRow.shop_name) || 'Your groomer'
+          var preview = msgText.length > 100 ? msgText.slice(0, 100) + '...' : msgText
+          sendPushToUser(
+            clientRow.user_id,
+            shopName,
+            preview,
+            '/portal/messages/' + threadId,
+            'thread-' + threadId
+          )
+        }
+
+        return {
+          success: true,
+          message: 'Sent to ' + clientRow.first_name + ' ' + (clientRow.last_name || '') + '.',
+          client_name: clientRow.first_name + ' ' + (clientRow.last_name || ''),
+          thread_id: threadId,
+          message_id: newMsg.id,
+        }
+      }
+
       default:
         return { success: false, error: 'Unknown tool: ' + toolName }
     }
@@ -3188,9 +3345,196 @@ Deno.serve(async (req) => {
       '- If you can\'t find something, say so honestly — "don\'t see a [thing] on that one".',
       '- When adding a new client, first name, last name, AND phone number are ALL required.',
       '',
+      'SENDING MESSAGES TO CLIENTS — CRITICAL SAFETY FLOW:',
+      '- When the groomer asks you to text/message/send to a client, you MUST follow this exact flow:',
+      '  1. Use search_clients FIRST if the groomer gave a partial name (just "Sarah"). If multiple match, ASK which one before drafting.',
+      '  2. Draft the message text, then SHOW it to the groomer with the client\'s full name. Example:',
+      '     "Here\'s what I\'ll send to Sarah Johnson: \'Hey Sarah, Bella\'s 2pm tomorrow needs to move to 3pm — does that work?\' Want me to send it?"',
+      '  3. WAIT for explicit confirmation ("yes", "send it", "do it", "looks good", "go ahead"). Do NOT assume.',
+      '  4. If the groomer edits the message ("change it to..."), redraft and show it again. Confirm again.',
+      '  5. Only AFTER explicit yes, call send_client_message.',
+      '  6. After the tool runs, confirm it was sent: "✅ Sent to Sarah."',
+      '- NEVER send a message without the preview + confirmation step. Messages to clients are final — they can\'t be undone.',
+      '- If the groomer is vague ("text all my Thursday people"), ask for specifics before doing anything bulk.',
+      '- Write messages in the groomer\'s natural voice — friendly, short, not robotic. Sign nothing ("- AI") — it should feel like the groomer typed it.',
+      '',
       'CURRENT DATA:',
       contextParts.join('\n'),
     ].join('\n')
+
+    // VAX CERT MODE — short-circuit for auto-reading vaccine certificates.
+    // Frontend sends body.vax_cert_mode = true + body.images = [{media_type, data}].
+    // Claude does ONE call, no tools, returns structured JSON.
+    if (body.vax_cert_mode === true) {
+      var vaxCertSystem = [
+        'You are a vaccination certificate parser. You receive an image of a pet vaccine certificate, vet invoice, vaccine sticker, or handwritten vet note.',
+        '',
+        'Your ONLY job: read the image and return a single JSON object with the fields below. Return ONLY the JSON, no other text, no markdown code fences, no commentary.',
+        '',
+        'JSON SHAPE (return this exact shape):',
+        '{',
+        '  "vaccine_type": "rabies" | "dhpp" | "bordetella" | "leptospirosis" | "lyme" | "canine_influenza" | "fvrcp" | "feline_leukemia" | "other" | null,',
+        '  "vaccine_label": string | null,   // used when vaccine_type = "other", or if unsure',
+        '  "expiry_date": "YYYY-MM-DD" | null,   // when the vaccine expires / next due',
+        '  "date_administered": "YYYY-MM-DD" | null,   // when the shot was given',
+        '  "vet_clinic": string | null,   // name of vet clinic / hospital',
+        '  "notes": string | null,   // any useful info: "1-year rabies", "3-year rabies", batch number, etc.',
+        '  "confidence": "high" | "medium" | "low",',
+        '  "warning": string | null   // if image is blurry, cut off, or ambiguous, explain here',
+        '}',
+        '',
+        'RULES:',
+        '- If a field is not visible or not readable, return null for that field. NEVER invent data.',
+        '- Dates MUST be YYYY-MM-DD format. Convert "Jan 15 2025" → "2025-01-15", "1/15/26" → "2026-01-15".',
+        '- If you see "3-year" or "1-year" on a rabies cert, put it in notes.',
+        '- vaccine_type mapping: "DA2PP" / "DHLPP" / "DAPP" → "dhpp"; "Kennel Cough" → "bordetella"; "Lepto" → "leptospirosis"; if unclear, use "other" and put the label in vaccine_label.',
+        '- confidence: "high" if all key fields are clearly readable, "medium" if some guessing, "low" if image is poor.',
+        '- If the image is NOT a vax certificate (random photo, etc.), return all nulls with warning: "This does not appear to be a vaccination certificate."',
+        '',
+        'Return ONLY the JSON object. No text before or after.',
+      ].join('\n')
+
+      var vaxMessages = []
+      var vaxUserContent = []
+      if (body.images && Array.isArray(body.images)) {
+        for (var vimg of body.images) {
+          if (vimg && vimg.data && vimg.media_type) {
+            vaxUserContent.push({
+              type: 'image',
+              source: { type: 'base64', media_type: vimg.media_type, data: vimg.data },
+            })
+          }
+        }
+      }
+      vaxUserContent.push({ type: 'text', text: 'Read this vaccination certificate and return JSON only.' })
+      vaxMessages.push({ role: 'user', content: vaxUserContent })
+
+      var vaxResponse = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': claudeKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 500,
+          system: vaxCertSystem,
+          messages: vaxMessages,
+        }),
+      })
+
+      if (!vaxResponse.ok) {
+        var vaxErrText = await vaxResponse.text()
+        console.error('Vax cert parse error:', vaxErrText)
+        return new Response(JSON.stringify({ error: 'Could not read the photo. Try again with a clearer image.' }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+
+      var vaxData = await vaxResponse.json()
+      var vaxText = ''
+      for (var vblock of vaxData.content) {
+        if (vblock.type === 'text') vaxText += vblock.text
+      }
+      // Strip markdown fences if Claude added them despite instructions
+      vaxText = vaxText.replace(/```json/g, '').replace(/```/g, '').trim()
+
+      var parsedVax
+      try {
+        parsedVax = JSON.parse(vaxText)
+      } catch (parseErr) {
+        console.error('Vax JSON parse failed:', vaxText)
+        return new Response(JSON.stringify({ error: 'Could not understand the photo. Try a clearer picture of the certificate.' }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+
+      return new Response(JSON.stringify({ vax_data: parsedVax }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // MIGRATION MODE OVERRIDE — when the frontend sends body.migration_mode = true,
+    // prepend a dedicated persona that replaces the default behavior.
+    // The groomer is onboarding / migrating their book of business from another system.
+    if (body.migration_mode === true) {
+      var migrationPreamble = [
+        '=========================================',
+        'MIGRATION MODE — ACTIVE',
+        '=========================================',
+        '',
+        'You are now Migration Claude — a patient, warm, personal onboarding assistant. Your ONLY job right now is to help this groomer move their business into PetPro. You are NOT the general booking assistant. Stay in this persona until the user says "business mode", "done with migration", "exit migration", or clearly signals they\'re finished.',
+        '',
+        'PERSONALITY:',
+        '- Warm, encouraging, patient. This person is nervous about switching software — reassure them.',
+        '- Conversational, not robotic. Use their first name if you know it. Use short sentences.',
+        '- Celebrate small wins: "Perfect, that\'s 10 clients added 🎉", "Look at you go, we\'re flying!"',
+        '- Never interrogate. Ask ONE thing at a time. Wait for their answer.',
+        '- If they seem overwhelmed, slow down. Offer to take a break. Say "no rush".',
+        '',
+        'OPENING BEHAVIOR (your very first migration mode reply):',
+        '- Greet them warmly. Example: "Hey! I\'m going to help you move your shop over — this is the easy part, promise. Quick question to start: what software (or system) are you coming from? Moe Go, Gingr, Pawfinity, paper notebook, spreadsheet — whatever it is, I can work with it."',
+        '- Do NOT dump a list of options. Ask the open question, listen to their answer.',
+        '',
+        'WHAT YOU CAN ACCEPT (the groomer can give you ANY of these):',
+        '- 📸 Screenshots of their old software (client list, appointment book, pet list) — you have vision, you can read them',
+        '- 📄 PDF exports or reports from their old system',
+        '- 🖼️ Photos of paper notebooks, rolodexes, printed appointment books',
+        '- 📝 Typed or pasted lists ("here are my top 20 clients: Amy Smith 555-1234 Lilly bulldog, ...")',
+        '- 🎤 Voice dictation ("add Amy Treadwell, phone 555-1234, she has a bulldog named Lilly")',
+        '',
+        'HOW TO HANDLE PHOTOS / SCREENSHOTS (CRITICAL — YOU HAVE VISION):',
+        '- When the groomer sends an image, LOOK AT IT carefully and identify what it shows: client list, appointment calendar, pet list, vax certificate, etc.',
+        '- Extract the data you can see: names, phone numbers, emails, pet names, breeds, vaccination dates.',
+        '- BEFORE importing, ALWAYS summarize what you found and ask for approval: "I see 12 clients in this screenshot — Amy Treadwell, Mike Johnson, Sarah Lee, [etc.]. Want me to add all of them, or just some?"',
+        '- Wait for their yes before calling add_client / add_pet tools.',
+        '- If the image is blurry or info is missing, say so: "I can see most of this but the phone numbers are cut off on the right — can you send another shot or read them out?"',
+        '',
+        'IMPORT WORKFLOW (step by step):',
+        '1. First, ask what software they\'re coming from.',
+        '2. Based on their answer, suggest the easiest format: "Got it! The fastest way is if you can export a CSV from Moe Go — want me to walk you through that? Or if it\'s easier, just screenshot your client list and drop it in here."',
+        '3. Once they send data (screenshot / paste / CSV / typed), read it, preview it back, get approval.',
+        '4. Import using add_client, add_pet, add_vaccination tools. Use search_clients first to avoid duplicates.',
+        '5. After each batch, celebrate + ask what\'s next: "Nailed it — 15 clients in 🎉. Want to keep going with more clients, or switch to importing their pets?"',
+        '',
+        'WHAT TO PRIORITIZE (tell the groomer):',
+        '- Priority 1: Client names + phone numbers (the minimum to reach them)',
+        '- Priority 2: Pet names + breeds (so they can book)',
+        '- Priority 3: Pet weight + age (for accurate quotes)',
+        '- Priority 4: Vaccinations (rabies + DHPP + bordetella expiry dates)',
+        '- Bonus: Allergies, medications, grooming notes, special handling',
+        '- Past appointment history is LOWEST priority — usually skip it. Fresh start is cleaner.',
+        '',
+        'SOFTWARE-SPECIFIC TIPS:',
+        '- Moe Go: has a CSV export under Settings → Data Export. Send them to /import page if they have a CSV.',
+        '- Gingr: export reports as PDF or Excel. You can read either.',
+        '- Pawfinity: has a client list export — CSV works best.',
+        '- Paper notebook / rolodex: take photos page by page. You\'ll read them.',
+        '- Spreadsheet (Google Sheets / Excel): they can export CSV or just paste the data.',
+        '',
+        'RULES FOR THIS MODE:',
+        '- NEVER invent data. If a field is missing, leave it blank. Missing is better than wrong.',
+        '- ALWAYS confirm before importing. Show a preview, get a yes, then run the tools.',
+        '- Use the EXISTING tools (add_client, add_pet, add_vaccination, edit_client, edit_pet) — you have full access.',
+        '- If duplicates might exist, run search_clients first and ask: "Amy Treadwell is already in here — want me to update her info, or skip?"',
+        '- If the groomer asks to switch back to normal Claude, respond warmly: "Got it! I\'m back to your regular assistant. Say \'help me migrate\' anytime to come back here."',
+        '',
+        'CLOSING A SESSION:',
+        '- When the groomer indicates they\'re done (or takes a break), give them a summary: "Awesome work today! We got 47 clients, 63 pets, and 38 vaccinations in. You\'re ~60% done. Whenever you\'re ready, just click Start AI Migration again or type \'help me migrate\' and we\'ll pick up where we left off."',
+        '- Never leave them feeling like they failed. Migration is hard — celebrate progress.',
+        '',
+        '=========================================',
+        '(End of Migration Mode preamble. The normal PetPro AI system prompt and all tools follow below — you have full access to them.)',
+        '=========================================',
+        '',
+      ].join('\n')
+
+      systemPrompt = migrationPreamble + systemPrompt
+    }
 
     // Build conversation history
     var messages = []
@@ -3200,7 +3544,28 @@ Deno.serve(async (req) => {
         messages.push({ role: 'assistant', content: h.assistant })
       }
     }
-    messages.push({ role: 'user', content: body.message })
+
+    // Support image attachments — if body.images is an array of { media_type, data (base64) },
+    // send them as a mixed content array alongside the text message.
+    if (body.images && Array.isArray(body.images) && body.images.length > 0) {
+      var userContent = []
+      for (var img of body.images) {
+        if (img && img.data && img.media_type) {
+          userContent.push({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: img.media_type,
+              data: img.data,
+            },
+          })
+        }
+      }
+      userContent.push({ type: 'text', text: body.message || 'Please look at this image.' })
+      messages.push({ role: 'user', content: userContent })
+    } else {
+      messages.push({ role: 'user', content: body.message })
+    }
 
     // Tool loop - Claude may use multiple tools
     var maxLoops = 8
@@ -3217,7 +3582,7 @@ Deno.serve(async (req) => {
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-6',
           max_tokens: 1500,
           system: systemPrompt,
           messages: messages,

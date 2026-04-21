@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
@@ -69,6 +69,13 @@ export default function PetDetail() {
   var [pendingCertFile, setPendingCertFile] = useState(null)   // new file picked in modal, not yet uploaded
   var [existingCertUrl, setExistingCertUrl] = useState(null)   // current document_url on the record being edited
   var [uploadingCert, setUploadingCert] = useState(false)
+
+  // 📸 Auto-read vax cert with Claude vision
+  var [autoReadingVax, setAutoReadingVax] = useState(false)
+  var [autoReadError, setAutoReadError] = useState(null)
+  var [autoReadWarning, setAutoReadWarning] = useState(null)   // "low confidence" or "image blurry" notice after a successful read
+  var autoReadTopInputRef = useRef(null)
+  var autoReadInlineInputRef = useRef(null)
 
   useEffect(function() {
     fetchPet()
@@ -259,6 +266,8 @@ export default function PetDetail() {
     })
     setPendingCertFile(null)
     setExistingCertUrl(null)
+    setAutoReadError(null)
+    setAutoReadWarning(null)
     setShowVaxModal(true)
   }
 
@@ -274,7 +283,123 @@ export default function PetDetail() {
     })
     setPendingCertFile(null)
     setExistingCertUrl(vax.document_url || null)
+    setAutoReadError(null)
+    setAutoReadWarning(null)
     setShowVaxModal(true)
+  }
+
+  // 📸 Auto-read a vaccine certificate image with Claude Vision.
+  // Sends the image to chat-command-v2-services edge function with vax_cert_mode = true,
+  // gets back structured JSON, and auto-fills the vax form.
+  async function handleAutoReadVaxCert(file) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setAutoReadError('Please upload an image (JPG, PNG, or HEIC).')
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setAutoReadError('Image is too big (10MB max). Try a smaller photo.')
+      return
+    }
+
+    setAutoReadError(null)
+    setAutoReadWarning(null)
+    setAutoReadingVax(true)
+
+    try {
+      // Convert file to base64
+      var base64 = await new Promise(function(resolve, reject) {
+        var reader = new FileReader()
+        reader.onload = function() {
+          var result = reader.result
+          // Strip the "data:image/xxx;base64," prefix
+          var comma = result.indexOf(',')
+          resolve(comma >= 0 ? result.substring(comma + 1) : result)
+        }
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+
+      // Normalize media type (HEIC → JPEG for API compatibility)
+      var mediaType = file.type
+      if (mediaType === 'image/heic' || mediaType === 'image/heif') {
+        mediaType = 'image/jpeg'
+      }
+
+      var { data: { session } } = await supabase.auth.getSession()
+      var token = session ? session.access_token : ''
+
+      var res = await fetch(
+        import.meta.env.VITE_SUPABASE_URL + '/functions/v1/chat-command-v2-services',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token,
+          },
+          body: JSON.stringify({
+            vax_cert_mode: true,
+            images: [{ media_type: mediaType, data: base64 }],
+            message: 'Read this vaccine cert',
+            groomer_id: pet ? pet.groomer_id : null,
+          }),
+        }
+      )
+
+      var result = await res.json()
+
+      if (result.error) {
+        setAutoReadError(result.error)
+        setAutoReadingVax(false)
+        return
+      }
+
+      var vaxData = result.vax_data
+      if (!vaxData) {
+        setAutoReadError('Could not read the photo. Try a clearer picture.')
+        setAutoReadingVax(false)
+        return
+      }
+
+      // If Claude said this isn't a vax cert, show warning and don't fill anything
+      if (vaxData.warning && !vaxData.vaccine_type && !vaxData.expiry_date) {
+        setAutoReadError(vaxData.warning)
+        setAutoReadingVax(false)
+        return
+      }
+
+      // Auto-fill the form with what Claude read. Preserve existing values if Claude returned null.
+      setVaxForm(function(prev) {
+        return {
+          vaccine_type: vaxData.vaccine_type || prev.vaccine_type,
+          vaccine_label: vaxData.vaccine_label || prev.vaccine_label,
+          expiry_date: vaxData.expiry_date || prev.expiry_date,
+          date_administered: vaxData.date_administered || prev.date_administered,
+          vet_clinic: vaxData.vet_clinic || prev.vet_clinic,
+          notes: vaxData.notes || prev.notes,
+        }
+      })
+
+      // Also attach the photo as the cert file so it saves with the record
+      setPendingCertFile(file)
+
+      // Show confidence / warnings so the groomer knows to double-check
+      if (vaxData.confidence === 'low') {
+        setAutoReadWarning('⚠️ Low confidence — please double-check the fields before saving.')
+      } else if (vaxData.confidence === 'medium') {
+        setAutoReadWarning('👀 Please verify the fields — some details were hard to read.')
+      } else if (vaxData.warning) {
+        setAutoReadWarning(vaxData.warning)
+      } else {
+        setAutoReadWarning('✅ Filled in from photo — please double-check before saving.')
+      }
+
+      setAutoReadingVax(false)
+    } catch (err) {
+      console.error('Auto-read vax cert failed:', err)
+      setAutoReadError('Something went wrong. Try again.')
+      setAutoReadingVax(false)
+    }
   }
 
   async function handleSaveVaccination(e) {
@@ -1088,6 +1213,65 @@ export default function PetDetail() {
               <button className="sl-modal-close" onClick={function() { setShowVaxModal(false) }}>✕</button>
             </div>
 
+            {/* 📸 TOP AUTO-READ BUTTON — big, prominent */}
+            {!editingVaxId && (
+              <div style={{ padding: '16px 20px 0', }}>
+                <div style={{
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  borderRadius: '10px',
+                  padding: '14px 16px',
+                  color: 'white',
+                }}>
+                  <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '6px' }}>
+                    🤖 Skip the typing — let Claude read it
+                  </div>
+                  <div style={{ fontSize: '12px', opacity: 0.95, marginBottom: '10px' }}>
+                    Snap a photo of the vax cert and Claude will fill in the fields for you.
+                  </div>
+                  <input
+                    ref={autoReadTopInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                    onChange={function(e) {
+                      var f = e.target.files && e.target.files[0]
+                      if (f) handleAutoReadVaxCert(f)
+                      e.target.value = ''   // allow re-selecting the same file
+                    }}
+                    style={{ display: 'none' }}
+                  />
+                  <button
+                    type="button"
+                    disabled={autoReadingVax}
+                    onClick={function() { autoReadTopInputRef.current && autoReadTopInputRef.current.click() }}
+                    style={{
+                      background: 'white',
+                      color: '#667eea',
+                      border: 'none',
+                      padding: '10px 16px',
+                      borderRadius: '8px',
+                      fontWeight: 'bold',
+                      fontSize: '14px',
+                      cursor: autoReadingVax ? 'wait' : 'pointer',
+                      width: '100%',
+                    }}
+                  >
+                    {autoReadingVax ? '🤖 Reading photo...' : '📸 Read Vax Cert Photo'}
+                  </button>
+                </div>
+
+                {autoReadError && (
+                  <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: '10px 12px', borderRadius: '8px', fontSize: '13px', marginTop: '10px' }}>
+                    {autoReadError}
+                  </div>
+                )}
+                {autoReadWarning && !autoReadError && (
+                  <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', padding: '10px 12px', borderRadius: '8px', fontSize: '13px', marginTop: '10px' }}>
+                    {autoReadWarning}
+                  </div>
+                )}
+              </div>
+            )}
+
             <form onSubmit={handleSaveVaccination} className="sl-form">
               <div className="sl-form-group">
                 <label className="sl-label">Vaccine Type *</label>
@@ -1227,6 +1411,37 @@ export default function PetDetail() {
                     <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
                       JPG, PNG, WebP, HEIC, or PDF. 10 MB max.
                     </div>
+
+                    {/* 📸 INLINE AUTO-READ BUTTON — smaller, next to upload field */}
+                    <input
+                      ref={autoReadInlineInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                      onChange={function(e) {
+                        var f = e.target.files && e.target.files[0]
+                        if (f) handleAutoReadVaxCert(f)
+                        e.target.value = ''
+                      }}
+                      style={{ display: 'none' }}
+                    />
+                    <button
+                      type="button"
+                      disabled={autoReadingVax}
+                      onClick={function() { autoReadInlineInputRef.current && autoReadInlineInputRef.current.click() }}
+                      style={{
+                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                        color: 'white',
+                        border: 'none',
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        cursor: autoReadingVax ? 'wait' : 'pointer',
+                        marginTop: '8px',
+                      }}
+                    >
+                      {autoReadingVax ? '🤖 Reading...' : '📸 Auto-read from photo with Claude'}
+                    </button>
                   </div>
                 )}
               </div>

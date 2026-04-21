@@ -1397,70 +1397,38 @@ export default function Calendar() {
         }
     }
 
-    // Check waitlist for matching entries when an appointment slot opens up
+    // Fire the new waitlist-notify edge function when a slot opens up.
+    // The edge function handles: toggle check, day-of-week filter,
+    // Haiku picker, templated message, push notification, response window.
     const checkWaitlistForOpening = async (cancelledApptId) => {
         try {
             const { data: { user } } = await supabase.auth.getUser()
             if (!user) return
 
-            // Get the cancelled appointment details
             const { data: cancelledAppt } = await supabase
                 .from('appointments')
-                .select('appointment_date, service_id, start_time')
+                .select('appointment_date, start_time, end_time, service_id')
                 .eq('id', cancelledApptId)
                 .single()
 
             if (!cancelledAppt) return
 
-            // Find waitlist entries that match this date (or are flexible)
-            const { data: waitlistMatches } = await supabase
-                .from('grooming_waitlist')
-                .select('*, clients:client_id(first_name, last_name, phone), pets:pet_id(name)')
-                .eq('groomer_id', user.id)
-                .eq('status', 'waiting')
-                .order('position', { ascending: true })
+            // Build ISO timestamps for the open slot
+            const slotStart = cancelledAppt.appointment_date + 'T' + cancelledAppt.start_time
+            const slotEnd = cancelledAppt.appointment_date + 'T' + cancelledAppt.end_time
 
-            if (!waitlistMatches || waitlistMatches.length === 0) return
-
-            // Filter to find best matches:
-            // 1. Same date match or flexible dates
-            // 2. Same service match (if specified) or any service
-            const matches = waitlistMatches.filter(entry => {
-                const dateMatch = entry.flexible_dates || entry.preferred_date === cancelledAppt.appointment_date
-                const serviceMatch = !entry.service_id || entry.service_id === cancelledAppt.service_id
-                return dateMatch && serviceMatch
-            })
-
-            if (matches.length === 0) return
-
-            // Auto-notify the first matching person on the waitlist
-            const firstMatch = matches[0]
-            const { error: updateError } = await supabase
-                .from('grooming_waitlist')
-                .update({
-                    status: 'notified',
-                    notified_at: new Date().toISOString(),
-                    notification_count: (firstMatch.notification_count || 0) + 1
-                })
-                .eq('id', firstMatch.id)
-
-            if (updateError) throw updateError
-
-            // Show notification to the groomer
-            const clientName = firstMatch.clients ? firstMatch.clients.first_name + ' ' + firstMatch.clients.last_name : 'Unknown'
-            const petName = firstMatch.pets ? firstMatch.pets.name : 'Unknown'
-            const phone = firstMatch.clients?.phone || 'no phone'
-
-            alert(
-                '📋 Waitlist Match Found!\n\n' +
-                clientName + ' with ' + petName + ' was #' + firstMatch.position + ' on the waitlist.\n\n' +
-                'They\'ve been marked as notified.\n' +
-                'Contact them at: ' + phone + '\n\n' +
-                '💡 Tip: Go to the Waitlist page to manage their booking.'
-            )
+            // Fire-and-forget — don't block the cancel flow if it fails
+            supabase.functions.invoke('waitlist-notify', {
+                body: {
+                    groomer_id: user.id,
+                    cancelled_appointment_id: cancelledApptId,
+                    start_time: slotStart,
+                    end_time: slotEnd,
+                    service_id: cancelledAppt.service_id
+                }
+            }).catch(err => console.error('waitlist-notify error:', err))
         } catch (err) {
             console.error('Waitlist auto-notify error:', err)
-            // Don't alert - this is a bonus feature, don't block the cancellation flow
         }
     }
 
@@ -1641,9 +1609,14 @@ export default function Calendar() {
                 <CancelAppointmentModal
                     appt={cancellingAppt}
                     onClose={() => setCancellingAppt(null)}
-                    onSaved={() => {
+                    onSaved={(scope, cancelledApptId) => {
                         setCancellingAppt(null)
                         fetchData()
+                        // Only fire waitlist auto-notify for single cancels
+                        // (not bulk/recurring — those skip the waitlist ping).
+                        if (scope === 'one' && cancelledApptId) {
+                            checkWaitlistForOpening(cancelledApptId)
+                        }
                     }}
                 />
             )}
@@ -4937,7 +4910,11 @@ function CancelAppointmentModal({ appt, onClose, onSaved }) {
                 }
             }
 
-            onSaved && onSaved()
+            // Tell parent which scope was used so it can decide whether to
+            // fire waitlist auto-notify. Non-recurring or scope='one' counts
+            // as a single slot opening; bulk cancels skip waitlist.
+            var reportedScope = (!isRecurringAppt || scope === 'one') ? 'one' : scope
+            onSaved && onSaved(reportedScope, appt.id)
         } catch (err) {
             console.error('Cancel error:', err)
             setError(err.message || 'Failed to cancel. Please try again.')

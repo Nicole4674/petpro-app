@@ -64,6 +64,12 @@ export default function ChatSettings() {
   var [clientCanReschedule, setClientCanReschedule] = useState(true)
   var [clientCanCancel, setClientCanCancel] = useState(true)
 
+  // ---- Waitlist Auto-Notify ----
+  var [waitlistAutoNotifyEnabled, setWaitlistAutoNotifyEnabled] = useState(false)
+  var [waitlistAutoNotifyInstructions, setWaitlistAutoNotifyInstructions] = useState('')
+  var [waitlistResponseWindowMinutes, setWaitlistResponseWindowMinutes] = useState(30)
+  var [waitlistOnYesAction, setWaitlistOnYesAction] = useState('notify_groomer')
+
   // ---- Custom ----
   var [customInstructions, setCustomInstructions] = useState('')
 
@@ -127,6 +133,11 @@ export default function ChatSettings() {
 
         if (data.custom_instructions != null) setCustomInstructions(data.custom_instructions)
 
+        if (data.waitlist_auto_notify_enabled != null) setWaitlistAutoNotifyEnabled(!!data.waitlist_auto_notify_enabled)
+        if (data.waitlist_auto_notify_instructions != null) setWaitlistAutoNotifyInstructions(data.waitlist_auto_notify_instructions)
+        if (data.waitlist_response_window_minutes != null) setWaitlistResponseWindowMinutes(data.waitlist_response_window_minutes)
+        if (data.waitlist_on_yes_action) setWaitlistOnYesAction(data.waitlist_on_yes_action)
+
         if (data.client_claude_enabled != null) setClientClaudeEnabled(!!data.client_claude_enabled)
         if (data.client_auto_book_enabled != null) setClientAutoBookEnabled(!!data.client_auto_book_enabled)
         if (data.client_can_reschedule != null) setClientCanReschedule(!!data.client_can_reschedule)
@@ -179,6 +190,10 @@ export default function ChatSettings() {
         client_auto_book_enabled: clientAutoBookEnabled,
         client_can_reschedule: clientCanReschedule,
         client_can_cancel: clientCanCancel,
+        waitlist_auto_notify_enabled: waitlistAutoNotifyEnabled,
+        waitlist_auto_notify_instructions: waitlistAutoNotifyInstructions || null,
+        waitlist_response_window_minutes: waitlistResponseWindowMinutes,
+        waitlist_on_yes_action: waitlistOnYesAction,
       }
 
       var { error: saveErr } = await supabase
@@ -516,6 +531,162 @@ export default function ChatSettings() {
         }}>
           <strong>⚠️ Note:</strong> New clients (zero past appointments) always route through
           messaging — they can never auto-book, no matter what these settings say.
+        </div>
+      </div>
+
+      {/* ===== Waitlist Auto-Notify ===== */}
+      <div style={cardStyle}>
+        <h3 style={sectionTitleStyle}>📋 Waitlist Auto-Notify</h3>
+        <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
+          When an appointment gets cancelled, PetPro AI can automatically message the first
+          eligible person on your waitlist to offer them the open slot — no manual work from you.
+        </div>
+
+        {/* Master toggle */}
+        <div style={{
+          background: waitlistAutoNotifyEnabled ? '#f0fdf4' : '#fef2f2',
+          border: waitlistAutoNotifyEnabled ? '1px solid #bbf7d0' : '1px solid #fecaca',
+          borderRadius: 10,
+          padding: 14,
+          marginBottom: 14,
+        }}>
+          <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>
+                Enable Waitlist Auto-Notify {waitlistAutoNotifyEnabled ? '' : '(OFF)'}
+              </div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                When off, PetPro AI will not ping anyone on the waitlist automatically.
+                You can still manually offer slots from the Waitlist page.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={waitlistAutoNotifyEnabled}
+              onChange={function (e) { setWaitlistAutoNotifyEnabled(e.target.checked) }}
+              style={{ width: 22, height: 22, cursor: 'pointer', flexShrink: 0, marginLeft: 16 }}
+            />
+          </label>
+        </div>
+
+        {/* Filter instructions */}
+        <div style={subToggleCardStyle(waitlistAutoNotifyEnabled)}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+            Filter Rules (PetPro AI reads these)
+          </div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
+            Plain English. PetPro AI will skip anyone on the waitlist who breaks these rules.
+          </div>
+          <textarea
+            value={waitlistAutoNotifyInstructions}
+            onChange={function (e) { setWaitlistAutoNotifyInstructions(e.target.value) }}
+            disabled={!waitlistAutoNotifyEnabled}
+            rows={4}
+            placeholder="Examples:&#10;- Don't offer to dogs over 50 lbs&#10;- Skip puppies under 6 months&#10;- Never offer a boarding slot to aggressive dogs&#10;- Only offer small-breed slots to dogs under 20 lbs"
+            style={{
+              width: '100%',
+              padding: 10,
+              border: '1px solid #d1d5db',
+              borderRadius: 8,
+              fontFamily: 'inherit',
+              fontSize: 14,
+              background: waitlistAutoNotifyEnabled ? '#fff' : '#f3f4f6',
+              color: waitlistAutoNotifyEnabled ? '#111827' : '#6b7280',
+              resize: 'vertical',
+              boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        {/* Response window timer */}
+        <div style={subToggleCardStyle(waitlistAutoNotifyEnabled)}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+            Response Window
+          </div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
+            How long does the client have to reply YES before PetPro AI moves on to the next person?
+          </div>
+          <select
+            value={waitlistResponseWindowMinutes}
+            onChange={function (e) { setWaitlistResponseWindowMinutes(parseInt(e.target.value, 10)) }}
+            disabled={!waitlistAutoNotifyEnabled}
+            style={{ ...inputStyle, maxWidth: 260 }}
+          >
+            <option value={5}>5 minutes (aggressive — fast shops)</option>
+            <option value={15}>15 minutes</option>
+            <option value={30}>30 minutes (recommended)</option>
+            <option value={60}>1 hour</option>
+            <option value={120}>2 hours (relaxed)</option>
+            <option value={240}>4 hours</option>
+          </select>
+        </div>
+
+        {/* On-yes action */}
+        <div style={subToggleCardStyle(waitlistAutoNotifyEnabled)}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+            When a client says YES, what should PetPro AI do?
+          </div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
+            PetPro AI will only accept a plain YES on the exact slot offered. It won't
+            negotiate different times — if the client asks for a change, PetPro AI pings you.
+          </div>
+
+          <label style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+            padding: '10px 12px',
+            border: '1px solid #e5e7eb',
+            borderRadius: 8,
+            marginBottom: 8,
+            cursor: waitlistAutoNotifyEnabled ? 'pointer' : 'not-allowed',
+            fontSize: 14,
+            background: waitlistOnYesAction === 'notify_groomer' ? '#eff6ff' : '#fff',
+          }}>
+            <input
+              type="radio"
+              name="onYesAction"
+              value="notify_groomer"
+              checked={waitlistOnYesAction === 'notify_groomer'}
+              disabled={!waitlistAutoNotifyEnabled}
+              onChange={function (e) { setWaitlistOnYesAction(e.target.value) }}
+              style={{ marginTop: 3 }}
+            />
+            <div>
+              <div><strong>Ping me to book it</strong> (safer — you stay in control)</div>
+              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                PetPro AI sends you a push notification: "Sophia said YES to the 2pm Friday slot — book it?" You tap to confirm.
+              </div>
+            </div>
+          </label>
+
+          <label style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+            padding: '10px 12px',
+            border: '1px solid #e5e7eb',
+            borderRadius: 8,
+            cursor: waitlistAutoNotifyEnabled ? 'pointer' : 'not-allowed',
+            fontSize: 14,
+            background: waitlistOnYesAction === 'auto_book' ? '#eff6ff' : '#fff',
+          }}>
+            <input
+              type="radio"
+              name="onYesAction"
+              value="auto_book"
+              checked={waitlistOnYesAction === 'auto_book'}
+              disabled={!waitlistAutoNotifyEnabled}
+              onChange={function (e) { setWaitlistOnYesAction(e.target.value) }}
+              style={{ marginTop: 3 }}
+            />
+            <div>
+              <div><strong>Auto-book it instantly</strong> (fastest — zero delay)</div>
+              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                PetPro AI books the appointment the second they say YES. You still get a notification that it happened.
+              </div>
+            </div>
+          </label>
         </div>
       </div>
 
