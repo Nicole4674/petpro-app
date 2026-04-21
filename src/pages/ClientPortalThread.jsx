@@ -375,24 +375,31 @@ export default function ClientPortalThread() {
     if (text && text.trim()) {
       ;(async function checkWaitlistReply() {
         try {
+          console.log('[waitlist-reply] STEP 1: checking. clientRow.id =', clientRow.id)
           // Cheap pre-check: only invoke if this client has a pending offer.
           // waitlist-notify sets status='notified' when it sends the offer message.
-          var { data: pending } = await supabase
+          var { data: pending, error: preErr } = await supabase
             .from('grooming_waitlist')
-            .select('id')
+            .select('id, status, client_id')
             .eq('client_id', clientRow.id)
             .eq('status', 'notified')
             .limit(1)
-          if (!pending || pending.length === 0) return
+          console.log('[waitlist-reply] STEP 2: pre-check result:', { pending: pending, error: preErr })
+          if (!pending || pending.length === 0) {
+            console.log('[waitlist-reply] STEP 3: no pending offer for this client — skipping')
+            return
+          }
 
-          var { error: wlErr } = await supabase.functions.invoke('waitlist-reply', {
+          console.log('[waitlist-reply] STEP 4: invoking edge function with:', { thread_id: thread.id, message_text: text })
+          var invokeResp = await supabase.functions.invoke('waitlist-reply', {
             body: {
               thread_id: thread.id,
               message_text: text,
             },
           })
-          if (wlErr) {
-            console.warn('[waitlist-reply] non-fatal:', wlErr)
+          console.log('[waitlist-reply] STEP 5: edge function response:', invokeResp)
+          if (invokeResp.error) {
+            console.warn('[waitlist-reply] non-fatal:', invokeResp.error)
           }
         } catch (e) {
           console.warn('[waitlist-reply] failed (non-fatal):', e)
