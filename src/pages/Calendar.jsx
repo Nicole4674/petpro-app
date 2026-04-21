@@ -1407,7 +1407,7 @@ export default function Calendar() {
 
             const { data: cancelledAppt } = await supabase
                 .from('appointments')
-                .select('appointment_date, start_time, end_time, service_id')
+                .select('appointment_date, start_time, end_time, service_id, staff_id')
                 .eq('id', cancelledApptId)
                 .single()
 
@@ -1424,7 +1424,8 @@ export default function Calendar() {
                     cancelled_appointment_id: cancelledApptId,
                     start_time: slotStart,
                     end_time: slotEnd,
-                    service_id: cancelledAppt.service_id
+                    service_id: cancelledAppt.service_id,
+                    staff_id: cancelledAppt.staff_id || null
                 }
             }).catch(err => console.error('waitlist-notify error:', err))
         } catch (err) {
