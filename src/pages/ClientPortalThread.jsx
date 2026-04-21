@@ -367,6 +367,38 @@ export default function ClientPortalThread() {
       }
     })()
 
+    // ─── Waitlist reply check (fire and forget) ───
+    // If this client has a pending waitlist offer and their message looks like
+    // a YES/NO response, the waitlist-reply edge function handles it.
+    // On no pending offer, the edge function returns quickly with { handled: false }
+    // and no AI is called. On YES/NO, it posts a reply and updates the waitlist.
+    if (text && text.trim()) {
+      ;(async function checkWaitlistReply() {
+        try {
+          // Cheap pre-check: only invoke if this client has a pending offer.
+          var { data: pending } = await supabase
+            .from('grooming_waitlist')
+            .select('id')
+            .eq('client_id', clientRow.id)
+            .eq('status', 'offered')
+            .limit(1)
+          if (!pending || pending.length === 0) return
+
+          var { error: wlErr } = await supabase.functions.invoke('waitlist-reply', {
+            body: {
+              thread_id: thread.id,
+              message_text: text,
+            },
+          })
+          if (wlErr) {
+            console.warn('[waitlist-reply] non-fatal:', wlErr)
+          }
+        } catch (e) {
+          console.warn('[waitlist-reply] failed (non-fatal):', e)
+        }
+      })()
+    }
+
     // Optimistic append
     setMessages(function (prev) {
       if (prev.find(function (m) { return m.id === data.id })) return prev
