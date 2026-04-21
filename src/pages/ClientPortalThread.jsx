@@ -376,11 +376,12 @@ export default function ClientPortalThread() {
       ;(async function checkWaitlistReply() {
         try {
           // Cheap pre-check: only invoke if this client has a pending offer.
+          // waitlist-notify sets status='notified' when it sends the offer message.
           var { data: pending } = await supabase
             .from('grooming_waitlist')
             .select('id')
             .eq('client_id', clientRow.id)
-            .eq('status', 'offered')
+            .eq('status', 'notified')
             .limit(1)
           if (!pending || pending.length === 0) return
 
