@@ -8,7 +8,10 @@ export default function Sidebar({ onToggle }) {
   const location = useLocation()
   const { canAccess, canAccessAny, loading, role } = usePermissions()
   const [collapsed, setCollapsed] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false) // Task #73 — mobile drawer open/closed
   const [unreadMessages, setUnreadMessages] = useState(0)
+  // Classic Mode — if groomer_ai_enabled is off, hide the 🤖 AI sidebar section entirely
+  const [groomerAiEnabled, setGroomerAiEnabled] = useState(true)
   const [openSections, setOpenSections] = useState({
     grooming: true,
     boarding: true,
@@ -62,6 +65,25 @@ export default function Sidebar({ onToggle }) {
     }
   }, [])
 
+  // Read the AI toggle from shop_settings — hides the 🤖 AI section when off (Classic Mode)
+  useEffect(function () {
+    var cancelled = false
+    async function loadAiFlag() {
+      try {
+        var { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+        var { data } = await supabase
+          .from('shop_settings')
+          .select('groomer_ai_enabled')
+          .eq('groomer_id', user.id)
+          .maybeSingle()
+        if (!cancelled) setGroomerAiEnabled(!data || data.groomer_ai_enabled !== false)
+      } catch (e) { /* fail open */ }
+    }
+    loadAiFlag()
+    return function () { cancelled = true }
+  }, [])
+
   function toggleSection(section) {
     setOpenSections(function(prev) {
       var updated = Object.assign({}, prev)
@@ -72,6 +94,8 @@ export default function Sidebar({ onToggle }) {
 
   function goTo(path) {
     navigate(path)
+    // Task #73 — close the mobile drawer after navigating so the user sees the page
+    setMobileOpen(false)
   }
 
   function isActive(path) {
@@ -84,7 +108,41 @@ export default function Sidebar({ onToggle }) {
   }
 
   return (
-    <div className={'sidebar' + (collapsed ? ' sidebar-collapsed' : '')}>
+    <>
+      {/* Task #73 — Mobile hamburger button (only visible on small screens via CSS) */}
+      <button
+        className="sidebar-hamburger"
+        onClick={function () { setMobileOpen(true) }}
+        title="Open menu"
+        aria-label="Open navigation menu"
+      >
+        <span className="sidebar-hamburger-icon">☰</span>
+        {unreadMessages > 0 && (
+          <span className="sidebar-hamburger-badge">
+            {unreadMessages > 9 ? '9+' : unreadMessages}
+          </span>
+        )}
+      </button>
+
+      {/* Task #73 — Backdrop that closes the drawer when tapped */}
+      {mobileOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={function () { setMobileOpen(false) }}
+          aria-hidden="true"
+        />
+      )}
+
+      <div className={'sidebar' + (collapsed ? ' sidebar-collapsed' : '') + (mobileOpen ? ' sidebar-mobile-open' : '')}>
+      {/* Task #73 — Close button for mobile drawer (only visible on small screens via CSS) */}
+      <button
+        className="sidebar-mobile-close"
+        onClick={function () { setMobileOpen(false) }}
+        title="Close menu"
+        aria-label="Close navigation menu"
+      >
+        ✕
+      </button>
       {/* Logo / Brand */}
       <div className="sidebar-brand" onClick={function() { goTo('/') }}>
         <span className="sidebar-logo">🐾</span>
@@ -373,8 +431,8 @@ export default function Sidebar({ onToggle }) {
           </div>
         </div>
 
-        {/* AI Section — visible if user has any AI permissions */}
-        {canAccessAny(['ai.voice_booking', 'ai.access_settings', 'ai.view_flags']) && (
+        {/* AI Section — visible if user has AI permissions AND groomer_ai_enabled is ON (Classic Mode hides it) */}
+        {groomerAiEnabled && canAccessAny(['ai.voice_booking', 'ai.access_settings', 'ai.view_flags']) && (
         <div className="sidebar-section">
           <div className="sidebar-section-header" onClick={function() { if (!collapsed) toggleSection('ai') }}>
             <span className="sidebar-icon">🤖</span>
@@ -490,5 +548,6 @@ export default function Sidebar({ onToggle }) {
         </div>
       )}
     </div>
+    </>
   )
 }

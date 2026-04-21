@@ -799,6 +799,68 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
           }
         }
 
+        // PET-NAME SEARCH — groomers often say the pet's name ("Mad Max",
+        // "Bella", "Pepper") without the owner. ALWAYS run this alongside
+        // the client search, because the broad client ilike can match
+        // unrelated people (e.g. "Mad Max" matching "Madison", "Madeleine",
+        // "Maximiliano" by first-name prefix). Pet-owner matches get
+        // merged into results and prioritized at the top so the AI sees
+        // the real target first.
+        var petOwnerIds = []
+        // Full query first (best: "Mad Max" as a single pet name)
+        var { data: fullPetMatch } = await supabaseAdmin
+          .from('pets')
+          .select('client_id, name')
+          .eq('groomer_id', groomerId)
+          .ilike('name', '%' + query + '%')
+          .limit(10)
+        if (fullPetMatch) {
+          for (var mp of fullPetMatch) {
+            if (mp.client_id && petOwnerIds.indexOf(mp.client_id) === -1) {
+              petOwnerIds.push(mp.client_id)
+            }
+          }
+        }
+        // If no hit on the full query, try each word (so "Max" alone still
+        // finds "Mad Max")
+        if (petOwnerIds.length === 0) {
+          for (var pw of words) {
+            if (!pw) continue
+            var { data: wordPetMatch } = await supabaseAdmin
+              .from('pets')
+              .select('client_id, name')
+              .eq('groomer_id', groomerId)
+              .ilike('name', '%' + pw + '%')
+              .limit(10)
+            if (wordPetMatch) {
+              for (var mp2 of wordPetMatch) {
+                if (mp2.client_id && petOwnerIds.indexOf(mp2.client_id) === -1) {
+                  petOwnerIds.push(mp2.client_id)
+                }
+              }
+            }
+          }
+        }
+        if (petOwnerIds.length > 0) {
+          var { data: petOwners } = await supabaseAdmin
+            .from('clients')
+            .select('id, first_name, last_name, phone, email, notes')
+            .eq('groomer_id', groomerId)
+            .in('id', petOwnerIds)
+            .limit(10)
+          if (petOwners) {
+            // Put pet-owner matches FIRST (strongest signal), then merge
+            // in any remaining client-name/phone matches (deduped).
+            var merged = petOwners.slice()
+            for (var r of results) {
+              var dup = false
+              for (var m of merged) { if (m.id === r.id) dup = true }
+              if (!dup) merged.push(r)
+            }
+            results = merged
+          }
+        }
+
         var clientIds = results.map(function(c) { return c.id })
         var pets = []
         if (clientIds.length > 0) {

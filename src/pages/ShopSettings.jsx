@@ -30,6 +30,9 @@ export default function ShopSettings() {
   var [logoUrl, setLogoUrl] = useState('')
   var [primaryColor, setPrimaryColor] = useState('#7c3aed')
   var [hours, setHours] = useState('')
+  // AI toggles — tier 1 (manual / "Moe Go Mode") vs tier 2 (full AI brain)
+  var [groomerAiEnabled, setGroomerAiEnabled] = useState(true)
+  var [clientAiBookingEnabled, setClientAiBookingEnabled] = useState(true)
 
   useEffect(function () {
     loadSettings()
@@ -64,6 +67,9 @@ export default function ShopSettings() {
         setLogoUrl(data.logo_url || '')
         setPrimaryColor(data.primary_color || '#7c3aed')
         setHours(data.hours || '')
+        // AI toggles — default to ON if the column is missing or null (existing behavior)
+        setGroomerAiEnabled(data.groomer_ai_enabled !== false)
+        setClientAiBookingEnabled(data.client_ai_booking_enabled !== false)
       }
     } catch (err) {
       console.error('Error loading shop settings:', err)
@@ -157,6 +163,8 @@ export default function ShopSettings() {
         logo_url: logoUrl || null,
         primary_color: primaryColor || '#7c3aed',
         hours: hours || null,
+        groomer_ai_enabled: groomerAiEnabled,
+        client_ai_booking_enabled: clientAiBookingEnabled,
       }
 
       var { error: upsertError } = await supabase
@@ -261,6 +269,35 @@ export default function ShopSettings() {
           Get pinged when a client books, sends a message, or PetPro AI flags an appointment — even when PetPro isn't open. Turn this on in every browser you use.
         </p>
         <EnableNotifications variant="settings" userType="groomer" />
+      </div>
+
+      {/* AI Features — tier 1 / tier 2 master toggles */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
+        <div style={{ fontWeight: '700', fontSize: '14px', color: '#374151', marginBottom: '4px' }}>
+          🤖 AI Features
+        </div>
+        <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#6b7280' }}>
+          Turn PetPro AI on or off per feature. Flip both off = <strong style={{ color: '#7c3aed' }}>Classic Mode 🐾</strong> (pure manual booking).
+        </p>
+
+        <Toggle
+          label="Groomer AI Chat"
+          description="Voice booking + ask-anything PetPro AI on your Dashboard. Off = no chat widget, pure manual calendar."
+          value={groomerAiEnabled}
+          onChange={setGroomerAiEnabled}
+        />
+        <Toggle
+          label="Client Self-Booking (AI)"
+          description="The PetPro AI chat bubble in your client portal. Off = no bubble at all — clients can only message you directly or call the shop."
+          value={clientAiBookingEnabled}
+          onChange={setClientAiBookingEnabled}
+        />
+
+        {(!groomerAiEnabled && !clientAiBookingEnabled) && (
+          <div style={{ marginTop: '14px', padding: '10px 14px', background: '#f5f3ff', border: '1px solid #c4b5fd', borderRadius: '8px', fontSize: '13px', color: '#6d28d9', fontWeight: '600' }}>
+            🐾 Classic Mode activated — pure manual booking, no AI anywhere.
+          </div>
+        )}
       </div>
 
       {/* Logo upload */}
@@ -418,6 +455,55 @@ function Field({ label, value, onChange, placeholder, type }) {
           height: type === 'color' ? '44px' : 'auto'
         }}
       />
+    </div>
+  )
+}
+
+// Toggle switch — green when ON, gray when OFF. Used for AI feature flags.
+function Toggle({ label, description, value, onChange }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', padding: '12px 0', borderBottom: '1px solid #f3f4f6' }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: '700', fontSize: '14px', color: '#111827', marginBottom: '2px' }}>
+          {label}
+        </div>
+        <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.4' }}>
+          {description}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={function () { onChange(!value) }}
+        role="switch"
+        aria-checked={value}
+        aria-label={label}
+        style={{
+          position: 'relative',
+          width: '52px',
+          height: '28px',
+          borderRadius: '999px',
+          border: 'none',
+          cursor: 'pointer',
+          background: value ? '#10b981' : '#d1d5db',
+          flexShrink: 0,
+          transition: 'background 0.15s',
+          padding: 0,
+        }}
+      >
+        <span
+          style={{
+            position: 'absolute',
+            top: '3px',
+            left: value ? '27px' : '3px',
+            width: '22px',
+            height: '22px',
+            borderRadius: '50%',
+            background: '#fff',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+            transition: 'left 0.15s',
+          }}
+        />
+      </button>
     </div>
   )
 }

@@ -286,7 +286,7 @@ export default function Pricing() {
         <div className="pr-settings-card">
           <div className="pr-settings-header">
             <h3>⚙️ Shop Settings</h3>
-            <span className="pr-settings-badge">🤖 Claude uses these for smart pricing</span>
+            <span className="pr-settings-badge">🤖 PetPro AI uses these for smart pricing</span>
           </div>
           <div className="pr-settings-grid">
             <div className="pr-setting-item">
@@ -313,7 +313,7 @@ export default function Pricing() {
                 />
                 <span className="pr-setting-unit">months</span>
               </div>
-              <span className="pr-setting-help">Claude flags when puppy needs adult pricing</span>
+              <span className="pr-setting-help">PetPro AI flags when puppy needs adult pricing</span>
             </div>
           </div>
         </div>

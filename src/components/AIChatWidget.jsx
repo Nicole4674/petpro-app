@@ -10,8 +10,135 @@ export default function AIChatWidget() {
   const [sending, setSending] = useState(false)
   const [adminMode, setAdminMode] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  // Classic Mode: hide widget if groomer_ai_enabled is OFF in shop_settings.
+  // Starts as null (unknown) so we don't flash the widget before the check resolves.
+  const [aiEnabled, setAiEnabled] = useState(null)
+
+  // Check the toggle on mount — reads shop_settings.groomer_ai_enabled for the current user
+  useEffect(function () {
+    var cancelled = false
+    async function checkToggle() {
+      try {
+        var { data: { user } } = await supabase.auth.getUser()
+        if (!user) { if (!cancelled) setAiEnabled(false); return }
+        var { data } = await supabase
+          .from('shop_settings')
+          .select('groomer_ai_enabled')
+          .eq('groomer_id', user.id)
+          .maybeSingle()
+        if (cancelled) return
+        // If no row yet OR column is null/true → show the widget (default on)
+        // Only hide if explicitly set to false (Classic Mode)
+        setAiEnabled(!data || data.groomer_ai_enabled !== false)
+      } catch (e) {
+        // On any error, fail open — keep AI visible so groomer isn't accidentally locked out
+        if (!cancelled) setAiEnabled(true)
+      }
+    }
+    checkToggle()
+    return function () { cancelled = true }
+  }, [])
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+
+  // --- Draggable widget state ---
+  // position = { x, y } (top-left corner in px) or null = use default CSS (bottom-right)
+  const [position, setPosition] = useState(null)
+  const [dragging, setDragging] = useState(false)
+  const dragOffsetRef = useRef({ x: 0, y: 0 })
+  const widgetSizeRef = useRef({ w: 380, h: 520 })
+
+  // Load saved position from localStorage on mount
+  useEffect(() => {
+    try {
+      var saved = localStorage.getItem('petpro_groomer_chat_pos')
+      if (saved) {
+        var parsed = JSON.parse(saved)
+        if (parsed && typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+          setPosition(parsed)
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }, [])
+
+  // Clamp position so widget always stays visible
+  function clampPosition(x, y) {
+    var w = widgetSizeRef.current.w
+    var h = widgetSizeRef.current.h
+    var maxX = window.innerWidth - w
+    var maxY = window.innerHeight - h
+    if (maxX < 0) maxX = 0
+    if (maxY < 0) maxY = 0
+    if (x < 0) x = 0
+    if (y < 0) y = 0
+    if (x > maxX) x = maxX
+    if (y > maxY) y = maxY
+    return { x: x, y: y }
+  }
+
+  // Mouse/touch event helpers
+  function getPoint(e) {
+    if (e.touches && e.touches[0]) return { x: e.touches[0].clientX, y: e.touches[0].clientY }
+    return { x: e.clientX, y: e.clientY }
+  }
+
+  function onDragStart(e) {
+    // Don't start drag if they clicked a button in the header (close, clear)
+    if (e.target && e.target.closest && e.target.closest('button')) return
+
+    var point = getPoint(e)
+    var widgetEl = e.currentTarget.parentElement // .chat-window
+    if (widgetEl) {
+      var rect = widgetEl.getBoundingClientRect()
+      widgetSizeRef.current = { w: rect.width, h: rect.height }
+      dragOffsetRef.current = { x: point.x - rect.left, y: point.y - rect.top }
+      setPosition({ x: rect.left, y: rect.top })
+    }
+    setDragging(true)
+    if (e.preventDefault) e.preventDefault()
+  }
+
+  // Attach global listeners while dragging
+  useEffect(() => {
+    if (!dragging) return
+    function onMove(e) {
+      var point = getPoint(e)
+      var newX = point.x - dragOffsetRef.current.x
+      var newY = point.y - dragOffsetRef.current.y
+      setPosition(clampPosition(newX, newY))
+      if (e.preventDefault) e.preventDefault()
+    }
+    function onEnd() {
+      setDragging(false)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onEnd)
+    window.addEventListener('touchmove', onMove, { passive: false })
+    window.addEventListener('touchend', onEnd)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onEnd)
+      window.removeEventListener('touchmove', onMove)
+      window.removeEventListener('touchend', onEnd)
+    }
+  }, [dragging])
+
+  // Persist position whenever it settles
+  useEffect(() => {
+    if (!dragging && position) {
+      try { localStorage.setItem('petpro_groomer_chat_pos', JSON.stringify(position)) } catch (e) { /* ignore */ }
+    }
+  }, [dragging, position])
+
+  // Re-clamp on window resize
+  useEffect(() => {
+    function onResize() {
+      if (position) setPosition(function(p) { return p ? clampPosition(p.x, p.y) : p })
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [position])
 
   // Load saved chat from Supabase on mount
   useEffect(() => {
@@ -164,6 +291,10 @@ export default function AIChatWidget() {
     }
   }
 
+  // Classic Mode — render nothing if toggle is OFF (or still loading)
+  // Returning null while loading avoids a quick flash of the widget before the check resolves
+  if (aiEnabled !== true) return null
+
   return (
     <>
       {/* Chat Bubble Button */}
@@ -176,9 +307,23 @@ export default function AIChatWidget() {
 
       {/* Chat Window */}
       {isOpen && (
-        <div className="chat-window">
-          {/* Chat Header */}
-          <div className="chat-header">
+        <div
+          className="chat-window"
+          style={position ? {
+            left: position.x + 'px',
+            top: position.y + 'px',
+            bottom: 'auto',
+            right: 'auto',
+          } : undefined}
+        >
+          {/* Chat Header — also the drag handle */}
+          <div
+            className="chat-header"
+            onMouseDown={onDragStart}
+            onTouchStart={onDragStart}
+            style={{ cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none', userSelect: 'none' }}
+            title="Drag to move"
+          >
             <div className="chat-header-info">
               <span className="chat-header-dot"></span>
               <span className="chat-header-title">PetPro AI{adminMode ? ' (Admin)' : ''}</span>

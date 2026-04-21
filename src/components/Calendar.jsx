@@ -473,7 +473,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, onClose, onS
     // Run PetPro AI safety check
     const runSafetyCheck = async () => {
         if (!form.pet_id) {
-            setError('Select a pet first so Claude can check their profile.')
+            setError('Select a pet first so PetPro AI can check their profile.')
             return
         }
         setChecking(true)

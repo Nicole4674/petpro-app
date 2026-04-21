@@ -741,6 +741,13 @@ export default function ClientDetail() {
                       </div>
                       <div className="cp-upcoming-actions">
                         <button
+                          className="cp-upcoming-btn cp-upcoming-btn-view"
+                          onClick={() => navigate(`/calendar?viewAppt=${appt.id}`)}
+                          title="View full appointment details on the calendar"
+                        >
+                          👁 View
+                        </button>
+                        <button
                           className="cp-upcoming-btn cp-upcoming-btn-reschedule"
                           onClick={() => handleReschedule(appt.id)}
                         >

@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import MessageBubble from '../components/MessageBubble'
 import MessageComposer from '../components/MessageComposer'
 import { notifyUser } from '../lib/push'
 
 export default function Messages() {
+  var navigate = useNavigate()
   var [user, setUser] = useState(null)
   var [threads, setThreads] = useState([]) // each: { id, groomer_id, client_id, subject, last_message_at, client_name, last_preview, last_sender, unread_count }
   var [selectedThreadId, setSelectedThreadId] = useState(null)
@@ -648,7 +650,22 @@ export default function Messages() {
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
-                      <div style={{ fontSize: '14px', color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div
+                        onClick={function (e) {
+                          e.stopPropagation()
+                          if (t.client_id) navigate('/clients/' + t.client_id)
+                        }}
+                        style={{
+                          fontSize: '14px',
+                          color: '#667eea',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                        }}
+                        title="View client profile"
+                      >
                         {t.client_name}
                       </div>
                       <div style={{ fontSize: '11px', color: '#6c757d', flexShrink: 0 }}>
@@ -684,9 +701,26 @@ export default function Messages() {
         ) : (
           <>
             <div style={threadHeaderStyle}>
-              <div style={{ fontWeight: 600, fontSize: '16px' }}>
-                {selectedThread ? selectedThread.client_name : 'Chat'}
-              </div>
+              {selectedThread && selectedThread.client_id ? (
+                <div
+                  onClick={function () { navigate('/clients/' + selectedThread.client_id) }}
+                  style={{
+                    fontWeight: 600,
+                    fontSize: '16px',
+                    color: '#667eea',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    display: 'inline-block',
+                  }}
+                  title="View client profile"
+                >
+                  {selectedThread.client_name}
+                </div>
+              ) : (
+                <div style={{ fontWeight: 600, fontSize: '16px' }}>
+                  {selectedThread ? selectedThread.client_name : 'Chat'}
+                </div>
+              )}
               {selectedThread && selectedThread.subject && (
                 <div style={{ fontSize: '13px', color: '#667eea', marginTop: '2px' }}>
                   {selectedThread.subject}

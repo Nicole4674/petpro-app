@@ -66,6 +66,67 @@ function isSameDay(d1, d2) {
     return dateToString(d1) === dateToString(d2)
 }
 
+// Task #77 — Detect major US holidays so we can warn about recurring appts landing on them.
+// Returns the holiday name (e.g., "Thanksgiving") or null.
+function isUSHoliday(d) {
+    var m = d.getMonth() // 0=Jan
+    var day = d.getDate()
+    var dow = d.getDay() // 0=Sun ... 4=Thu
+    // Fixed-date holidays
+    if (m === 0 && day === 1) return "New Year's Day"
+    if (m === 5 && day === 19) return "Juneteenth"
+    if (m === 6 && day === 4) return "Independence Day"
+    if (m === 10 && day === 11) return "Veterans Day"
+    if (m === 11 && day === 24) return "Christmas Eve"
+    if (m === 11 && day === 25) return "Christmas Day"
+    if (m === 11 && day === 31) return "New Year's Eve"
+    // MLK Day — 3rd Monday of January
+    if (m === 0 && dow === 1 && day >= 15 && day <= 21) return 'MLK Day'
+    // Presidents Day — 3rd Monday of February
+    if (m === 1 && dow === 1 && day >= 15 && day <= 21) return "Presidents Day"
+    // Memorial Day — last Monday of May
+    if (m === 4 && dow === 1 && day >= 25 && day <= 31) return 'Memorial Day'
+    // Labor Day — 1st Monday of September
+    if (m === 8 && dow === 1 && day >= 1 && day <= 7) return 'Labor Day'
+    // Columbus Day — 2nd Monday of October
+    if (m === 9 && dow === 1 && day >= 8 && day <= 14) return 'Columbus Day'
+    // Thanksgiving — 4th Thursday of November
+    if (m === 10 && dow === 4 && day >= 22 && day <= 28) return 'Thanksgiving'
+    // Black Friday — day after Thanksgiving (4th Fri, falls on 23-29)
+    if (m === 10 && dow === 5 && day >= 23 && day <= 29) return 'Black Friday'
+    // Mother's Day — 2nd Sunday of May
+    if (m === 4 && dow === 0 && day >= 8 && day <= 14) return "Mother's Day"
+    // Father's Day — 3rd Sunday of June
+    if (m === 5 && dow === 0 && day >= 15 && day <= 21) return "Father's Day"
+    return null
+}
+
+// Task #77 — Compute every date in a recurring series.
+// Returns [{ date: Date, dateStr: 'YYYY-MM-DD', sequence: 1..N, label: 'Thu, Apr 23, 2026' }, ...]
+// Safe to call with any values — returns [] if inputs are invalid.
+function computeRecurringDates(startDateStr, intervalWeeks, totalCount) {
+    var out = []
+    if (!startDateStr) return out
+    var iv = parseInt(intervalWeeks, 10)
+    var n = parseInt(totalCount, 10)
+    if (!iv || iv < 1) iv = 1
+    if (!n || n < 1) return out
+    if (n > 60) n = 60 // safety cap
+    var base = new Date(startDateStr + 'T00:00:00')
+    if (isNaN(base.getTime())) return out
+    for (var i = 0; i < n; i++) {
+        var d = new Date(base)
+        d.setDate(base.getDate() + (i * iv * 7))
+        out.push({
+            date: d,
+            dateStr: dateToString(d),
+            sequence: i + 1,
+            label: d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }),
+        })
+    }
+    return out
+}
+
 const STATUS_COLORS = {
     confirmed: '#2563eb',
     pending: '#d97706',
@@ -82,6 +143,7 @@ export default function Calendar() {
     // Reschedule modal — holds the appointment being rescheduled
     const [reschedulingAppt, setReschedulingAppt] = useState(null)
     const [cancellingAppt, setCancellingAppt] = useState(null) // Task #19 — recurring cancel flow
+    const [showRecurringDates, setShowRecurringDates] = useState(false) // Task #77 — toggles "View all dates" list in popup
     const [view, setView] = useState('week')
     const [currentDate, setCurrentDate] = useState(new Date())
     const [appointments, setAppointments] = useState([])
@@ -98,6 +160,12 @@ export default function Calendar() {
     const [apptDetailLoading, setApptDetailLoading] = useState(false)
     const [statusDropdownOpen, setStatusDropdownOpen] = useState(false) // click-to-change status pill
     const [showAddPetToApptModal, setShowAddPetToApptModal] = useState(false) // multi-pet: + Add Pet to existing appt
+    // Multi-pet: in-popup "change service" editor — tracks which appointment_pet is being edited + the pending new service_id
+    const [editingServiceApptPetId, setEditingServiceApptPetId] = useState(null)
+    const [pendingServiceId, setPendingServiceId] = useState('')
+    // In-popup "change groomer" editor — toggles dropdown + holds pending staff_id (tier 1/2 customizability)
+    const [editingGroomer, setEditingGroomer] = useState(false)
+    const [pendingStaffId, setPendingStaffId] = useState('')
     const [apptNotes, setApptNotes] = useState([]) // paper trail of notes for current appointment
     const [showAddNotePopup, setShowAddNotePopup] = useState(false)
     const [newNoteText, setNewNoteText] = useState('')
@@ -126,6 +194,20 @@ export default function Calendar() {
     const [paymentNotes, setPaymentNotes] = useState('')
     const [recordingPayment, setRecordingPayment] = useState(false)
     const [apptPayments, setApptPayments] = useState([]) // payment history for the appt detail popup
+    // Payment edit modal state — for fixing typos or adding a tip that came in later
+    const [editingPayment, setEditingPayment] = useState(null) // full payment row being edited, or null
+    const [editPayAmount, setEditPayAmount] = useState('')
+    const [editPayTip, setEditPayTip] = useState('')
+    const [editPayMethod, setEditPayMethod] = useState('')
+    const [editPayNotes, setEditPayNotes] = useState('')
+    const [savingEditPayment, setSavingEditPayment] = useState(false)
+    // "Add Payment" modal — for recording a tip/payment that comes in after the original checkout
+    const [showAddPayment, setShowAddPayment] = useState(false)
+    const [addPayAmount, setAddPayAmount] = useState('')
+    const [addPayTip, setAddPayTip] = useState('')
+    const [addPayMethod, setAddPayMethod] = useState('cash')
+    const [addPayNotes, setAddPayNotes] = useState('')
+    const [savingAddPayment, setSavingAddPayment] = useState(false)
 
     useEffect(() => {
         fetchData()
@@ -134,9 +216,11 @@ export default function Calendar() {
     // Close the status dropdown whenever the appt detail popup closes or changes appts
     useEffect(() => {
         if (!selectedAppt) setStatusDropdownOpen(false)
+        // Task #77 — also collapse the recurring dates list so each popup open starts clean
+        setShowRecurringDates(false)
     }, [selectedAppt?.id])
 
-    // Handle "Book Again" and "Reschedule" URL params from client profile
+    // Handle "Book Again", "Reschedule", and "View" URL params from client profile
     useEffect(() => {
         if (loading) return
         const params = new URLSearchParams(location.search)
@@ -144,6 +228,7 @@ export default function Calendar() {
         const bookPet = params.get('bookPet')
         const bookService = params.get('bookService')
         const rescheduleAppt = params.get('rescheduleAppt')
+        const viewAppt = params.get('viewAppt')
 
         if (bookClient && bookPet) {
             setPreFillBooking({
@@ -167,6 +252,28 @@ export default function Calendar() {
                         .eq('id', rescheduleAppt)
                         .single()
                     if (data) setReschedulingAppt(data)
+                })()
+            }
+            routerNavigate('/calendar', { replace: true })
+        } else if (viewAppt) {
+            // Jump calendar to the appointment's date + open the full detail popup
+            // so the groomer can see the surrounding schedule context (easier to move things).
+            const appt = appointments.find(a => a.id === viewAppt)
+            if (appt) {
+                setCurrentDate(new Date(appt.appointment_date + 'T00:00:00'))
+                handleApptClick(appt, null)
+            } else {
+                // Not in current view range — fetch minimal record to get the date, then hydrate popup
+                ;(async () => {
+                    const { data } = await supabase
+                        .from('appointments')
+                        .select('id, appointment_date')
+                        .eq('id', viewAppt)
+                        .single()
+                    if (data) {
+                        setCurrentDate(new Date(data.appointment_date + 'T00:00:00'))
+                        handleApptClick({ id: viewAppt }, null)
+                    }
                 })()
             }
             routerNavigate('/calendar', { replace: true })
@@ -373,6 +480,27 @@ export default function Calendar() {
         }
     }
 
+    // Task #77 — Jump to a specific sibling in a recurring series.
+    // Closes the current popup, moves the calendar to that week, then re-opens on the target appt.
+    const jumpToSibling = async (siblingId, siblingDateStr) => {
+        if (!siblingId) return
+        // If they clicked the one they're already on, no-op
+        if (selectedAppt && selectedAppt.id === siblingId) return
+        // Navigate the calendar to that date in week view so they can see context
+        try {
+            var d = new Date(siblingDateStr + 'T00:00:00')
+            if (!isNaN(d.getTime())) {
+                setCurrentDate(d)
+                setView('week')
+            }
+        } catch (e) { /* ignore */ }
+        // Close current popup, then open the target appt via the existing full-load flow
+        setSelectedAppt(null)
+        setTimeout(function () {
+            handleApptClick({ id: siblingId }, null)
+        }, 50)
+    }
+
     const handleApptClick = async (appt, e) => {
         console.log('[handleApptClick] CLICKED appt id:', appt.id, 'date:', appt.appointment_date, 'has appointment_pets?', !!appt.appointment_pets, 'count:', appt.appointment_pets?.length || 0)
         if (e && e.stopPropagation) e.stopPropagation()
@@ -419,16 +547,22 @@ export default function Calendar() {
             console.log('[handleApptClick] loaded appt with', fullAppt.appointment_pets?.length || 0, 'pets')
 
             // Task #19 — If this is a recurring appointment, count how many future instances remain
+            // Task #77 — ALSO fetch all siblings (full list, ordered by sequence) for the clickable dates list
             if (fullAppt?.recurring_series_id) {
                 const todayStr = new Date().toISOString().slice(0, 10)
-                const { data: remainingAppts } = await supabase
+                const { data: allSiblings } = await supabase
                     .from('appointments')
-                    .select('id, appointment_date, status, checked_out_at, recurring_conflict')
+                    .select('id, appointment_date, start_time, status, checked_in_at, checked_out_at, recurring_sequence, recurring_conflict')
                     .eq('recurring_series_id', fullAppt.recurring_series_id)
-                    .gte('appointment_date', todayStr)
-                    .is('checked_out_at', null)
+                    .order('recurring_sequence', { ascending: true })
 
-                const upcomingCount = (remainingAppts || []).filter(a =>
+                const siblings = allSiblings || []
+                fullAppt.recurring_siblings = siblings
+
+                // Count future instances still on the books (not cancelled, not checked out, not already rescheduled)
+                const upcomingCount = siblings.filter(a =>
+                    a.appointment_date >= todayStr &&
+                    !a.checked_out_at &&
                     !['cancelled', 'no_show', 'completed', 'rescheduled'].includes(a.status)
                 ).length
                 fullAppt.recurring_upcoming_count = upcomingCount
@@ -548,6 +682,174 @@ export default function Calendar() {
             fetchData()
         } catch (err) {
             alert('Error removing pet: ' + err.message)
+        }
+    }
+
+    // Multi-pet: Change the service for a single pet on an existing appointment.
+    // Auto-shrinks/extends the appointment end_time based on the new service's time block.
+    // Warns (with override) if the new end time overlaps another appointment on the same day/staff.
+    // Price is NOT auto-updated — groomer edits manually per product decision.
+    const handleChangePetService = async (apptPetId) => {
+        if (!selectedAppt || !pendingServiceId) return
+
+        // Find the new service from the services list
+        var newService = (services || []).find(function (s) { return s.id === pendingServiceId })
+        if (!newService) {
+            alert('Service not found. Try reopening the popup.')
+            return
+        }
+
+        // Find the appointment_pet being edited
+        var oldApptPet = (selectedAppt.appointment_pets || []).find(function (ap) { return ap.id === apptPetId })
+        if (!oldApptPet) return
+
+        // If nothing changed, just close the editor
+        if (oldApptPet.service_id === pendingServiceId) {
+            setEditingServiceApptPetId(null)
+            setPendingServiceId('')
+            return
+        }
+
+        try {
+            // 1. Compute the new total time block for the whole appointment
+            //    (sum of every pet's service time, with this pet's service swapped)
+            var newTotalMinutes = 0
+            ;(selectedAppt.appointment_pets || []).forEach(function (ap) {
+                if (ap.id === apptPetId) {
+                    newTotalMinutes += (newService.time_block_minutes || 0)
+                } else {
+                    newTotalMinutes += (ap.services?.time_block_minutes || 0)
+                }
+            })
+
+            // 2. Compute new end_time = start_time + newTotalMinutes
+            var startParts = selectedAppt.start_time.split(':').map(Number)
+            var startTotalMin = startParts[0] * 60 + startParts[1]
+            var endTotalMin = startTotalMin + newTotalMinutes
+            var endH = Math.floor(endTotalMin / 60)
+            var endM = endTotalMin % 60
+            var newEndTime = String(endH).padStart(2, '0') + ':' + String(endM).padStart(2, '0')
+
+            // 3. Conflict check — look at other appointments same day + same staff, see if [startTotalMin, endTotalMin) overlaps
+            var conflicts = (appointments || []).filter(function (a) {
+                if (a.id === selectedAppt.id) return false
+                if (a.appointment_date !== selectedAppt.appointment_date) return false
+                // If appointment has a staff assignment, only check same staff; otherwise check all
+                if (selectedAppt.staff_id && a.staff_id !== selectedAppt.staff_id) return false
+                if (['cancelled', 'no_show', 'rescheduled'].indexOf(a.status) >= 0) return false
+                var aStart = (a.start_time || '').split(':').map(Number)
+                var aEnd = (a.end_time || '').split(':').map(Number)
+                if (aStart.length < 2 || aEnd.length < 2) return false
+                var aStartMin = aStart[0] * 60 + aStart[1]
+                var aEndMin = aEnd[0] * 60 + aEnd[1]
+                // Overlap: newStart < aEnd AND newEnd > aStart
+                return startTotalMin < aEndMin && endTotalMin > aStartMin
+            })
+
+            if (conflicts.length > 0) {
+                var conflictLines = conflicts.slice(0, 3).map(function (c) {
+                    var nm = c.clients ? ((c.clients.first_name || '') + ' ' + (c.clients.last_name || '')).trim() : 'Appointment'
+                    return '• ' + (nm || 'Appointment') + ' (' + (c.start_time || '?') + '–' + (c.end_time || '?') + ')'
+                }).join('\n')
+                var extra = conflicts.length > 3 ? '\n• +' + (conflicts.length - 3) + ' more…' : ''
+                var msg = 'Heads up — changing to "' + newService.service_name + '" (' + (newService.time_block_minutes || 0) + ' mins) will make this appointment end at ' + newEndTime + ', which overlaps with:\n\n' + conflictLines + extra + '\n\nSave anyway?'
+                if (!window.confirm(msg)) return
+            }
+
+            // 4. Update appointment_pets row (service swap)
+            var { error: apErr } = await supabase
+                .from('appointment_pets')
+                .update({ service_id: newService.id })
+                .eq('id', apptPetId)
+            if (apErr) throw apErr
+
+            // 5. Update appointment end_time. If this pet is the "primary" (matches appointments.pet_id),
+            //    also sync the backward-compat service_id field.
+            var apptUpdate = { end_time: newEndTime }
+            if (selectedAppt.pet_id === oldApptPet.pet_id) {
+                apptUpdate.service_id = newService.id
+            }
+            var { error: aErr } = await supabase
+                .from('appointments')
+                .update(apptUpdate)
+                .eq('id', selectedAppt.id)
+            if (aErr) throw aErr
+
+            // 6. Close editor + refresh popup + calendar
+            setEditingServiceApptPetId(null)
+            setPendingServiceId('')
+            await handleApptClick(selectedAppt, { stopPropagation: function () {} })
+            fetchData()
+        } catch (err) {
+            alert('Error changing service: ' + (err.message || err))
+        }
+    }
+
+    // Change the assigned groomer on an existing appointment, with conflict check + override.
+    // Called from the ✏️ Change button in the Groomer section of the appointment popup.
+    // "" (empty string) means "Unassigned".
+    const handleChangeGroomer = async () => {
+        if (!selectedAppt) return
+
+        var newStaffId = pendingStaffId === '' ? null : pendingStaffId
+        var currentStaffId = selectedAppt.staff_id || null
+
+        // If nothing changed, just close the editor
+        if (newStaffId === currentStaffId) {
+            setEditingGroomer(false)
+            setPendingStaffId('')
+            return
+        }
+
+        try {
+            // 1. If assigning to a groomer (not unassigning), check their schedule for the same day.
+            //    Overlap: selectedAppt.start_time < other.end_time AND selectedAppt.end_time > other.start_time.
+            if (newStaffId) {
+                var startParts = (selectedAppt.start_time || '').split(':').map(Number)
+                var endParts = (selectedAppt.end_time || '').split(':').map(Number)
+                var apptStartMin = startParts[0] * 60 + (startParts[1] || 0)
+                var apptEndMin = endParts[0] * 60 + (endParts[1] || 0)
+
+                var conflicts = (appointments || []).filter(function (a) {
+                    if (a.id === selectedAppt.id) return false
+                    if (a.appointment_date !== selectedAppt.appointment_date) return false
+                    if (a.staff_id !== newStaffId) return false
+                    if (['cancelled', 'no_show', 'rescheduled'].indexOf(a.status) >= 0) return false
+                    var aStart = (a.start_time || '').split(':').map(Number)
+                    var aEnd = (a.end_time || '').split(':').map(Number)
+                    if (aStart.length < 2 || aEnd.length < 2) return false
+                    var aStartMin = aStart[0] * 60 + (aStart[1] || 0)
+                    var aEndMin = aEnd[0] * 60 + (aEnd[1] || 0)
+                    return apptStartMin < aEndMin && apptEndMin > aStartMin
+                })
+
+                if (conflicts.length > 0) {
+                    var newStaff = (staffMembers || []).find(function (s) { return s.id === newStaffId })
+                    var newStaffName = newStaff ? (newStaff.first_name || 'That groomer') : 'That groomer'
+                    var conflictLines = conflicts.slice(0, 3).map(function (c) {
+                        var nm = c.clients ? ((c.clients.first_name || '') + ' ' + (c.clients.last_name || '')).trim() : 'Appointment'
+                        return '• ' + (nm || 'Appointment') + ' (' + (c.start_time || '?') + '–' + (c.end_time || '?') + ')'
+                    }).join('\n')
+                    var extra = conflicts.length > 3 ? '\n• +' + (conflicts.length - 3) + ' more…' : ''
+                    var msg = 'Heads up — ' + newStaffName + ' is already booked during this time:\n\n' + conflictLines + extra + '\n\nAssign anyway?'
+                    if (!window.confirm(msg)) return
+                }
+            }
+
+            // 2. Update the appointment's staff_id
+            var { error: updErr } = await supabase
+                .from('appointments')
+                .update({ staff_id: newStaffId })
+                .eq('id', selectedAppt.id)
+            if (updErr) throw updErr
+
+            // 3. Close editor + refresh popup + calendar
+            setEditingGroomer(false)
+            setPendingStaffId('')
+            await handleApptClick(selectedAppt, { stopPropagation: function () {} })
+            fetchData()
+        } catch (err) {
+            alert('Error changing groomer: ' + (err.message || err))
         }
     }
 
@@ -740,7 +1042,7 @@ export default function Calendar() {
     const handleRecordPayment = async () => {
         if (!paymentAppt) return
         if (!paymentMethod) {
-            alert('Please pick a payment method (Cash, Zelle, or Venmo)')
+            alert('Please pick a payment method (Cash, Zelle, Venmo, or Credit Card)')
             return
         }
 
@@ -837,6 +1139,130 @@ export default function Calendar() {
         setShowPaymentPopup(false)
         setPaymentAppt(null)
         setRecordingPayment(false)
+    }
+
+    // Open the edit modal for a specific payment row — prefills fields
+    const openEditPayment = (p) => {
+        setEditingPayment(p)
+        setEditPayAmount(p.amount != null ? String(p.amount) : '')
+        setEditPayTip(p.tip_amount != null ? String(p.tip_amount) : '')
+        setEditPayMethod(p.method || 'cash')
+        setEditPayNotes(p.notes || '')
+    }
+
+    // Save changes to an existing payment row (fix typo, add tip later, change method, etc.)
+    const handleUpdatePayment = async () => {
+        if (!editingPayment) return
+        var amt = parseFloat(editPayAmount || 0)
+        if (isNaN(amt) || amt < 0) { alert('Enter a valid amount.'); return }
+        var tip = parseFloat(editPayTip || 0)
+        if (isNaN(tip) || tip < 0) tip = 0
+        if (!editPayMethod) { alert('Pick a payment method.'); return }
+
+        setSavingEditPayment(true)
+        try {
+            var { error } = await supabase
+                .from('payments')
+                .update({
+                    amount: amt,
+                    tip_amount: tip,
+                    method: editPayMethod,
+                    notes: editPayNotes || null,
+                })
+                .eq('id', editingPayment.id)
+            if (error) throw error
+
+            // Refresh the payment history list in the popup
+            if (selectedAppt) {
+                var { data: refreshed } = await supabase
+                    .from('payments')
+                    .select('*')
+                    .eq('appointment_id', selectedAppt.id)
+                    .order('created_at', { ascending: true })
+                setApptPayments(refreshed || [])
+            }
+            setEditingPayment(null)
+            fetchData()
+        } catch (err) {
+            alert('Error updating payment: ' + (err.message || err))
+        }
+        setSavingEditPayment(false)
+    }
+
+    // Open the Add Payment modal — e.g. client paid cash at checkout, then tipped later via Zelle
+    const openAddPayment = () => {
+        setAddPayAmount('')
+        setAddPayTip('')
+        setAddPayMethod('cash')
+        setAddPayNotes('')
+        setShowAddPayment(true)
+    }
+
+    // Insert an additional payment row (does NOT touch checked_out_at — that already happened at checkout)
+    const handleAddAdditionalPayment = async () => {
+        if (!selectedAppt) return
+        var amt = parseFloat(addPayAmount || 0)
+        var tip = parseFloat(addPayTip || 0)
+        if (isNaN(amt) || amt < 0) amt = 0
+        if (isNaN(tip) || tip < 0) tip = 0
+        if (amt === 0 && tip === 0) { alert('Enter an amount or a tip.'); return }
+        if (!addPayMethod) { alert('Pick a payment method.'); return }
+
+        setSavingAddPayment(true)
+        try {
+            var { data: { user } } = await supabase.auth.getUser()
+            var { error } = await supabase.from('payments').insert({
+                appointment_id: selectedAppt.id,
+                client_id: selectedAppt.client_id,
+                groomer_id: user.id,
+                amount: amt,
+                tip_amount: tip,
+                method: addPayMethod,
+                notes: addPayNotes || null,
+            })
+            if (error) throw error
+
+            // Refresh the payment history list in the popup
+            var { data: refreshed } = await supabase
+                .from('payments')
+                .select('*')
+                .eq('appointment_id', selectedAppt.id)
+                .order('created_at', { ascending: true })
+            setApptPayments(refreshed || [])
+
+            setShowAddPayment(false)
+            fetchData()
+        } catch (err) {
+            alert('Error adding payment: ' + (err.message || err))
+        }
+        setSavingAddPayment(false)
+    }
+
+    // Delete a payment row (typo correction, refund, or duplicate entry)
+    const handleDeletePayment = async (p) => {
+        if (!p) return
+        var amtStr = parseFloat(p.amount || 0).toFixed(2)
+        if (!window.confirm('Delete this $' + amtStr + ' ' + (p.method || '').toUpperCase() + ' payment? This cannot be undone.')) return
+
+        try {
+            var { error } = await supabase
+                .from('payments')
+                .delete()
+                .eq('id', p.id)
+            if (error) throw error
+
+            if (selectedAppt) {
+                var { data: refreshed } = await supabase
+                    .from('payments')
+                    .select('*')
+                    .eq('appointment_id', selectedAppt.id)
+                    .order('created_at', { ascending: true })
+                setApptPayments(refreshed || [])
+            }
+            fetchData()
+        } catch (err) {
+            alert('Error deleting payment: ' + (err.message || err))
+        }
     }
 
     const updateApptStatus = async (apptId, newStatus) => {
@@ -1247,6 +1673,60 @@ export default function Calendar() {
                                                 ⏰ Only {remaining} left — consider booking a new series to keep {selectedAppt.pets?.name} on schedule.
                                             </div>
                                         )}
+                                        {/* Task #77 — collapsible list of all dates in the series (REAL rows, clickable to jump) */}
+                                        {(() => {
+                                            var siblings = selectedAppt.recurring_siblings || []
+                                            if (siblings.length === 0) return null
+                                            var currentId = selectedAppt.id
+                                            var todayStr = dateToString(new Date())
+                                            return (
+                                                <div className="appt-detail-recurring-dates-wrap">
+                                                    <button
+                                                        type="button"
+                                                        className="appt-detail-recurring-toggle"
+                                                        onClick={() => setShowRecurringDates(v => !v)}
+                                                    >
+                                                        {showRecurringDates ? '▾' : '▸'} {showRecurringDates ? 'Hide' : 'View'} all {siblings.length} dates
+                                                    </button>
+                                                    {showRecurringDates && (
+                                                        <>
+                                                            <p className="appt-detail-recurring-dates-hint">💡 Click any date to jump to that week</p>
+                                                            <ul className="appt-detail-recurring-dates-list">
+                                                                {siblings.map(function (s) {
+                                                                    var isCurrent = s.id === currentId
+                                                                    var isPast = (s.appointment_date < todayStr || !!s.checked_out_at) && !isCurrent
+                                                                    var isCancelled = s.status === 'cancelled' || s.status === 'no_show' || s.status === 'rescheduled'
+                                                                    var hasConflict = !!s.recurring_conflict
+                                                                    var dObj = new Date(s.appointment_date + 'T00:00:00')
+                                                                    var label = dObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+                                                                    var cls = 'appt-detail-recurring-date-item'
+                                                                    if (isCurrent) cls += ' appt-detail-recurring-date-current'
+                                                                    else if (isPast) cls += ' appt-detail-recurring-date-past'
+                                                                    if (isCancelled) cls += ' appt-detail-recurring-date-cancelled'
+                                                                    if (hasConflict) cls += ' appt-detail-recurring-date-conflict'
+                                                                    return (
+                                                                        <li
+                                                                            key={s.id}
+                                                                            className={cls + (isCurrent ? '' : ' appt-detail-recurring-date-clickable')}
+                                                                            onClick={isCurrent ? undefined : function () { jumpToSibling(s.id, s.appointment_date) }}
+                                                                            title={isCurrent ? 'This is the appointment you\'re viewing' : 'Jump to this appointment'}
+                                                                        >
+                                                                            <span className="appt-detail-recurring-date-seq">#{s.recurring_sequence}</span>
+                                                                            <span className="appt-detail-recurring-date-label">{label}</span>
+                                                                            {hasConflict && <span className="appt-detail-recurring-date-tag appt-detail-recurring-date-tag-conflict">⚠️ conflict</span>}
+                                                                            {isCurrent && <span className="appt-detail-recurring-date-tag">this one</span>}
+                                                                            {isCancelled && <span className="appt-detail-recurring-date-tag appt-detail-recurring-date-tag-cancelled">{s.status}</span>}
+                                                                            {isPast && !isCurrent && !isCancelled && <span className="appt-detail-recurring-date-tag appt-detail-recurring-date-tag-past">past</span>}
+                                                                            {!isCurrent && <span className="appt-detail-recurring-date-jump">→</span>}
+                                                                        </li>
+                                                                    )
+                                                                })}
+                                                            </ul>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            )
+                                        })()}
                                     </div>
                                 )
                             })()}
@@ -1297,10 +1777,60 @@ export default function Calendar() {
                                 )}
                             </div>
 
-                            {/* Groomer */}
+                            {/* Groomer — click ✏️ Change to reassign (conflict check + override) */}
                             <div className="appt-detail-section">
-                                <div className="appt-detail-section-title">✂️ Groomer</div>
-                                {selectedAppt.staff_members ? (
+                                <div className="appt-detail-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span>✂️ Groomer</span>
+                                    {!editingGroomer && (
+                                        <button
+                                            onClick={function () {
+                                                setPendingStaffId(selectedAppt.staff_id || '')
+                                                setEditingGroomer(true)
+                                            }}
+                                            style={{ background: 'transparent', border: '1px solid #d1d5db', color: '#6d28d9', padding: '4px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}
+                                        >
+                                            ✏️ Change
+                                        </button>
+                                    )}
+                                </div>
+                                {editingGroomer ? (
+                                    <div style={{ padding: '10px', border: '1px solid #e5e7eb', borderRadius: '8px', background: '#fafafa' }}>
+                                        <select
+                                            value={pendingStaffId}
+                                            onChange={function (e) { setPendingStaffId(e.target.value) }}
+                                            style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', marginBottom: '8px', background: '#fff' }}
+                                        >
+                                            <option value="">— Unassigned —</option>
+                                            {(staffMembers || []).map(function (s) {
+                                                return (
+                                                    <option key={s.id} value={s.id}>
+                                                        {s.first_name} {s.last_name || ''}
+                                                    </option>
+                                                )
+                                            })}
+                                        </select>
+                                        <div style={{ display: 'flex', gap: '8px' }}>
+                                            <button
+                                                onClick={handleChangeGroomer}
+                                                style={{ flex: 1, padding: '8px 12px', background: '#10b981', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                            >
+                                                ✓ Save
+                                            </button>
+                                            <button
+                                                onClick={function () {
+                                                    setEditingGroomer(false)
+                                                    setPendingStaffId('')
+                                                }}
+                                                style={{ flex: 1, padding: '8px 12px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                        <div style={{ marginTop: '8px', fontSize: '11px', color: '#6b7280', fontStyle: 'italic' }}>
+                                            Tip: If the new groomer is already booked, you'll get a warning but can override.
+                                        </div>
+                                    </div>
+                                ) : selectedAppt.staff_members ? (
                                     <div className="appt-detail-groomer-card">
                                         <span className="appt-detail-groomer-swatch" style={{ backgroundColor: selectedAppt.staff_members.color_code || '#9ca3af' }}></span>
                                         <div>
@@ -1312,7 +1842,7 @@ export default function Calendar() {
                                         <span className="appt-detail-groomer-swatch" style={{ backgroundColor: '#9ca3af' }}></span>
                                         <div>
                                             <div className="appt-detail-groomer-name">Unassigned</div>
-                                            <div className="appt-detail-groomer-hint">Edit this appointment to assign a groomer</div>
+                                            <div className="appt-detail-groomer-hint">Click ✏️ Change above to assign a groomer</div>
                                         </div>
                                     </div>
                                 )}
@@ -1366,13 +1896,60 @@ export default function Calendar() {
                                                     >×</button>
                                                 </div>
 
-                                                {/* Service for this pet */}
-                                                {ap.services && (
+                                                {/* Service for this pet — click ✏️ Change to swap (owner changed mind at drop-off, etc.) */}
+                                                {editingServiceApptPetId === ap.id ? (
                                                     <div className="appt-detail-service-card" style={{ marginBottom: '8px' }}>
-                                                        <div className="appt-detail-service-name">✂️ {ap.services.service_name}</div>
-                                                        <div className="appt-detail-service-meta">
-                                                            ${parseFloat(ap.quoted_price || ap.services.price || 0).toFixed(2)} · {ap.services.time_block_minutes} mins
+                                                        <select
+                                                            value={pendingServiceId}
+                                                            onChange={function (e) { setPendingServiceId(e.target.value) }}
+                                                            style={{ width: '100%', padding: '8px', fontSize: '14px', borderRadius: '6px', border: '1px solid #d1d5db', marginBottom: '8px', background: '#fff' }}
+                                                        >
+                                                            <option value="">— Pick a service —</option>
+                                                            {(services || []).map(function (s) {
+                                                                return (
+                                                                    <option key={s.id} value={s.id}>
+                                                                        {s.service_name} — ${parseFloat(s.price || 0).toFixed(2)} · {s.time_block_minutes || 0} min
+                                                                    </option>
+                                                                )
+                                                            })}
+                                                        </select>
+                                                        <div style={{ display: 'flex', gap: '6px' }}>
+                                                            <button
+                                                                onClick={function () { handleChangePetService(ap.id) }}
+                                                                disabled={!pendingServiceId}
+                                                                style={{ flex: 1, padding: '8px 12px', background: pendingServiceId ? '#10b981' : '#d1d5db', color: 'white', border: 'none', borderRadius: '6px', cursor: pendingServiceId ? 'pointer' : 'not-allowed', fontWeight: 600, fontSize: '13px' }}
+                                                            >✓ Save service</button>
+                                                            <button
+                                                                onClick={function () { setEditingServiceApptPetId(null); setPendingServiceId('') }}
+                                                                style={{ flex: 1, padding: '8px 12px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}
+                                                            >Cancel</button>
                                                         </div>
+                                                        <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '8px', lineHeight: '1.4' }}>
+                                                            💡 End time will auto-adjust. Price stays at ${parseFloat(ap.quoted_price || 0).toFixed(2)} — update manually if needed.
+                                                        </div>
+                                                    </div>
+                                                ) : ap.services ? (
+                                                    <div className="appt-detail-service-card" style={{ marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                                            <div className="appt-detail-service-name">✂️ {ap.services.service_name}</div>
+                                                            <div className="appt-detail-service-meta">
+                                                                ${parseFloat(ap.quoted_price || ap.services.price || 0).toFixed(2)} · {ap.services.time_block_minutes} mins
+                                                            </div>
+                                                        </div>
+                                                        <button
+                                                            onClick={function () { setEditingServiceApptPetId(ap.id); setPendingServiceId(ap.service_id || '') }}
+                                                            title="Change service for this pet (auto-adjusts end time)"
+                                                            style={{ background: '#fff', border: '1px solid #c4b5fd', color: '#6d28d9', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, flexShrink: 0 }}
+                                                        >✏️ Change</button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="appt-detail-service-card" style={{ marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                                        <div style={{ flex: 1, color: '#9ca3af', fontStyle: 'italic' }}>No service picked</div>
+                                                        <button
+                                                            onClick={function () { setEditingServiceApptPetId(ap.id); setPendingServiceId('') }}
+                                                            title="Pick a service for this pet"
+                                                            style={{ background: '#fff', border: '1px solid #c4b5fd', color: '#6d28d9', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, flexShrink: 0 }}
+                                                        >+ Pick service</button>
                                                     </div>
                                                 )}
 
@@ -1541,7 +2118,17 @@ export default function Calendar() {
 
                                 return (
                                     <div className="appt-detail-section">
-                                        <div className="appt-detail-section-title">💳 Payment History</div>
+                                        <div className="appt-detail-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span>💳 Payment History</span>
+                                            <button
+                                                type="button"
+                                                onClick={openAddPayment}
+                                                className="appt-payment-add-btn"
+                                                title="Add an additional payment (tip later, second partial, etc.)"
+                                            >
+                                                ➕ Add Payment
+                                            </button>
+                                        </div>
                                         {apptPayments.length === 0 ? (
                                             <div className="appt-payments-empty">
                                                 No payments recorded yet
@@ -1567,6 +2154,25 @@ export default function Calendar() {
                                                                 )}
                                                             </div>
                                                             {p.notes && <div className="appt-payment-notes">"{p.notes}"</div>}
+                                                            {/* Edit + Delete — for tip-added-later or typo corrections */}
+                                                            <div className="appt-payment-actions">
+                                                                <button
+                                                                    type="button"
+                                                                    className="appt-payment-edit-btn"
+                                                                    onClick={function () { openEditPayment(p) }}
+                                                                    title="Edit this payment"
+                                                                >
+                                                                    ✏️ Edit
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className="appt-payment-delete-btn"
+                                                                    onClick={function () { handleDeletePayment(p) }}
+                                                                    title="Delete this payment"
+                                                                >
+                                                                    🗑️ Delete
+                                                                </button>
+                                                            </div>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -1718,6 +2324,207 @@ export default function Calendar() {
                     <div style={{ textAlign: 'center', padding: '40px', background: 'white', borderRadius: '16px' }}>
                         <div style={{ fontSize: '40px', animation: 'pulse 1s ease-in-out infinite' }}>🐾</div>
                         <p style={{ color: '#64748b', marginTop: '12px' }}>Loading appointment...</p>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit Payment Modal — fix typo, add tip that came in later, change method */}
+            {editingPayment && (
+                <div className="modal-overlay" onClick={function () { if (!savingEditPayment) setEditingPayment(null) }} style={{ zIndex: 2100 }}>
+                    <div className="add-note-popup" onClick={function (e) { e.stopPropagation() }} style={{ maxWidth: '420px' }}>
+                        <div className="add-note-popup-header">
+                            <h3>✏️ Edit Payment</h3>
+                            <button className="modal-close" onClick={function () { if (!savingEditPayment) setEditingPayment(null) }}>×</button>
+                        </div>
+                        <div style={{ padding: '16px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Amount</label>
+                                    <div style={{ position: 'relative' }}>
+                                        <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#6b7280', fontWeight: 600 }}>$</span>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={editPayAmount}
+                                            onChange={function (e) { setEditPayAmount(e.target.value) }}
+                                            disabled={savingEditPayment}
+                                            style={{ width: '100%', padding: '8px 10px 8px 22px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Tip</label>
+                                    <div style={{ position: 'relative' }}>
+                                        <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#6b7280', fontWeight: 600 }}>$</span>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={editPayTip}
+                                            onChange={function (e) { setEditPayTip(e.target.value) }}
+                                            disabled={savingEditPayment}
+                                            style={{ width: '100%', padding: '8px 10px 8px 22px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            <div style={{ marginBottom: '12px' }}>
+                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Payment Method</label>
+                                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                    {[
+                                        { id: 'cash', label: '💵 Cash' },
+                                        { id: 'zelle', label: '⚡ Zelle' },
+                                        { id: 'venmo', label: '🔵 Venmo' },
+                                        { id: 'card', label: '💳 Card' },
+                                        { id: 'check', label: '📝 Check' },
+                                    ].map(function (m) {
+                                        var active = editPayMethod === m.id
+                                        return (
+                                            <button
+                                                key={m.id}
+                                                type="button"
+                                                onClick={function () { setEditPayMethod(m.id) }}
+                                                disabled={savingEditPayment}
+                                                style={{ flex: '1 0 auto', minWidth: '72px', padding: '8px 10px', border: '1px solid ' + (active ? '#7c3aed' : '#d1d5db'), background: active ? '#ede9fe' : '#fff', color: active ? '#6d28d9' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '12px' }}
+                                            >
+                                                {m.label}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                            <div style={{ marginBottom: '12px' }}>
+                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Notes (optional)</label>
+                                <input
+                                    type="text"
+                                    value={editPayNotes}
+                                    onChange={function (e) { setEditPayNotes(e.target.value) }}
+                                    placeholder='e.g. "Tip added next day"'
+                                    disabled={savingEditPayment}
+                                    style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                                />
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                    onClick={handleUpdatePayment}
+                                    disabled={savingEditPayment}
+                                    style={{ flex: 1, padding: '10px 12px', background: savingEditPayment ? '#a7f3d0' : '#10b981', color: 'white', border: 'none', borderRadius: '6px', cursor: savingEditPayment ? 'wait' : 'pointer', fontWeight: 600, fontSize: '14px' }}
+                                >
+                                    {savingEditPayment ? 'Saving…' : '✓ Save Changes'}
+                                </button>
+                                <button
+                                    onClick={function () { setEditingPayment(null) }}
+                                    disabled={savingEditPayment}
+                                    style={{ flex: 1, padding: '10px 12px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '14px' }}
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Add Payment Modal — for post-checkout additions (late tip, second partial, etc.) */}
+            {showAddPayment && selectedAppt && (
+                <div className="modal-overlay" onClick={function () { if (!savingAddPayment) setShowAddPayment(false) }} style={{ zIndex: 2100 }}>
+                    <div className="add-note-popup" onClick={function (e) { e.stopPropagation() }} style={{ maxWidth: '420px' }}>
+                        <div className="add-note-popup-header">
+                            <h3>➕ Add Payment</h3>
+                            <button className="modal-close" onClick={function () { if (!savingAddPayment) setShowAddPayment(false) }}>×</button>
+                        </div>
+                        <div style={{ padding: '16px' }}>
+                            <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '12px', fontStyle: 'italic' }}>
+                                Adds a new payment row — use this for a tip that came in later, a second partial payment, etc.
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Amount</label>
+                                    <div style={{ position: 'relative' }}>
+                                        <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#6b7280', fontWeight: 600 }}>$</span>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={addPayAmount}
+                                            onChange={function (e) { setAddPayAmount(e.target.value) }}
+                                            placeholder="0.00"
+                                            disabled={savingAddPayment}
+                                            style={{ width: '100%', padding: '8px 10px 8px 22px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Tip</label>
+                                    <div style={{ position: 'relative' }}>
+                                        <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#6b7280', fontWeight: 600 }}>$</span>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={addPayTip}
+                                            onChange={function (e) { setAddPayTip(e.target.value) }}
+                                            placeholder="0.00"
+                                            disabled={savingAddPayment}
+                                            style={{ width: '100%', padding: '8px 10px 8px 22px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            <div style={{ marginBottom: '12px' }}>
+                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Payment Method</label>
+                                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                    {[
+                                        { id: 'cash', label: '💵 Cash' },
+                                        { id: 'zelle', label: '⚡ Zelle' },
+                                        { id: 'venmo', label: '🔵 Venmo' },
+                                        { id: 'card', label: '💳 Card' },
+                                        { id: 'check', label: '📝 Check' },
+                                    ].map(function (m) {
+                                        var active = addPayMethod === m.id
+                                        return (
+                                            <button
+                                                key={m.id}
+                                                type="button"
+                                                onClick={function () { setAddPayMethod(m.id) }}
+                                                disabled={savingAddPayment}
+                                                style={{ flex: '1 0 auto', minWidth: '72px', padding: '8px 10px', border: '1px solid ' + (active ? '#7c3aed' : '#d1d5db'), background: active ? '#ede9fe' : '#fff', color: active ? '#6d28d9' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '12px' }}
+                                            >
+                                                {m.label}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                            <div style={{ marginBottom: '12px' }}>
+                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Notes (optional)</label>
+                                <input
+                                    type="text"
+                                    value={addPayNotes}
+                                    onChange={function (e) { setAddPayNotes(e.target.value) }}
+                                    placeholder='e.g. "Tip dropped off next day"'
+                                    disabled={savingAddPayment}
+                                    style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                                />
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                    onClick={handleAddAdditionalPayment}
+                                    disabled={savingAddPayment}
+                                    style={{ flex: 1, padding: '10px 12px', background: savingAddPayment ? '#a7f3d0' : '#10b981', color: 'white', border: 'none', borderRadius: '6px', cursor: savingAddPayment ? 'wait' : 'pointer', fontWeight: 600, fontSize: '14px' }}
+                                >
+                                    {savingAddPayment ? 'Saving…' : '✓ Add Payment'}
+                                </button>
+                                <button
+                                    onClick={function () { setShowAddPayment(false) }}
+                                    disabled={savingAddPayment}
+                                    style={{ flex: 1, padding: '10px 12px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '14px' }}
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
@@ -1940,6 +2747,14 @@ export default function Calendar() {
                                             >
                                                 🔵 Venmo
                                             </button>
+                                            <button
+                                                type="button"
+                                                className={'payment-method-btn' + (paymentMethod === 'card' ? ' payment-method-btn-active' : '')}
+                                                onClick={() => setPaymentMethod('card')}
+                                                disabled={recordingPayment}
+                                            >
+                                                💳 Credit Card
+                                            </button>
                                         </div>
 
                                         {/* Amount + Tip side by side */}
@@ -2136,8 +2951,8 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                         style={{ position: 'relative' }}
                                         onClick={() => onSlotClick(currentDate, hour, col.id)}
                                     >
-                                        {renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut)}
-                                        {renderBlockedTimes(slotBlocks, onBlockClick)}
+                                        {renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut, hour)}
+                                        {renderBlockedTimes(slotBlocks, onBlockClick, hour)}
                                     </div>
                                 )
                             })
@@ -2164,9 +2979,19 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                     onClick={() => onSlotClick(date, hour)}
                                 >
                                     {slotAppts.map((appt) => {
-                                        const startH = parseInt(appt.start_time.split(':')[0])
-                                        const endH = parseInt(appt.end_time.split(':')[0])
-                                        const span = Math.max(1, endH - startH)
+                                        // Task #72 fix — size the block by ACTUAL minutes, not whole hours.
+                                        // Old bug: span = endH - startH ignored minutes → 30-min appt rendered as 60-min block,
+                                        // 90-min appt rendered as 60-min block, 9:30 appt rendered starting at 9:00, etc.
+                                        const [sh, smRaw] = appt.start_time.split(':').map(Number)
+                                        const [eh, emRaw] = appt.end_time.split(':').map(Number)
+                                        const sm = smRaw || 0
+                                        const em = emRaw || 0
+                                        const startTotalMin = sh * 60 + sm
+                                        const endTotalMin = eh * 60 + em
+                                        const durationMin = Math.max(15, endTotalMin - startTotalMin)
+                                        const startOffsetMin = startTotalMin - (hour * 60) // where inside the hour cell this appt starts
+                                        const topPct = (startOffsetMin / 60) * 100
+                                        const heightPct = (durationMin / 60) * 100
                                         const groomerColor = appt.staff_members?.color_code || '#9ca3af'
                                         const groomerName = appt.staff_members ? appt.staff_members.first_name : 'Unassigned'
                                         const isRecurring = !!appt.recurring_series_id
@@ -2187,9 +3012,6 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                             else if (apptStatus === 'confirmed') statusBadge = { label: '✓ CONFIRMED', bg: '#065f46', fg: '#d1fae5' }
                                             else if (apptStatus === 'unconfirmed') statusBadge = { label: '❓ UNCONFIRMED', bg: '#92400e', fg: '#fef3c7' }
                                         }
-                                        // Multi-hour tiles use absolute positioning so they capture clicks across the full
-                                        // visual height (otherwise the time-cells below capture clicks on the overflow area)
-                                        const tallTileStyle = span > 1 ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 } : {}
                                         return (
                                             <div
                                                 key={appt.id}
@@ -2203,14 +3025,19 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                     (isPending ? ' appt-pending' : '')
                                                 }
                                                 style={{
+                                                    position: 'absolute',
+                                                    top: 'calc(' + topPct + '% + 2px)',
+                                                    left: '2px',
+                                                    right: '2px',
+                                                    height: 'calc(' + heightPct + '% - 4px)',
+                                                    minHeight: '26px',
+                                                    zIndex: 5,
                                                     backgroundColor: blockBg,
                                                     borderLeft: '4px solid ' + blockBorder,
-                                                    height: `${span * 100}%`,
-                                                    minHeight: '48px',
                                                     cursor: 'pointer',
                                                     opacity: isCancelled ? 0.6 : 1,
                                                     textDecoration: isCancelled ? 'line-through' : 'none',
-                                                    ...tallTileStyle,
+                                                    boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
                                                 }}
                                                 onClick={(e) => onApptClick(appt, e)}
                                                 title={'Groomer: ' + groomerName + ' · Status: ' + apptStatus + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '')}
@@ -2268,7 +3095,7 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                             </div>
                                         )
                                     })}
-                                    {renderBlockedTimes(slotBlocks, onBlockClick)}
+                                    {renderBlockedTimes(slotBlocks, onBlockClick, hour)}
                                 </div>
                             )
                         })
@@ -2281,26 +3108,38 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
 }
 
 // Task #38 — render gray "BLOCKED" tiles for staff lunch/errand time
-function renderBlockedTimes(slotBlocks, onBlockClick) {
+// Task #72 fix — size tiles by actual minutes, not whole hours
+function renderBlockedTimes(slotBlocks, onBlockClick, hour) {
     return (slotBlocks || []).map((blk) => {
-        const startH = parseInt(blk.start_time.split(':')[0])
-        const endH = parseInt(blk.end_time.split(':')[0])
-        const span = Math.max(1, endH - startH)
+        const [sh, smRaw] = blk.start_time.split(':').map(Number)
+        const [eh, emRaw] = blk.end_time.split(':').map(Number)
+        const sm = smRaw || 0
+        const em = emRaw || 0
+        const startTotalMin = sh * 60 + sm
+        const endTotalMin = eh * 60 + em
+        const durationMin = Math.max(15, endTotalMin - startTotalMin)
+        const startOffsetMin = startTotalMin - ((hour || sh) * 60)
+        const topPct = (startOffsetMin / 60) * 100
+        const heightPct = (durationMin / 60) * 100
         const staffName = blk.staff_members ? blk.staff_members.first_name : 'Blocked'
-        const tallTileStyle = span > 1 ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 4 } : {}
         return (
             <div
                 key={blk.id}
                 className="appt-block appt-blocked"
                 style={{
+                    position: 'absolute',
+                    top: 'calc(' + topPct + '% + 2px)',
+                    left: '2px',
+                    right: '2px',
+                    height: 'calc(' + heightPct + '% - 4px)',
+                    minHeight: '26px',
+                    zIndex: 4,
                     backgroundColor: '#9ca3af',
                     borderLeft: '4px solid #6b7280',
-                    height: `${span * 100}%`,
-                    minHeight: '48px',
                     cursor: 'pointer',
                     color: '#fff',
                     backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 8px, rgba(255,255,255,0.15) 8px, rgba(255,255,255,0.15) 16px)',
-                    ...tallTileStyle,
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
                 }}
                 onClick={(e) => { e.stopPropagation(); if (onBlockClick) onBlockClick(blk) }}
                 title={'BLOCKED — ' + staffName + (blk.note ? ' (' + blk.note + ')' : '') + ' — click to edit'}
@@ -2314,20 +3153,25 @@ function renderBlockedTimes(slotBlocks, onBlockClick) {
     })
 }
 
-function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut) {
+function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut, hour) {
     return slotAppts.map((appt) => {
-        const startH = parseInt(appt.start_time.split(':')[0])
-        const endH = parseInt(appt.end_time.split(':')[0])
-        const span = Math.max(1, endH - startH)
+        // Task #72 fix — size blocks by actual minutes, not whole hours
+        const [sh, smRaw] = appt.start_time.split(':').map(Number)
+        const [eh, emRaw] = appt.end_time.split(':').map(Number)
+        const sm = smRaw || 0
+        const em = emRaw || 0
+        const startTotalMin = sh * 60 + sm
+        const endTotalMin = eh * 60 + em
+        const durationMin = Math.max(15, endTotalMin - startTotalMin)
+        const startOffsetMin = startTotalMin - ((hour || sh) * 60)
+        const topPct = (startOffsetMin / 60) * 100
+        const heightPct = (durationMin / 60) * 100
         const groomerColor = appt.staff_members?.color_code || '#9ca3af'
         const groomerName = appt.staff_members ? appt.staff_members.first_name : 'Unassigned'
         const isRecurring = !!appt.recurring_series_id
         const hasConflict = !!appt.recurring_conflict
         // Phase 6 — booking-rule flag pending (AI held it for groomer approval)
         const isFlaggedPending = appt.flag_status === 'pending'
-        // Multi-hour tiles use absolute positioning so they capture clicks across the full
-        // visual height (otherwise the time-cells below capture clicks on the overflow area)
-        const tallTileStyle = span > 1 ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 } : {}
         return (
             <div
                 key={appt.id}
@@ -2339,12 +3183,17 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                     (hasConflict ? ' appt-recurring-conflict' : '')
                 }
                 style={{
+                    position: 'absolute',
+                    top: 'calc(' + topPct + '% + 2px)',
+                    left: '2px',
+                    right: '2px',
+                    height: 'calc(' + heightPct + '% - 4px)',
+                    minHeight: '26px',
+                    zIndex: 5,
                     backgroundColor: groomerColor,
                     borderLeft: '4px solid ' + groomerColor,
-                    height: `${span * 100}%`,
-                    minHeight: '48px',
                     cursor: 'pointer',
-                    ...tallTileStyle,
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
                 }}
                 onClick={(e) => onApptClick(appt, e)}
                 title={'Groomer: ' + groomerName + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '') + (isFlaggedPending ? ' · ⏳ Needs approval' : '')}
@@ -2613,7 +3462,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
     // Run PetPro AI safety check (checks first pet for now; multi-pet safety check is a future enhancement)
     const runSafetyCheck = async () => {
         if (petsInBooking.length === 0) {
-            setError('Add at least one pet first so Claude can check their profile.')
+            setError('Add at least one pet first so PetPro AI can check their profile.')
             return
         }
         setChecking(true)
@@ -3273,6 +4122,44 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                                 <p className="recurring-preview">
                                     This will create <strong>{totalCount} appointments</strong>, one every <strong>{intervalWeeks} {intervalWeeks === 1 ? 'week' : 'weeks'}</strong> on the same day and time.
                                 </p>
+                                {/* Task #77 — live date preview with holiday warnings */}
+                                {form.appointment_date && (() => {
+                                    var dates = computeRecurringDates(form.appointment_date, intervalWeeks, totalCount)
+                                    if (dates.length === 0) return null
+                                    var holidayHits = dates.filter(function (d) { return isUSHoliday(d.date) }).length
+                                    return (
+                                        <div className="recurring-preview-list-wrap">
+                                            <div className="recurring-preview-list-header">
+                                                <span className="recurring-preview-list-title">📅 Preview — all {dates.length} dates</span>
+                                                {holidayHits > 0 && (
+                                                    <span className="recurring-preview-list-warn">
+                                                        ⚠️ {holidayHits} {holidayHits === 1 ? 'date lands' : 'dates land'} on a holiday
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <ul className="recurring-preview-list">
+                                                {dates.map(function (d) {
+                                                    var holiday = isUSHoliday(d.date)
+                                                    var cls = 'recurring-preview-item' + (holiday ? ' recurring-preview-item-holiday' : '')
+                                                    return (
+                                                        <li key={d.sequence} className={cls}>
+                                                            <span className="recurring-preview-seq">#{d.sequence}</span>
+                                                            <span className="recurring-preview-label">{d.label}</span>
+                                                            {holiday && (
+                                                                <span className="recurring-preview-holiday-tag">🎉 {holiday}</span>
+                                                            )}
+                                                        </li>
+                                                    )
+                                                })}
+                                            </ul>
+                                            {holidayHits > 0 && (
+                                                <p className="recurring-preview-tip">
+                                                    💡 You can adjust the start date above, or book as-is and move individual dates later from the appointment popup.
+                                                </p>
+                                            )}
+                                        </div>
+                                    )
+                                })()}
                             </div>
                         )}
                     </div>
@@ -4190,7 +5077,7 @@ function BlockTimeModal({ modal, staff, saving, onSave, onDelete, onClose }) {
             <div style={card} onClick={(e) => e.stopPropagation()}>
                 <h3 style={title}>{isEdit ? '🚫 Edit Blocked Time' : '🚫 Block Time'}</h3>
                 <p style={sub}>
-                    Blocked time stays on your calendar and prevents Claude from auto-booking over it.
+                    Blocked time stays on your calendar and prevents PetPro AI from auto-booking over it.
                 </p>
 
                 <form onSubmit={handleSubmit}>

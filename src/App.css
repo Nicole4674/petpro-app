@@ -3393,6 +3393,137 @@
     transition: background 0.2s, color 0.2s;
 }
 
+/* ═══════════════════════════════════════════════════════════
+   Task #73 — Mobile sidebar drawer (< 900px)
+   Hamburger button + slide-in drawer + backdrop for phones.
+   Matches the pattern used in the client portal.
+   ═══════════════════════════════════════════════════════════ */
+
+/* Hamburger + close buttons and backdrop are hidden by default (desktop) */
+.sidebar-hamburger,
+.sidebar-mobile-close,
+.sidebar-backdrop {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    /* Hide the desktop collapse toggle arrow on mobile (we use hamburger instead) */
+    .sidebar-toggle {
+        display: none;
+    }
+
+    /* Sidebar slides off-screen by default, in when open */
+    .sidebar {
+        transform: translateX(-100%);
+        transition: transform 0.28s ease;
+        width: 260px !important; /* override collapsed state on mobile */
+        box-shadow: none;
+    }
+
+    .sidebar.sidebar-mobile-open {
+        transform: translateX(0);
+        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Main content takes the full screen width — no left margin for phantom sidebar */
+    .app-main,
+    .app-main-expanded {
+        margin-left: 0 !important;
+        width: 100vw !important;
+        max-width: 100vw !important;
+        padding-top: 56px; /* room for the fixed hamburger bar */
+    }
+
+    /* Floating hamburger button — top-left */
+    .sidebar-hamburger {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: none;
+        border-radius: 10px;
+        background: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%);
+        color: #fff;
+        font-size: 22px;
+        font-weight: 700;
+        cursor: pointer;
+        z-index: 90;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+    }
+
+    .sidebar-hamburger-icon {
+        line-height: 1;
+    }
+
+    /* Unread message badge on the hamburger button */
+    .sidebar-hamburger-badge {
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        background: #dc2626;
+        color: #fff;
+        font-size: 10px;
+        font-weight: 700;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 9px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 2px solid #fff;
+    }
+
+    /* Close (✕) inside open drawer — top-right */
+    .sidebar-mobile-close {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border: none;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.12);
+        color: #fff;
+        font-size: 18px;
+        cursor: pointer;
+        z-index: 2;
+    }
+
+    .sidebar-mobile-close:hover {
+        background: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Dark backdrop behind open drawer */
+    .sidebar-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 95;
+        animation: sidebarBackdropIn 0.2s ease;
+    }
+
+    @keyframes sidebarBackdropIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+
+    /* Bump sidebar z-index above the backdrop when open */
+    .sidebar {
+        z-index: 100;
+    }
+}
+
 /* Wake word flash - purple flash when "Hey PetPro" is detected */
 .voice-wake-flash {
   animation: wakeFlash 0.6s ease-out;
@@ -13166,6 +13297,60 @@
     font-weight: 700;
 }
 
+/* "+ Add Payment" button in the Payment History section header */
+.appt-payment-add-btn {
+    background: #10b981;
+    color: #fff;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.12s;
+    text-transform: none;
+    letter-spacing: 0;
+}
+.appt-payment-add-btn:hover {
+    background: #059669;
+}
+
+/* Payment row edit/delete buttons — fix typos, add tips later */
+.appt-payment-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed #e5e7eb;
+}
+.appt-payment-edit-btn,
+.appt-payment-delete-btn {
+    flex: 1;
+    padding: 5px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 5px;
+    cursor: pointer;
+    background: #fff;
+    transition: all 0.12s;
+}
+.appt-payment-edit-btn {
+    border: 1px solid #d8b4fe;
+    color: #6d28d9;
+}
+.appt-payment-edit-btn:hover {
+    background: #f5f3ff;
+    border-color: #a78bfa;
+}
+.appt-payment-delete-btn {
+    border: 1px solid #fecaca;
+    color: #dc2626;
+}
+.appt-payment-delete-btn:hover {
+    background: #fef2f2;
+    border-color: #f87171;
+}
+
 .appt-payment-tip {
     font-size: 12px;
     color: #059669;
@@ -13704,6 +13889,17 @@
   gap: 4px;
 }
 
+.cp-upcoming-btn-view {
+  background: white;
+  color: #667eea;
+  border: 1px solid #667eea;
+}
+
+.cp-upcoming-btn-view:hover {
+  background: #f5f3ff;
+  transform: translateY(-1px);
+}
+
 .cp-upcoming-btn-reschedule {
   background: #2563eb;
   color: white;
@@ -14151,6 +14347,100 @@
     font-style: italic;
 }
 
+/* Task #77 — live date preview in create form (with holiday warnings) */
+.recurring-preview-list-wrap {
+    margin-top: 12px;
+    padding: 12px;
+    background: #ffffff;
+    border: 1px solid #d8b4fe;
+    border-radius: 8px;
+}
+
+.recurring-preview-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed #e9d5ff;
+}
+
+.recurring-preview-list-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #6d28d9;
+}
+
+.recurring-preview-list-warn {
+    font-size: 12px;
+    font-weight: 700;
+    color: #b45309;
+    background: #fef3c7;
+    padding: 3px 10px;
+    border-radius: 10px;
+    border: 1px solid #fcd34d;
+}
+
+.recurring-preview-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.recurring-preview-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    margin: 4px 0;
+    background: #faf5ff;
+    border: 1px solid #ede9fe;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #374151;
+}
+
+.recurring-preview-item-holiday {
+    background: #fffbeb;
+    border-color: #fcd34d;
+}
+
+.recurring-preview-seq {
+    font-weight: 700;
+    color: #6d28d9;
+    min-width: 32px;
+}
+
+.recurring-preview-label {
+    flex: 1;
+    font-weight: 500;
+}
+
+.recurring-preview-holiday-tag {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 10px;
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fcd34d;
+}
+
+.recurring-preview-tip {
+    margin: 10px 0 0 0;
+    padding: 8px 10px;
+    font-size: 12px;
+    color: #92400e;
+    background: #fffbeb;
+    border-left: 3px solid #f59e0b;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
 /* Summary popup after series creation */
 .recurring-summary-modal {
     max-width: 480px;
@@ -14375,6 +14665,161 @@
     font-size: 13px;
     color: #991b1b;
     font-weight: 600;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Task #77 — Recurring dates list (popup)
+   ═══════════════════════════════════════════════════════════ */
+
+.appt-detail-recurring-dates-wrap {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed #d8b4fe;
+}
+
+.appt-detail-recurring-toggle {
+    background: transparent;
+    border: none;
+    color: #6d28d9;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 4px 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.appt-detail-recurring-toggle:hover {
+    color: #5b21b6;
+    text-decoration: underline;
+}
+
+.appt-detail-recurring-dates-list {
+    list-style: none;
+    padding: 10px 0 0 0;
+    margin: 8px 0 0 0;
+    max-height: 260px;
+    overflow-y: auto;
+    border-top: 1px dashed #d8b4fe;
+}
+
+.appt-detail-recurring-date-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    margin: 4px 0;
+    background: #fff;
+    border: 1px solid #ede9fe;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #374151;
+}
+
+.appt-detail-recurring-date-seq {
+    font-weight: 700;
+    color: #6d28d9;
+    min-width: 32px;
+}
+
+.appt-detail-recurring-date-label {
+    flex: 1;
+    font-weight: 500;
+}
+
+.appt-detail-recurring-date-tag {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 10px;
+    background: #d1fae5;
+    color: #065f46;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.appt-detail-recurring-date-tag-past {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.appt-detail-recurring-date-current {
+    background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
+    border-color: #c4b5fd;
+    font-weight: 700;
+    color: #5b21b6;
+}
+
+.appt-detail-recurring-date-past {
+    opacity: 0.6;
+    background: #f9fafb;
+}
+
+.appt-detail-recurring-date-past .appt-detail-recurring-date-label {
+    text-decoration: line-through;
+    color: #9ca3af;
+}
+
+/* Task #77 — clickable jump behavior */
+.appt-detail-recurring-dates-hint {
+    margin: 8px 0 0 0;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: #6d28d9;
+    background: #faf5ff;
+    border-radius: 6px;
+    font-weight: 600;
+}
+
+.appt-detail-recurring-date-clickable {
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.appt-detail-recurring-date-clickable:hover {
+    background: #f5f3ff;
+    border-color: #a78bfa;
+    transform: translateX(2px);
+}
+
+.appt-detail-recurring-date-clickable:active {
+    transform: translateX(0);
+}
+
+.appt-detail-recurring-date-jump {
+    color: #a78bfa;
+    font-weight: 700;
+    font-size: 14px;
+    margin-left: auto;
+}
+
+.appt-detail-recurring-date-clickable:hover .appt-detail-recurring-date-jump {
+    color: #6d28d9;
+}
+
+.appt-detail-recurring-date-conflict {
+    border-color: #fecaca !important;
+    background: #fef2f2;
+}
+
+.appt-detail-recurring-date-tag-conflict {
+    background: #fee2e2 !important;
+    color: #991b1b !important;
+}
+
+.appt-detail-recurring-date-cancelled {
+    opacity: 0.5;
+}
+
+.appt-detail-recurring-date-cancelled .appt-detail-recurring-date-label {
+    text-decoration: line-through;
+}
+
+.appt-detail-recurring-date-tag-cancelled {
+    background: #fee2e2 !important;
+    color: #991b1b !important;
+    text-transform: capitalize !important;
 }
 
 /* ═══════════════════════════════════════════════════════════

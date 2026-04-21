@@ -113,7 +113,10 @@ export default function ClientChatWidget() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [position])
 
-  // On mount: check if client Claude is enabled for this client's groomer
+  // On mount: check if client-side PetPro AI is enabled for this client's groomer.
+  // Two layers, and EITHER one off = hide the widget:
+  //   1. shop_settings.client_ai_booking_enabled (new master toggle — Classic Mode 🐾)
+  //   2. ai_personalization.client_claude_enabled (old granular toggle — backwards compat)
   useEffect(() => {
     async function checkEnabled() {
       var { data: { user } } = await supabase.auth.getUser()
@@ -131,13 +134,24 @@ export default function ClientChatWidget() {
         setEnabled(false)
         return
       }
-      // Check the groomer's toggle
+
+      // Layer 1 — MASTER toggle (Classic Mode). If OFF, hide immediately.
+      var { data: shop } = await supabase
+        .from('shop_settings')
+        .select('client_ai_booking_enabled')
+        .eq('groomer_id', clientRow.groomer_id)
+        .maybeSingle()
+      if (shop && shop.client_ai_booking_enabled === false) {
+        setEnabled(false)
+        return
+      }
+
+      // Layer 2 — legacy granular toggle (from old ChatSettings page)
       var { data: settings } = await supabase
         .from('ai_personalization')
         .select('client_claude_enabled')
         .eq('groomer_id', clientRow.groomer_id)
         .maybeSingle()
-      // Default to true if no settings row yet
       if (!settings) {
         setEnabled(true)
         return
