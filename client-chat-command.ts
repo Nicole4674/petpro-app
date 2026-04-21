@@ -1056,7 +1056,7 @@ Deno.serve(async function(req) {
 
     var { data: servicesList } = await supabaseAdmin
       .from('services')
-      .select('id, service_name, price, time_block_minutes')
+      .select('id, service_name, price, price_type, price_max, weight_min, weight_max, time_block_minutes')
       .eq('groomer_id', groomerId)
       .eq('is_active', true)
 
@@ -1170,7 +1170,18 @@ Deno.serve(async function(req) {
     contextParts.push('=== SERVICES OFFERED ===')
     if (servicesList && servicesList.length > 0) {
       for (var s of servicesList) {
-        contextParts.push(s.id + ' | ' + s.service_name + ' | $' + (s.price || '?') + ' | ' + (s.time_block_minutes || 60) + ' min')
+        var priceStr = ''
+        var ptype = s.price_type || 'fixed'
+        if (ptype === 'range' && s.price != null && s.price_max != null) {
+          var wMin = s.weight_min != null ? s.weight_min : '?'
+          var wMax = s.weight_max != null ? s.weight_max : '?'
+          priceStr = 'RANGE $' + s.price + '-$' + s.price_max + ' (for weights ' + wMin + '-' + wMax + ' lbs, linear scale)'
+        } else if (ptype === 'starting_at' && s.price != null) {
+          priceStr = 'STARTING_AT $' + s.price
+        } else {
+          priceStr = 'FIXED $' + (s.price != null ? s.price : '?')
+        }
+        contextParts.push(s.id + ' | ' + s.service_name + ' | ' + priceStr + ' | ' + (s.time_block_minutes || 60) + ' min')
       }
     } else {
       contextParts.push('No services listed.')
@@ -1223,9 +1234,23 @@ Deno.serve(async function(req) {
       '- You can ONLY reschedule/cancel appointments that appear in MY UPCOMING APPOINTMENTS. Never make up an appointment_id.',
       '- If the client asks about other clients, staff, pricing policies, shop revenue, or anything beyond booking their OWN pets, politely say: "That\'s a question for the shop — try the Messages tab to reach them directly!"',
       '- If they ask you to do something the toggles don\'t allow (e.g., reschedule when client_can_reschedule is false), tell them the tool is turned off and to use Messages.',
-      '- NEVER quote prices outside what\'s in SERVICES OFFERED. If the exact price isn\'t listed, say "the shop will confirm the exact price".',
+      '- NEVER quote prices outside what\'s in SERVICES OFFERED.',
       '- NEVER share phone numbers, addresses, or personal info about other clients or staff.',
       '- NEVER call client_book_appointment without a service_id. If the client hasn\'t specified a service yet, ASK first.',
+      '',
+      'PRICING & QUOTING (CRITICAL — READ CAREFULLY):',
+      '- Each service in SERVICES OFFERED is tagged as FIXED, RANGE, or STARTING_AT. Quote based on that tag.',
+      '- FIXED $X → quote the exact price: "Face/Feet/Trim is $45."',
+      '- RANGE $A-$B (for weights W_min-W_max lbs) → the price scales linearly with the pet\'s weight. You MUST give a weight-scaled estimate, not just the bottom of the range.',
+      '  • Formula: estimate = A + (B - A) * (pet_weight - W_min) / (W_max - W_min)',
+      '  • Clamp: if pet_weight <= W_min, estimate = A. If pet_weight >= W_max, estimate = B.',
+      '  • Round to the nearest whole dollar.',
+      '  • Phrasing: "Face/Feet/Trim for Lilly (65 lbs) is estimated around $58 — the groomer will confirm the exact quote."',
+      '  • If the pet\'s weight is NOT in MY PETS, ask the client for the pet\'s weight BEFORE quoting. Do NOT quote the low end as the answer.',
+      '- STARTING_AT $X → "starts at $X — final price depends on size, coat, and condition. The groomer will give you an exact quote."',
+      '- NEVER quote only the low end of a range as if it were the price. This is the most important rule in this section.',
+      '- If a service has no price listed at all, say "the shop will confirm the exact price."',
+      '- Always include the disclaimer "the groomer will confirm the exact quote" on any RANGE or STARTING_AT quote.',
       '',
       'AVAILABILITY CHECKING (CRITICAL — PREVENT DOUBLE BOOKINGS):',
       '- You DO NOT automatically see the shop\'s schedule. To see what times are already booked on a given day, you MUST call the `client_check_availability` tool.',

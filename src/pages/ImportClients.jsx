@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 
 export default function ImportClients() {
@@ -139,11 +140,109 @@ export default function ImportClients() {
     return clients
   }
 
-  // Parse a single row handling MoeGo's CSV format
-  // MoeGo format: "value"\t,"value"\t,"value"\t,
-  // Delimiter is tab followed by comma: \t,
+  // Parse an Excel (.xlsx/.xls) workbook from an ArrayBuffer
+  function parseExcelWorkbook(arrayBuffer) {
+    try {
+      var workbook = XLSX.read(arrayBuffer, { type: 'array' })
+      var firstSheetName = workbook.SheetNames[0]
+      if (!firstSheetName) {
+        setErrors(['Excel file has no sheets'])
+        return []
+      }
+      var sheet = workbook.Sheets[firstSheetName]
+      // header:1 -> array of arrays (first row = headers). raw:false -> values as strings.
+      var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false })
+
+      if (!rows || rows.length < 2) {
+        setErrors(['Excel file appears empty or has no data rows'])
+        return []
+      }
+
+      // Build header map (same shape as parseFile)
+      var headers = rows[0] || []
+      var headerMap = {}
+      for (var h = 0; h < headers.length; h++) {
+        var cleanHeader = String(headers[h] || '').replace(/"/g, '').replace(/\t/g, '').trim().toLowerCase()
+        headerMap[cleanHeader] = h
+      }
+      console.log('Excel parsed headers:', headerMap)
+      console.log('Excel total rows:', rows.length)
+
+      var clients = []
+      var parseErrors = []
+
+      for (var i = 1; i < rows.length; i++) {
+        try {
+          var raw = rows[i] || []
+          // Normalize every cell to a string so downstream helpers stay happy
+          var values = []
+          for (var v = 0; v < raw.length; v++) {
+            values.push(raw[v] != null ? String(raw[v]) : '')
+          }
+          if (values.length < 3) continue
+
+          var firstName = getVal(values, headerMap, 'first name')
+          var lastName = getVal(values, headerMap, 'last name')
+          if (!firstName && !lastName) continue
+
+          var petString = getVal(values, headerMap, 'pet(breed)')
+          var pets = parsePets(petString)
+          var notes = getVal(values, headerMap, 'notes')
+          var tags = getVal(values, headerMap, 'tags')
+          var prefFreq = getVal(values, headerMap, 'preferred frequency')
+          var status = getVal(values, headerMap, 'status') || 'active'
+
+          var bookingNotes = []
+          if (tags) bookingNotes.push(tags)
+          if (prefFreq) bookingNotes.push('Preferred frequency: ' + prefFreq)
+
+          clients.push({
+            selected: true,
+            first_name: cleanText(firstName),
+            last_name: cleanText(lastName),
+            email: cleanText(getVal(values, headerMap, 'email')),
+            phone: cleanText(getVal(values, headerMap, 'primary contact')),
+            alt_phone: cleanText(getVal(values, headerMap, 'additional contact')),
+            address: cleanText(getVal(values, headerMap, 'address')),
+            notes: cleanText(notes),
+            booking_notes: bookingNotes.join(' | '),
+            status: status.toLowerCase().trim(),
+            pets: pets,
+            total_sales: getVal(values, headerMap, 'total sales'),
+            last_service: getVal(values, headerMap, 'last service'),
+            next_service: getVal(values, headerMap, 'next service'),
+            total_bookings: getVal(values, headerMap, 'total booking number'),
+            overdue_days: getVal(values, headerMap, 'overdue days'),
+            row_number: i + 1
+          })
+        } catch (err) {
+          parseErrors.push('Row ' + (i + 1) + ': ' + err.message)
+        }
+      }
+
+      if (parseErrors.length > 0) {
+        setErrors(parseErrors)
+      }
+
+      return clients
+    } catch (err) {
+      setErrors(['Failed to read Excel file: ' + err.message])
+      return []
+    }
+  }
+
+  // Parse a single row — handles BOTH MoeGo's weird tab-comma format AND standard CSV
+  // MoeGo format: "value"\t,"value"\t,"value"\t,  (delimiter is \t,)
+  // Standard CSV: value,value,value  (delimiter is just a comma, but respects quoted strings)
   function parseRow(line) {
-    var parts = line.split('\t,')
+    var parts
+    // If the line has the MoeGo tab-comma delimiter, use that
+    if (line.indexOf('\t,') !== -1) {
+      parts = line.split('\t,')
+    } else {
+      // Otherwise treat as standard CSV (respecting quoted values with commas inside)
+      parts = splitCSVLine(line)
+    }
     var values = []
     for (var i = 0; i < parts.length; i++) {
       values.push(parts[i].replace(/"/g, '').replace(/\t/g, '').trim())
@@ -151,9 +250,39 @@ export default function ImportClients() {
     return values
   }
 
-  // Get value from row by header name
+  // Split a standard CSV line — handles quoted values with commas inside them
+  function splitCSVLine(line) {
+    var result = []
+    var current = ''
+    var inQuotes = false
+    for (var i = 0; i < line.length; i++) {
+      var ch = line[i]
+      if (ch === '"') {
+        inQuotes = !inQuotes
+      } else if (ch === ',' && !inQuotes) {
+        result.push(current)
+        current = ''
+      } else {
+        current += ch
+      }
+    }
+    result.push(current)
+    return result
+  }
+
+  // Get value from row by header name (flexible match — tries exact, then with/without spaces)
   function getVal(values, headerMap, headerName) {
     var idx = headerMap[headerName]
+    // If exact match didn't work, try matching by stripping all spaces from the header names
+    if (idx === undefined) {
+      var target = headerName.replace(/\s+/g, '')
+      for (var key in headerMap) {
+        if (key.replace(/\s+/g, '') === target) {
+          idx = headerMap[key]
+          break
+        }
+      }
+    }
     if (idx === undefined || idx >= values.length) return ''
     return (values[idx] || '').replace(/"/g, '').replace(/\t/g, '').trim()
   }
@@ -164,10 +293,18 @@ export default function ImportClients() {
     if (!file) return
 
     setErrors([])
+    var fileName = (file.name || '').toLowerCase()
+    var isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls')
+
     var reader = new FileReader()
     reader.onload = function(event) {
-      var text = event.target.result
-      var clients = parseFile(text)
+      var clients
+      if (isExcel) {
+        clients = parseExcelWorkbook(event.target.result)
+      } else {
+        var text = event.target.result
+        clients = parseFile(text)
+      }
       if (clients && clients.length > 0) {
         setParsedClients(clients)
         // Initialize all as selected
@@ -180,7 +317,12 @@ export default function ImportClients() {
         setStep('preview')
       }
     }
-    reader.readAsText(file)
+
+    if (isExcel) {
+      reader.readAsArrayBuffer(file)
+    } else {
+      reader.readAsText(file)
+    }
   }
 
   // Toggle select all
@@ -530,12 +672,12 @@ export default function ImportClients() {
 
             <div className="import-dropzone" onClick={function() { fileInputRef.current && fileInputRef.current.click() }}>
               <div className="dropzone-icon">📁</div>
-              <div className="dropzone-text">Click to upload your MoeGo export file</div>
-              <div className="dropzone-hint">Supports .csv and .tsv files</div>
+              <div className="dropzone-text">Click to upload your client list</div>
+              <div className="dropzone-hint">Supports .csv, .tsv, .xlsx, and .xls files</div>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv,.tsv,.txt"
+                accept=".csv,.tsv,.txt,.xlsx,.xls"
                 onChange={handleFileUpload}
                 style={{ display: 'none' }}
               />

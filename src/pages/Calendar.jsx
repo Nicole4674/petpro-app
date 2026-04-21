@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { checkBookingSafety } from '../lib/claude'
+import { notifyUser } from '../lib/push'
 
 const HOURS = []
 for (let h = 7; h <= 18; h++) {
@@ -209,6 +210,11 @@ export default function Calendar() {
     const [addPayNotes, setAddPayNotes] = useState('')
     const [savingAddPayment, setSavingAddPayment] = useState(false)
 
+    // ===== Inline Send Message (from appointment popup) =====
+    const [newMessageText, setNewMessageText] = useState('')
+    const [sendingMessage, setSendingMessage] = useState(false)
+    const [sendMessageStatus, setSendMessageStatus] = useState(null) // 'success' | 'error' | null
+
     useEffect(() => {
         fetchData()
     }, [currentDate, view])
@@ -218,6 +224,9 @@ export default function Calendar() {
         if (!selectedAppt) setStatusDropdownOpen(false)
         // Task #77 — also collapse the recurring dates list so each popup open starts clean
         setShowRecurringDates(false)
+        // Reset inline message composer each time the popup opens a different appt
+        setNewMessageText('')
+        setSendMessageStatus(null)
     }, [selectedAppt?.id])
 
     // Handle "Book Again", "Reschedule", and "View" URL params from client profile
@@ -942,6 +951,105 @@ export default function Calendar() {
         setNewNoteText('')
         setShowAddNotePopup(false)
         setSavingNote(false)
+    }
+
+    // ---- Inline Send Message from the appointment popup ----
+    // Finds (or creates) a thread for (groomer, client), inserts the message,
+    // bumps thread.last_message_at, and fires a push to the client portal.
+    const handleSendMessageFromPopup = async () => {
+        if (!newMessageText.trim() || !selectedAppt || sendingMessage) return
+        setSendingMessage(true)
+        setSendMessageStatus(null)
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser()
+            if (!user) throw new Error('Not signed in')
+
+            const clientId = selectedAppt.client_id
+            if (!clientId) throw new Error('This appointment has no client on file')
+
+            // Find an existing thread for this (groomer, client) pair, or create one.
+            let { data: existingThread, error: threadFindErr } = await supabase
+                .from('threads')
+                .select('id')
+                .eq('groomer_id', user.id)
+                .eq('client_id', clientId)
+                .order('last_message_at', { ascending: false, nullsFirst: false })
+                .limit(1)
+                .maybeSingle()
+            if (threadFindErr) throw threadFindErr
+
+            let threadId = existingThread?.id
+            if (!threadId) {
+                const { data: newThread, error: newThreadErr } = await supabase
+                    .from('threads')
+                    .insert({ groomer_id: user.id, client_id: clientId, subject: null })
+                    .select('id')
+                    .single()
+                if (newThreadErr) throw newThreadErr
+                threadId = newThread.id
+            }
+
+            // Insert the message
+            const text = newMessageText.trim()
+            const { data: inserted, error: msgErr } = await supabase
+                .from('messages')
+                .insert({
+                    thread_id: threadId,
+                    groomer_id: user.id,
+                    client_id: clientId,
+                    sender_type: 'groomer',
+                    text: text,
+                    read_by_groomer: true,
+                    read_by_client: false,
+                })
+                .select()
+                .single()
+            if (msgErr) throw msgErr
+
+            // Bump thread timestamp
+            await supabase
+                .from('threads')
+                .update({ last_message_at: inserted.created_at })
+                .eq('id', threadId)
+
+            // Fire-and-forget push notification to the client (non-blocking)
+            ;(async function notifyClient() {
+                try {
+                    const { data: clientRow } = await supabase
+                        .from('clients')
+                        .select('user_id')
+                        .eq('id', clientId)
+                        .maybeSingle()
+                    if (!clientRow?.user_id) return
+                    const { data: shopRow } = await supabase
+                        .from('shop_settings')
+                        .select('shop_name')
+                        .eq('groomer_id', user.id)
+                        .maybeSingle()
+                    const shopName = (shopRow && shopRow.shop_name) || 'Your groomer'
+                    notifyUser({
+                        userId: clientRow.user_id,
+                        title: shopName,
+                        body: text.slice(0, 100),
+                        url: '/portal/messages/' + threadId,
+                        tag: 'thread-' + threadId,
+                    })
+                } catch (e) {
+                    console.warn('[push] notify client failed (non-fatal):', e)
+                }
+            })()
+
+            setNewMessageText('')
+            setSendMessageStatus('success')
+            // Auto-clear the success message after 3s
+            setTimeout(function () { setSendMessageStatus(null) }, 3000)
+        } catch (err) {
+            console.error('Send message from popup failed:', err)
+            setSendMessageStatus('error')
+        } finally {
+            setSendingMessage(false)
+        }
     }
 
     // Check the dog IN — stamp the exact arrival time + who did it
@@ -2254,6 +2362,59 @@ export default function Calendar() {
                                 >
                                     + Add Note
                                 </button>
+                            </div>
+
+                            {/* 💬 Send Message — quick compose to the pet's owner without leaving the calendar */}
+                            <div className="appt-detail-section">
+                                <div className="appt-detail-section-title">💬 Send Message</div>
+                                <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '6px' }}>
+                                    Text the owner directly — goes to their client portal inbox and phone.
+                                </div>
+                                <textarea
+                                    value={newMessageText}
+                                    onChange={(e) => setNewMessageText(e.target.value)}
+                                    placeholder="e.g. Hi! Just letting you know Lilly will be ready in 10 minutes 🐾"
+                                    rows={3}
+                                    style={{
+                                        width: '100%',
+                                        padding: '10px 12px',
+                                        fontSize: '14px',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '8px',
+                                        fontFamily: 'inherit',
+                                        resize: 'vertical',
+                                        boxSizing: 'border-box',
+                                    }}
+                                    disabled={sendingMessage}
+                                />
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', gap: '8px', flexWrap: 'wrap' }}>
+                                    <div style={{ fontSize: '13px', minHeight: '18px' }}>
+                                        {sendMessageStatus === 'success' && (
+                                            <span style={{ color: '#047857' }}>✓ Message sent</span>
+                                        )}
+                                        {sendMessageStatus === 'error' && (
+                                            <span style={{ color: '#b91c1c' }}>✗ Couldn't send — try again</span>
+                                        )}
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                        <Link
+                                            to={'/messages'}
+                                            style={{ fontSize: '13px', color: '#2563eb', textDecoration: 'underline', alignSelf: 'center' }}
+                                            onClick={() => setSelectedAppt(null)}
+                                        >
+                                            View full conversation
+                                        </Link>
+                                        <button
+                                            type="button"
+                                            className="appt-notes-add-btn"
+                                            onClick={handleSendMessageFromPopup}
+                                            disabled={!newMessageText.trim() || sendingMessage}
+                                            style={{ opacity: (!newMessageText.trim() || sendingMessage) ? 0.5 : 1 }}
+                                        >
+                                            {sendingMessage ? 'Sending…' : '💬 Send Message'}
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
 
                             {/* Flags */}

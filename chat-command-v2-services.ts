@@ -89,7 +89,7 @@ var toolDefinitions = [
   },
   {
     name: 'edit_pet',
-    description: 'Edit a pet\'s information. Search for the client first to find the pet ID.',
+    description: 'Edit a pet\'s general information (name, breed, weight, behavior, handling). DO NOT use this tool for vaccines — use add_vaccination / edit_vaccination instead. Search for the client first to find the pet ID.',
     input_schema: {
       type: 'object',
       properties: {
@@ -126,7 +126,7 @@ var toolDefinitions = [
   },
   {
     name: 'add_pet',
-    description: 'Add a new pet to an existing client. Search for the client first to get their ID.',
+    description: 'Add a new pet to an existing client. DO NOT add vaccination info here — after the pet is created, call add_vaccination for each shot (rabies, DHPP, bordetella, etc.). Search for the client first to get their ID.',
     input_schema: {
       type: 'object',
       properties: {
@@ -154,6 +154,68 @@ var toolDefinitions = [
         pet_name: { type: 'string', description: 'Name of the pet for confirmation' },
       },
       required: ['pet_id', 'pet_name'],
+    },
+  },
+  {
+    name: 'add_vaccination',
+    description: 'Log an individual vaccination record for a pet (rabies, DHPP, bordetella, etc.). Always use THIS instead of edit_pet when recording shot info. IMPORTANT: For bordetella, ALWAYS ask for date_administered (when the shot was given) because there is a mandatory 7-day wait before boarding.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pet_id: { type: 'string', description: 'The UUID of the pet' },
+        vaccine_type: {
+          type: 'string',
+          description: 'Type of vaccine. Dog: rabies, dhpp, bordetella, canine_influenza, leptospirosis, lyme. Cat: rabies, fvrcp, felv, bordetella. Custom: other.',
+          enum: ['rabies', 'dhpp', 'bordetella', 'canine_influenza', 'leptospirosis', 'lyme', 'fvrcp', 'felv', 'other'],
+        },
+        vaccine_label: { type: 'string', description: 'Custom display name. REQUIRED when vaccine_type is "other" (e.g., "Giardia", "Rattlesnake"). Ignored for standard types.' },
+        expiry_date: { type: 'string', description: 'Expiry date in YYYY-MM-DD format (e.g., 2027-06-15)' },
+        date_administered: { type: 'string', description: 'Date shot was given in YYYY-MM-DD format. REQUIRED for bordetella (7-day boarding wait rule). Optional for other vaccines.' },
+        vet_clinic: { type: 'string', description: 'Name of the vet clinic or veterinarian who gave the shot. Optional but helpful for verification.' },
+        document_url: { type: 'string', description: 'URL to an uploaded vaccination certificate photo. Usually set by the UI, not conversationally — leave blank unless the groomer explicitly provides one.' },
+        notes: { type: 'string', description: 'Optional notes like "1-year rabies" vs "3-year rabies", etc.' },
+      },
+      required: ['pet_id', 'vaccine_type', 'expiry_date'],
+    },
+  },
+  {
+    name: 'edit_vaccination',
+    description: 'Update an existing vaccination record (mistyped date, wrong type, etc.). Use list_vaccinations first to get the vaccination_id.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vaccination_id: { type: 'string', description: 'The UUID of the vaccination record' },
+        vaccine_type: { type: 'string', enum: ['rabies', 'dhpp', 'bordetella', 'canine_influenza', 'leptospirosis', 'lyme', 'fvrcp', 'felv', 'other'] },
+        vaccine_label: { type: 'string' },
+        expiry_date: { type: 'string', description: 'YYYY-MM-DD format' },
+        date_administered: { type: 'string', description: 'YYYY-MM-DD format' },
+        vet_clinic: { type: 'string' },
+        document_url: { type: 'string' },
+        notes: { type: 'string' },
+      },
+      required: ['vaccination_id'],
+    },
+  },
+  {
+    name: 'delete_vaccination',
+    description: 'Delete a vaccination record. Use when the groomer says "remove that shot", "that rabies record is wrong", etc. Always confirm with the groomer before deleting.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vaccination_id: { type: 'string', description: 'The UUID of the vaccination record' },
+      },
+      required: ['vaccination_id'],
+    },
+  },
+  {
+    name: 'list_vaccinations',
+    description: 'Get all vaccination records for a specific pet. Returns each shot with type, expiry, date administered, and status (current / expired / due_soon = within 30 days).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pet_id: { type: 'string', description: 'The UUID of the pet' },
+      },
+      required: ['pet_id'],
     },
   },
   {
@@ -903,7 +965,24 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
           .eq('groomer_id', groomerId)
 
         if (!clientInfo) return { success: false, error: 'Client not found' }
-        return { success: true, client: clientInfo, pets: clientPets || [] }
+
+        // Also fetch vaccinations per pet so Claude sees them without a second tool call
+        var petsWithVax = []
+        if (clientPets && clientPets.length > 0) {
+          for (var i = 0; i < clientPets.length; i++) {
+            var pet = clientPets[i]
+            var { data: vax } = await supabaseAdmin
+              .from('vaccinations')
+              .select('id, vaccine_type, vaccine_label, expiry_date, date_administered, vet_clinic, document_url, notes')
+              .eq('pet_id', pet.id)
+              .eq('groomer_id', groomerId)
+              .order('expiry_date', { ascending: false })
+            pet.vaccinations = vax || []
+            petsWithVax.push(pet)
+          }
+        }
+
+        return { success: true, client: clientInfo, pets: petsWithVax }
       }
 
       case 'edit_client': {
@@ -981,6 +1060,8 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
         if (toolInput.hip_joint_issues !== undefined) updates.hip_joint_issues = toolInput.hip_joint_issues
         if (toolInput.matting_level !== undefined) updates.matting_level = toolInput.matting_level
         if (toolInput.anxiety_level !== undefined) updates.anxiety_level = toolInput.anxiety_level
+        // Legacy vaccination_status / vaccination_expiry fields intentionally NOT handled here.
+        // Use add_vaccination / edit_vaccination for all vaccine data.
         if (Object.keys(updates).length === 0) return { success: false, error: 'No fields to update' }
 
         var { error } = await supabaseAdmin.from('pets').update(updates).eq('id', toolInput.pet_id).eq('groomer_id', groomerId)
@@ -996,6 +1077,9 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
       }
 
       case 'add_pet': {
+        // Note: vaccines are NOT inserted here. After the pet is created,
+        // Claude should call add_vaccination for each shot. Legacy pet.vaccination_*
+        // columns default to 'unknown' and null at the DB level.
         var { data: newPet, error } = await supabaseAdmin
           .from('pets')
           .insert({
@@ -1025,6 +1109,89 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
           .eq('groomer_id', groomerId)
         if (error) return { success: false, error: error.message }
         return { success: true, message: 'Pet "' + toolInput.pet_name + '" has been marked as deceased. Record preserved.' }
+      }
+
+      case 'add_vaccination': {
+        // Guardrail: if vaccine_type is "other", require vaccine_label
+        if (toolInput.vaccine_type === 'other' && !toolInput.vaccine_label) {
+          return { success: false, error: 'vaccine_label is required when vaccine_type is "other". Ask the groomer what to call the shot (e.g., Giardia, Rattlesnake).' }
+        }
+        // Guardrail: bordetella should have date_administered for the 7-day wait rule
+        if (toolInput.vaccine_type === 'bordetella' && !toolInput.date_administered) {
+          return { success: false, error: 'date_administered is required for bordetella because of the 7-day boarding wait rule. Ask the groomer when the shot was given.' }
+        }
+        var { data: newVax, error } = await supabaseAdmin
+          .from('vaccinations')
+          .insert({
+            groomer_id: groomerId,
+            pet_id: toolInput.pet_id,
+            vaccine_type: toolInput.vaccine_type,
+            vaccine_label: toolInput.vaccine_label || null,
+            expiry_date: toolInput.expiry_date,
+            date_administered: toolInput.date_administered || null,
+            vet_clinic: toolInput.vet_clinic || null,
+            document_url: toolInput.document_url || null,
+            notes: toolInput.notes || null,
+          })
+          .select('id, vaccine_type, vaccine_label, expiry_date, date_administered, vet_clinic, document_url')
+          .single()
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Vaccination record added', vaccination: newVax }
+      }
+
+      case 'edit_vaccination': {
+        var updates = {}
+        if (toolInput.vaccine_type) updates.vaccine_type = toolInput.vaccine_type
+        if (toolInput.vaccine_label !== undefined) updates.vaccine_label = toolInput.vaccine_label || null
+        if (toolInput.expiry_date) updates.expiry_date = toolInput.expiry_date
+        if (toolInput.date_administered !== undefined) updates.date_administered = toolInput.date_administered || null
+        if (toolInput.vet_clinic !== undefined) updates.vet_clinic = toolInput.vet_clinic || null
+        if (toolInput.document_url !== undefined) updates.document_url = toolInput.document_url || null
+        if (toolInput.notes !== undefined) updates.notes = toolInput.notes || null
+        if (Object.keys(updates).length === 0) return { success: false, error: 'No fields to update' }
+        updates.updated_at = new Date().toISOString()
+
+        var { error } = await supabaseAdmin
+          .from('vaccinations')
+          .update(updates)
+          .eq('id', toolInput.vaccination_id)
+          .eq('groomer_id', groomerId)
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Vaccination record updated' }
+      }
+
+      case 'delete_vaccination': {
+        var { error } = await supabaseAdmin
+          .from('vaccinations')
+          .delete()
+          .eq('id', toolInput.vaccination_id)
+          .eq('groomer_id', groomerId)
+        if (error) return { success: false, error: error.message }
+        return { success: true, message: 'Vaccination record deleted' }
+      }
+
+      case 'list_vaccinations': {
+        var { data: vaxList, error } = await supabaseAdmin
+          .from('vaccinations')
+          .select('*')
+          .eq('pet_id', toolInput.pet_id)
+          .eq('groomer_id', groomerId)
+          .order('expiry_date', { ascending: false })
+        if (error) return { success: false, error: error.message }
+
+        // Enrich each record with a computed status + days_to_expiry
+        var now = new Date()
+        var today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        var enriched = (vaxList || []).map(function(v) {
+          var exp = new Date(v.expiry_date)
+          var daysToExpiry = Math.floor((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+          var status = 'current'
+          if (daysToExpiry < 0) status = 'expired'
+          else if (daysToExpiry <= 30) status = 'due_soon'
+          return Object.assign({}, v, { status: status, days_to_expiry: daysToExpiry })
+        })
+
+        return { success: true, count: enriched.length, vaccinations: enriched }
       }
 
       case 'list_staff': {
@@ -2896,6 +3063,37 @@ Deno.serve(async (req) => {
       '- Nights math: "4/20 → 4/23" = 3 nights (end_date minus start_date).',
       '- Kennels — see the KENNELS list in CURRENT DATA. Pick by name ("Large 1"), NEVER guess an ID. If the owner asks what\'s free, use check_boarding_availability.',
       '- BOARDING TODAY in CURRENT DATA shows who\'s currently overnight. Use that for quick "who\'s here?" questions without a tool call.',
+      '',
+      'MIGRATION MODE (helping new groomers move from MoeGo, Gingr, pen-and-paper, etc.):',
+      '- If the groomer says they\'re switching from another system, migrating, importing their book of business, reading off their schedule, or just "help me add my clients" — treat it as migration mode. Be a patient co-pilot.',
+      '- You can add clients (add_client), add pets (add_pet), and edit both (edit_client / edit_pet) with fields for breed, weight, grooming_notes, special_notes, allergies, medications, aggression flags.',
+      '- For VACCINATIONS use the dedicated tools (add_vaccination / edit_vaccination / delete_vaccination / list_vaccinations) — NOT the old pet-level fields. See the VACCINATION RULES section for details.',
+      '- Ask ONE thing at a time — don\'t interrogate. Example: "Got it, Amy Treadwell + Lilly the bulldog (50lbs). Quick — is Lilly\'s rabies current? Got an expiry date handy?"',
+      '- If the groomer dictates rapid-fire or pastes a list, ADD everyone quickly and summarize at the end. Prioritize: client name → phone → pet name → breed → weight. Allergies + vax are bonus — don\'t block on them.',
+      '- Never invent data. If you don\'t know something, leave it blank — missing info is better than wrong info.',
+      '- If the groomer seems overwhelmed, offer to read back what you have and ask what\'s next, instead of drilling further.',
+      '',
+      'VACCINATION RULES (legally required tracking for all shops):',
+      '',
+      '** CRITICAL ROUTING RULE — READ FIRST **',
+      'If the user mentions ANY vaccine by name (rabies, DHPP, bordetella, kennel cough, FVRCP, FeLV, lepto, lyme, canine flu, distemper, parvo, etc.) OR uses the word "vaccine", "vax", "shot", or "shots" — you MUST use the dedicated vaccination tools (add_vaccination / edit_vaccination / delete_vaccination / list_vaccinations).',
+      'You MUST NOT use edit_pet or add_pet to record vaccine info. The pet table no longer accepts vaccination fields — those tools will silently ignore vax data. Always add one record PER SHOT in the vaccinations table.',
+      '',
+      'ROUTING EXAMPLES (memorize these patterns):',
+      '- User: "update Amy\'s vaccines DHPP for 6/26/2027" → CORRECT: add_vaccination(pet_id=Lilly, vaccine_type="dhpp", expiry_date="2027-06-26"). WRONG: edit_pet.',
+      '- User: "add Lilly\'s rabies shot, expires June 2027" → add_vaccination(vaccine_type="rabies", expiry_date="2027-06-30").',
+      '- User: "Max got his bordetella today" → add_vaccination(vaccine_type="bordetella", date_administered=<today>, expiry_date=<today+1yr>). Ask for exact expiry if unclear.',
+      '- User: "Lilly\'s shots are good" → ambiguous — DO NOT call edit_pet. Ask: "Which vaccines and what expiry dates?" then add each one via add_vaccination.',
+      '- User: "vaccines expire 6/26/27" (no specific shot named) → ask which shot(s). DO NOT write to pet-level fields.',
+      '',
+      'MECHANICS:',
+      '- Supported vaccine_type values: rabies, dhpp, bordetella, canine_influenza, leptospirosis, lyme (dogs) | fvrcp, felv (cats) | other (any custom shot — MUST include vaccine_label like "Giardia" or "Rattlesnake").',
+      '- expiry_date is REQUIRED. Always convert groomer-speak to YYYY-MM-DD ("shots good til June 2027" → "2027-06-30", "rabies expires 6/15/27" → "2027-06-15").',
+      '- date_administered is OPTIONAL for most vaccines but MANDATORY for bordetella. The tool will reject bordetella without it. If the groomer doesn\'t know the admin date for bordetella, ask: "When was Lilly\'s kennel cough shot given? There\'s a 7-day wait rule before boarding." If they truly don\'t know, log the vaccine with just expiry and ask them to pull the record later.',
+      '- WHY bordetella is special: it\'s a live vaccine that can shed for up to 7 days. Boarding a dog within 7 days of their bordetella shot risks a kennel-wide kennel cough outbreak. The system auto-flags any boarding reservation within the shop\'s wait window (default 7 days).',
+      '- Use list_vaccinations to see what\'s on file for a pet — returns each shot with a computed status (current / due_soon / expired). "Due_soon" = within 30 days of expiry.',
+      '- When the groomer asks "are Lilly\'s shots current?" or "who has expired vaccines?" — use list_vaccinations (single pet) or loop get_client_details (multiple). Don\'t guess.',
+      '- CONFIRM WORD CHOICE: when you successfully call add_vaccination, say "Added" (not "Updated") so the groomer knows a new record was created.',
       '',
       'WAITLIST RULES:',
       '- Use list_waitlist when the owner asks "who\'s on the waitlist?" or before booking a newly-open slot.',
