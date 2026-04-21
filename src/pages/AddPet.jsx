@@ -78,6 +78,18 @@ export default function AddPet() {
     setLoading(true)
     setError(null)
 
+    // Require weight + age — Claude needs both to quote price ranges accurately
+    if (!form.weight || Number(form.weight) <= 0) {
+      setError('Weight is required (in lbs) — Claude uses it to quote accurate prices.')
+      setLoading(false)
+      return
+    }
+    if (form.age === '' || form.age === null || Number(form.age) < 0) {
+      setError('Age is required (in years).')
+      setLoading(false)
+      return
+    }
+
     const { data: { user } } = await supabase.auth.getUser()
 
     // Clean up empty strings to null for optional fields
@@ -127,12 +139,12 @@ export default function AddPet() {
 
         <div className="form-row">
           <div className="form-group">
-            <label>Weight (lbs)</label>
-            <input type="number" name="weight" value={form.weight} onChange={handleChange} />
+            <label>Weight (lbs) *</label>
+            <input type="number" name="weight" value={form.weight} onChange={handleChange} required min="0" step="0.1" placeholder="e.g. 45" />
           </div>
           <div className="form-group">
-            <label>Age (years)</label>
-            <input type="number" name="age" value={form.age} onChange={handleChange} />
+            <label>Age (years) *</label>
+            <input type="number" name="age" value={form.age} onChange={handleChange} required min="0" step="0.5" placeholder="e.g. 3" />
           </div>
         </div>
 

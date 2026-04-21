@@ -11,6 +11,26 @@ var TABS = [
   { key: 'payments', label: '💳 Payments' }
 ]
 
+// Vaccine type definitions (dogs + cats). Order matters for dropdown.
+var VACCINE_TYPES = [
+  { value: 'rabies',            label: 'Rabies',            emoji: '🦠', species: 'both' },
+  { value: 'dhpp',              label: 'DHPP',              emoji: '💉', species: 'dog'  },
+  { value: 'bordetella',        label: 'Bordetella',        emoji: '🐕', species: 'dog'  },
+  { value: 'canine_influenza',  label: 'Canine Influenza',  emoji: '🤧', species: 'dog'  },
+  { value: 'leptospirosis',     label: 'Leptospirosis',     emoji: '💧', species: 'dog'  },
+  { value: 'lyme',              label: 'Lyme',              emoji: '🕷️', species: 'dog'  },
+  { value: 'fvrcp',             label: 'FVRCP',             emoji: '🐈', species: 'cat'  },
+  { value: 'felv',              label: 'FeLV',              emoji: '🐱', species: 'cat'  },
+  { value: 'other',             label: 'Other',             emoji: '💊', species: 'both' }
+]
+
+function getVaxTypeInfo(type) {
+  for (var i = 0; i < VACCINE_TYPES.length; i++) {
+    if (VACCINE_TYPES[i].value === type) return VACCINE_TYPES[i]
+  }
+  return { label: type, emoji: '💉', species: 'both' }
+}
+
 export default function PetDetail() {
   var { id } = useParams()
   var navigate = useNavigate()
@@ -33,6 +53,22 @@ export default function PetDetail() {
   // Notes form
   var [newNote, setNewNote] = useState('')
   var [savingNote, setSavingNote] = useState(false)
+
+  // Vaccination modal
+  var [showVaxModal, setShowVaxModal] = useState(false)
+  var [editingVaxId, setEditingVaxId] = useState(null)
+  var [vaxForm, setVaxForm] = useState({
+    vaccine_type: 'rabies',
+    vaccine_label: '',
+    expiry_date: '',
+    date_administered: '',
+    vet_clinic: '',
+    notes: ''
+  })
+  var [savingVax, setSavingVax] = useState(false)
+  var [pendingCertFile, setPendingCertFile] = useState(null)   // new file picked in modal, not yet uploaded
+  var [existingCertUrl, setExistingCertUrl] = useState(null)   // current document_url on the record being edited
+  var [uploadingCert, setUploadingCert] = useState(false)
 
   useEffect(function() {
     fetchPet()
@@ -100,8 +136,18 @@ export default function PetDetail() {
 
   async function fetchVaccinations() {
     setLoadingTab(true)
-    // Vaccination info is stored on the pet record itself for now
-    // If you later create a vaccinations table, we'll query it here
+    var { data, error } = await supabase
+      .from('vaccinations')
+      .select('*')
+      .eq('pet_id', id)
+      .order('expiry_date', { ascending: true })
+
+    if (error) {
+      console.error('Error fetching vaccinations:', error)
+      setVaccinations([])
+    } else {
+      setVaccinations(data || [])
+    }
     setLoadingTab(false)
   }
 
@@ -133,6 +179,17 @@ export default function PetDetail() {
 
   async function handleSaveEdit(e) {
     e.preventDefault()
+
+    // Require weight + age — Claude needs both to quote price ranges accurately
+    if (!editForm.weight || Number(editForm.weight) <= 0) {
+      alert('Weight is required (in lbs) — Claude uses it to quote accurate prices.')
+      return
+    }
+    if (!editForm.age || String(editForm.age).trim() === '') {
+      alert('Age is required.')
+      return
+    }
+
     setSaving(true)
 
     var { error } = await supabase
@@ -190,6 +247,182 @@ export default function PetDetail() {
     setSavingNote(false)
   }
 
+  function openAddVaxModal() {
+    setEditingVaxId(null)
+    setVaxForm({
+      vaccine_type: 'rabies',
+      vaccine_label: '',
+      expiry_date: '',
+      date_administered: '',
+      vet_clinic: '',
+      notes: ''
+    })
+    setPendingCertFile(null)
+    setExistingCertUrl(null)
+    setShowVaxModal(true)
+  }
+
+  function openEditVaxModal(vax) {
+    setEditingVaxId(vax.id)
+    setVaxForm({
+      vaccine_type: vax.vaccine_type || 'rabies',
+      vaccine_label: vax.vaccine_label || '',
+      expiry_date: vax.expiry_date || '',
+      date_administered: vax.date_administered || '',
+      vet_clinic: vax.vet_clinic || '',
+      notes: vax.notes || ''
+    })
+    setPendingCertFile(null)
+    setExistingCertUrl(vax.document_url || null)
+    setShowVaxModal(true)
+  }
+
+  async function handleSaveVaccination(e) {
+    e.preventDefault()
+
+    // Guardrails (match the edge-function tool layer)
+    if (vaxForm.vaccine_type === 'other' && !vaxForm.vaccine_label.trim()) {
+      alert('Please enter a vaccine name for "Other".')
+      return
+    }
+    if (vaxForm.vaccine_type === 'bordetella' && !vaxForm.date_administered) {
+      alert('Bordetella requires the date it was administered (7-day wait rule before boarding).')
+      return
+    }
+    if (!vaxForm.expiry_date) {
+      alert('Expiry date is required.')
+      return
+    }
+
+    // Client-side file size cap (server-side cap is 10MB, but fail early for a nicer error)
+    if (pendingCertFile && pendingCertFile.size > 10 * 1024 * 1024) {
+      alert('Certificate photo must be 10 MB or smaller.')
+      return
+    }
+
+    setSavingVax(true)
+
+    var { data: { user } } = await supabase.auth.getUser()
+
+    var payload = {
+      pet_id: id,
+      groomer_id: user.id,
+      vaccine_type: vaxForm.vaccine_type,
+      vaccine_label: vaxForm.vaccine_label.trim() || null,
+      expiry_date: vaxForm.expiry_date,
+      date_administered: vaxForm.date_administered || null,
+      vet_clinic: vaxForm.vet_clinic.trim() || null,
+      notes: vaxForm.notes.trim() || null
+    }
+
+    // Capture original document_url so we can clean up the old storage file
+    // if user is replacing it or removing it.
+    var originalDocUrl = null
+    if (editingVaxId) {
+      var currentRecord = vaccinations.find(function(v) { return v.id === editingVaxId })
+      if (currentRecord) originalDocUrl = currentRecord.document_url || null
+    }
+
+    // Save the main record first so we have a vaccination id to use in the file path.
+    var savedVaxId = editingVaxId
+    var error
+
+    if (editingVaxId) {
+      var res = await supabase
+        .from('vaccinations')
+        .update(Object.assign({ updated_at: new Date().toISOString() }, payload))
+        .eq('id', editingVaxId)
+      error = res.error
+    } else {
+      var res2 = await supabase
+        .from('vaccinations')
+        .insert([payload])
+        .select('id')
+        .single()
+      error = res2.error
+      if (res2.data) savedVaxId = res2.data.id
+    }
+
+    if (error) {
+      alert('Error saving vaccination: ' + error.message)
+      setSavingVax(false)
+      return
+    }
+
+    // ---- Handle cert photo upload / remove / replace ----
+    try {
+      if (pendingCertFile && savedVaxId) {
+        // Upload (replace path: {groomer_id}/{pet_id}/{vax_id}_{timestamp}.{ext})
+        setUploadingCert(true)
+        var ext = pendingCertFile.name.split('.').pop().toLowerCase()
+        var filePath = user.id + '/' + id + '/' + savedVaxId + '_' + Date.now() + '.' + ext
+        var { error: uploadErr } = await supabase.storage
+          .from('vax-certs')
+          .upload(filePath, pendingCertFile, { upsert: false })
+        if (uploadErr) throw uploadErr
+
+        // Update the vaccination record with the new document_url
+        var { error: updateErr } = await supabase
+          .from('vaccinations')
+          .update({ document_url: filePath, updated_at: new Date().toISOString() })
+          .eq('id', savedVaxId)
+        if (updateErr) throw updateErr
+
+        // Best-effort cleanup of the old file if this was a replace
+        if (originalDocUrl && originalDocUrl !== filePath) {
+          await supabase.storage.from('vax-certs').remove([originalDocUrl])
+        }
+      } else if (editingVaxId && originalDocUrl && existingCertUrl === null) {
+        // User cleared existing cert without picking a new one → remove it
+        await supabase.storage.from('vax-certs').remove([originalDocUrl])
+        await supabase
+          .from('vaccinations')
+          .update({ document_url: null, updated_at: new Date().toISOString() })
+          .eq('id', editingVaxId)
+      }
+    } catch (uploadError) {
+      alert('Vaccination saved, but cert photo upload failed: ' + (uploadError.message || uploadError))
+    } finally {
+      setUploadingCert(false)
+    }
+
+    setShowVaxModal(false)
+    setEditingVaxId(null)
+    setPendingCertFile(null)
+    setExistingCertUrl(null)
+    fetchVaccinations()
+    setSavingVax(false)
+  }
+
+  async function handleDeleteVaccination(vaxId) {
+    if (!confirm('Delete this vaccination record? This cannot be undone.')) return
+    // Find the record so we can clean up its cert photo from storage too
+    var record = vaccinations.find(function(v) { return v.id === vaxId })
+    var { error } = await supabase.from('vaccinations').delete().eq('id', vaxId)
+    if (error) {
+      alert('Error deleting: ' + error.message)
+    } else {
+      if (record && record.document_url) {
+        // Best-effort cert cleanup (ignore errors — record is already gone)
+        await supabase.storage.from('vax-certs').remove([record.document_url])
+      }
+      fetchVaccinations()
+    }
+  }
+
+  // Cert photo viewer: bucket is private, so we generate a short-lived signed URL on click.
+  async function viewCertificate(path) {
+    if (!path) return
+    var { data, error } = await supabase.storage
+      .from('vax-certs')
+      .createSignedUrl(path, 60 * 60) // 1 hour
+    if (error || !data) {
+      alert('Could not open certificate: ' + (error && error.message ? error.message : 'unknown error'))
+      return
+    }
+    window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
+  }
+
   function formatDate(d) {
     if (!d) return '—'
     var parts = d.split('-')
@@ -201,7 +434,39 @@ export default function PetDetail() {
     return '$' + Number(amount).toFixed(2)
   }
 
+  function daysUntil(dateStr) {
+    if (!dateStr) return null
+    var exp = new Date(dateStr)
+    var today = new Date()
+    today.setHours(0, 0, 0, 0)
+    exp.setHours(0, 0, 0, 0)
+    return Math.floor((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+  }
+
+  function getVaxRecordStatus(vax) {
+    var d = daysUntil(vax.expiry_date)
+    if (d === null) return 'unknown'
+    if (d < 0) return 'expired'
+    if (d <= 30) return 'due_soon'
+    return 'current'
+  }
+
+  // Overall pet vax status — computed from the vaccinations table if we have any
+  // records, otherwise falls back to the old pet-level vaccination_expiry column.
   function getVaxStatus() {
+    if (vaccinations && vaccinations.length > 0) {
+      var hasExpired = false
+      var hasDueSoon = false
+      for (var i = 0; i < vaccinations.length; i++) {
+        var s = getVaxRecordStatus(vaccinations[i])
+        if (s === 'expired') hasExpired = true
+        if (s === 'due_soon') hasDueSoon = true
+      }
+      if (hasExpired) return 'expired'
+      if (hasDueSoon) return 'due_soon'
+      return 'current'
+    }
+    // Fallback — legacy pet-level vaccination_expiry
     if (!pet || !pet.vaccination_expiry) return 'unknown'
     var exp = new Date(pet.vaccination_expiry)
     var now = new Date()
@@ -485,16 +750,88 @@ export default function PetDetail() {
                   {vaxStatus === 'unknown' && '❓'}
                 </div>
                 <div className="pd-vax-status-info">
-                  <h3>{vaxStatus === 'current' ? 'Vaccinations Current' : vaxStatus === 'due_soon' ? 'Vaccinations Due Soon' : vaxStatus === 'expired' ? 'Vaccinations Expired' : 'Vaccination Status Unknown'}</h3>
-                  {pet.vaccination_expiry ? (
-                    <p>Expiry date: {formatDate(pet.vaccination_expiry)}</p>
-                  ) : (
-                    <p>No vaccination expiry date on file</p>
-                  )}
+                  <h3>
+                    {vaxStatus === 'current' && 'Vaccinations Current'}
+                    {vaxStatus === 'due_soon' && 'Vaccinations Due Soon'}
+                    {vaxStatus === 'expired' && 'Vaccinations Expired'}
+                    {vaxStatus === 'unknown' && 'No Vaccination Records'}
+                  </h3>
+                  <p>
+                    {vaccinations.length > 0
+                      ? vaccinations.length + ' vaccine record' + (vaccinations.length !== 1 ? 's' : '') + ' on file'
+                      : 'Add individual shots below (Rabies, DHPP, Bordetella, etc.)'}
+                  </p>
                 </div>
               </div>
             </div>
-            <div className="pd-vax-vet">
+
+            <div className="pd-vax-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '16px 0' }}>
+              <h3 className="pd-card-title" style={{ margin: 0 }}>💉 Vaccine Records</h3>
+              <button className="pd-edit-btn" onClick={openAddVaxModal}>+ Add Vaccination</button>
+            </div>
+
+            {loadingTab ? (
+              <div className="pd-tab-loading">Loading vaccinations...</div>
+            ) : vaccinations.length === 0 ? (
+              <div className="pd-empty">
+                <div className="pd-empty-icon">💉</div>
+                <h3>No vaccine records yet</h3>
+                <p>Add Rabies, DHPP, Bordetella, and any other shots {pet.name} has received.</p>
+                <button className="pd-edit-btn" onClick={openAddVaxModal} style={{ marginTop: '12px' }}>+ Add First Vaccination</button>
+              </div>
+            ) : (
+              <div className="pd-vax-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {vaccinations.map(function(v) {
+                  var info = getVaxTypeInfo(v.vaccine_type)
+                  var status = getVaxRecordStatus(v)
+                  var days = daysUntil(v.expiry_date)
+                  var statusLabel = status === 'current' ? '✅ Current'
+                                  : status === 'due_soon' ? '⚠️ Due in ' + days + ' day' + (days !== 1 ? 's' : '')
+                                  : status === 'expired' ? '❌ Expired ' + Math.abs(days) + ' day' + (Math.abs(days) !== 1 ? 's' : '') + ' ago'
+                                  : '❓ Unknown'
+                  return (
+                    <div key={v.id} className={'pd-vax-record pd-vax-card-' + status} style={{ padding: '14px 16px', borderRadius: '10px', border: '1px solid #e5e7eb', background: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
+                      <div style={{ flex: '1 1 240px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                          <span style={{ fontSize: '20px' }}>{info.emoji}</span>
+                          <strong style={{ fontSize: '16px' }}>
+                            {v.vaccine_type === 'other' && v.vaccine_label ? v.vaccine_label : info.label}
+                          </strong>
+                          <span className={'pd-vax-badge pd-vax-' + status} style={{ marginLeft: '8px' }}>{statusLabel}</span>
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#4b5563', display: 'flex', flexWrap: 'wrap', gap: '14px' }}>
+                          <span><strong>Expires:</strong> {formatDate(v.expiry_date)}</span>
+                          {v.date_administered && <span><strong>Given:</strong> {formatDate(v.date_administered)}</span>}
+                          {v.vet_clinic && <span><strong>Vet:</strong> {v.vet_clinic}</span>}
+                        </div>
+                        {v.notes && (
+                          <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '6px', fontStyle: 'italic' }}>
+                            📝 {v.notes}
+                          </div>
+                        )}
+                        {v.document_url && (
+                          <div style={{ marginTop: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={function() { viewCertificate(v.document_url) }}
+                              style={{ fontSize: '13px', color: '#2563eb', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textDecoration: 'underline' }}
+                            >
+                              📎 View certificate
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                        <button className="pd-edit-btn" onClick={function() { openEditVaxModal(v) }} style={{ padding: '6px 10px', fontSize: '13px' }}>✏️ Edit</button>
+                        <button className="pd-edit-btn" onClick={function() { handleDeleteVaccination(v.id) }} style={{ padding: '6px 10px', fontSize: '13px', background: '#fee2e2', color: '#991b1b' }}>🗑 Delete</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            <div className="pd-vax-vet" style={{ marginTop: '24px' }}>
               <h3 className="pd-card-title">🏥 Vet Information</h3>
               <div className="pd-info-rows">
                 <div className="pd-info-row">
@@ -507,8 +844,9 @@ export default function PetDetail() {
                 </div>
               </div>
             </div>
-            <div className="pd-vax-note">
-              💡 Individual vaccine records (Rabies, DHPP, Bordetella, etc.) will be tracked here once the vaccination table is built. For now, the overall vaccination expiry is tracked on the pet's profile.
+
+            <div className="pd-vax-note" style={{ marginTop: '16px' }}>
+              💡 Bordetella is a live vaccine — most boarding shops require it was given at least 7 days before boarding. That's why the <strong>date administered</strong> is required for bordetella.
             </div>
           </div>
         )}
@@ -631,14 +969,14 @@ export default function PetDetail() {
 
               <div className="sl-form-row">
                 <div className="sl-form-group">
-                  <label className="sl-label">Weight (lbs)</label>
-                  <input type="number" className="sl-input" value={editForm.weight || ''}
+                  <label className="sl-label">Weight (lbs) *</label>
+                  <input type="number" className="sl-input" value={editForm.weight || ''} required min="0" step="0.1" placeholder="e.g. 45"
                     onChange={function(e) { setEditForm(Object.assign({}, editForm, { weight: e.target.value })) }}
                   />
                 </div>
                 <div className="sl-form-group">
-                  <label className="sl-label">Age</label>
-                  <input type="text" className="sl-input" value={editForm.age || ''} placeholder="e.g. 3 years"
+                  <label className="sl-label">Age *</label>
+                  <input type="text" className="sl-input" value={editForm.age || ''} required placeholder="e.g. 3 years"
                     onChange={function(e) { setEditForm(Object.assign({}, editForm, { age: e.target.value })) }}
                   />
                 </div>
@@ -734,6 +1072,169 @@ export default function PetDetail() {
                 <button type="button" className="sl-btn-cancel" onClick={function() { setEditing(false); setEditForm(pet) }}>Cancel</button>
                 <button type="submit" className="sl-btn-save" disabled={saving}>
                   {saving ? 'Saving...' : '💾 Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add / Edit Vaccination Modal */}
+      {showVaxModal && (
+        <div className="sl-modal-overlay" onClick={function(e) { if (e.target.className === 'sl-modal-overlay') setShowVaxModal(false) }}>
+          <div className="sl-modal" style={{ maxWidth: '560px' }}>
+            <div className="sl-modal-header">
+              <h2>{editingVaxId ? '✏️ Edit Vaccination' : '💉 Add Vaccination'}</h2>
+              <button className="sl-modal-close" onClick={function() { setShowVaxModal(false) }}>✕</button>
+            </div>
+
+            <form onSubmit={handleSaveVaccination} className="sl-form">
+              <div className="sl-form-group">
+                <label className="sl-label">Vaccine Type *</label>
+                <select
+                  className="sl-input"
+                  value={vaxForm.vaccine_type}
+                  onChange={function(e) { setVaxForm(Object.assign({}, vaxForm, { vaccine_type: e.target.value })) }}
+                  required
+                >
+                  {VACCINE_TYPES.map(function(vt) {
+                    var tag = vt.species === 'dog' ? ' (dog)' : vt.species === 'cat' ? ' (cat)' : ''
+                    return (
+                      <option key={vt.value} value={vt.value}>
+                        {vt.emoji} {vt.label}{tag}
+                      </option>
+                    )
+                  })}
+                </select>
+              </div>
+
+              {vaxForm.vaccine_type === 'other' && (
+                <div className="sl-form-group">
+                  <label className="sl-label">Vaccine Name *</label>
+                  <input
+                    type="text"
+                    className="sl-input"
+                    value={vaxForm.vaccine_label}
+                    onChange={function(e) { setVaxForm(Object.assign({}, vaxForm, { vaccine_label: e.target.value })) }}
+                    placeholder="e.g. Giardia, Rattlesnake"
+                    required
+                  />
+                </div>
+              )}
+
+              <div className="sl-form-row">
+                <div className="sl-form-group">
+                  <label className="sl-label">Expiry Date *</label>
+                  <input
+                    type="date"
+                    className="sl-input"
+                    value={vaxForm.expiry_date}
+                    onChange={function(e) { setVaxForm(Object.assign({}, vaxForm, { expiry_date: e.target.value })) }}
+                    required
+                  />
+                </div>
+                <div className="sl-form-group">
+                  <label className="sl-label">
+                    Date Administered
+                    {vaxForm.vaccine_type === 'bordetella' && <span style={{ color: '#dc2626' }}> *</span>}
+                  </label>
+                  <input
+                    type="date"
+                    className="sl-input"
+                    value={vaxForm.date_administered}
+                    onChange={function(e) { setVaxForm(Object.assign({}, vaxForm, { date_administered: e.target.value })) }}
+                    required={vaxForm.vaccine_type === 'bordetella'}
+                  />
+                </div>
+              </div>
+
+              {vaxForm.vaccine_type === 'bordetella' && (
+                <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', padding: '10px 12px', borderRadius: '8px', fontSize: '13px', color: '#92400e', marginBottom: '12px' }}>
+                  ⚠️ <strong>Bordetella is a live vaccine.</strong> Most boarding shops require it was given at least 7 days before boarding. Date administered is required so we can enforce the wait window.
+                </div>
+              )}
+
+              <div className="sl-form-group">
+                <label className="sl-label">Vet Clinic</label>
+                <input
+                  type="text"
+                  className="sl-input"
+                  value={vaxForm.vet_clinic}
+                  onChange={function(e) { setVaxForm(Object.assign({}, vaxForm, { vet_clinic: e.target.value })) }}
+                  placeholder="e.g. Banfield, All Pets Vet"
+                />
+              </div>
+
+              <div className="sl-form-group">
+                <label className="sl-label">Notes</label>
+                <textarea
+                  className="sl-input"
+                  rows="2"
+                  value={vaxForm.notes}
+                  onChange={function(e) { setVaxForm(Object.assign({}, vaxForm, { notes: e.target.value })) }}
+                  placeholder='e.g. "1-year rabies" vs "3-year rabies"'
+                />
+              </div>
+
+              <div className="sl-form-group">
+                <label className="sl-label">📎 Certificate Photo (optional)</label>
+                {pendingCertFile ? (
+                  <div style={{ fontSize: '13px', padding: '10px 12px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: '#065f46', wordBreak: 'break-all' }}>📷 {pendingCertFile.name}</span>
+                    <button
+                      type="button"
+                      onClick={function() { setPendingCertFile(null) }}
+                      style={{ background: 'transparent', border: 'none', color: '#065f46', cursor: 'pointer', fontSize: '13px', textDecoration: 'underline', flexShrink: 0 }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : existingCertUrl ? (
+                  <div style={{ fontSize: '13px', padding: '10px 12px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ color: '#1e40af' }}>📄 Certificate on file</span>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        type="button"
+                        onClick={function() { viewCertificate(existingCertUrl) }}
+                        style={{ background: 'transparent', border: 'none', color: '#1e40af', cursor: 'pointer', fontSize: '13px', textDecoration: 'underline' }}
+                      >
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={function() {
+                          if (confirm('Remove the current certificate photo? It will be deleted when you save.')) {
+                            setExistingCertUrl(null)
+                          }
+                        }}
+                        style={{ background: 'transparent', border: 'none', color: '#b91c1c', cursor: 'pointer', fontSize: '13px', textDecoration: 'underline' }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf"
+                      onChange={function(e) {
+                        var f = e.target.files && e.target.files[0]
+                        if (f) setPendingCertFile(f)
+                      }}
+                      style={{ fontSize: '13px' }}
+                    />
+                    <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+                      JPG, PNG, WebP, HEIC, or PDF. 10 MB max.
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="sl-form-actions">
+                <button type="button" className="sl-btn-cancel" onClick={function() { setShowVaxModal(false) }}>Cancel</button>
+                <button type="submit" className="sl-btn-save" disabled={savingVax || uploadingCert}>
+                  {uploadingCert ? 'Uploading photo...' : savingVax ? 'Saving...' : (editingVaxId ? '💾 Save Changes' : '💉 Add Vaccination')}
                 </button>
               </div>
             </form>
