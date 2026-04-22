@@ -133,6 +133,20 @@ export default function Signup() {
         <p className="switch-auth">
           Already have an account? <Link to="/login">Sign In</Link>
         </p>
+        <p style={{
+          marginTop: '24px',
+          fontSize: '12px',
+          color: '#888',
+          textAlign: 'center',
+          lineHeight: '1.5'
+        }}>
+          By signing up, you agree to our{' '}
+          <Link to="/terms" style={{ color: '#888', textDecoration: 'underline' }}>Terms of Service</Link>
+          {' '}and{' '}
+          <Link to="/privacy" style={{ color: '#888', textDecoration: 'underline' }}>Privacy Policy</Link>.
+          <br />
+          © 2026 Pamperedlittlepaws LLC
+        </p>
       </div>
     </div>
   )

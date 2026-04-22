@@ -452,6 +452,9 @@ export default function Plans() {
           <span style={{ margin: '0 8px' }}>·</span>
           <a href="mailto:nicole@trypetpro.com" style={footerLink}>Contact</a>
         </div>
+        <div style={{ marginTop: '16px', fontSize: '12px', color: '#6b7280' }}>
+          © 2026 Pamperedlittlepaws LLC. All rights reserved.
+        </div>
       </div>
     </div>
   )
