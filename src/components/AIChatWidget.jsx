@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { checkAICap, logAIUsage } from '../lib/aiUsage'
 
 export default function AIChatWidget() {
   const [isOpen, setIsOpen] = useState(false)
@@ -277,6 +278,18 @@ export default function AIChatWidget() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
 
+      // Monthly AI cap check — bail out BEFORE hitting the edge function
+      // if this groomer has maxed out their tier's monthly action cap.
+      const capStatus = await checkAICap()
+      if (!capStatus.allowed) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          text: capStatus.message || 'You\'ve hit your monthly AI limit. Upgrade your plan to keep using AI features this month.'
+        }])
+        setSending(false)
+        return
+      }
+
       // Build conversation history (last 10 exchanges)
       const history = []
       const allMessages = [...messages, { role: 'user', text: userMessage }]
@@ -312,6 +325,8 @@ export default function AIChatWidget() {
         setMessages(prev => [...prev, { role: 'assistant', text: 'Sorry, I had trouble with that. Try again!' }])
       } else {
         setMessages(prev => [...prev, { role: 'assistant', text: data.text }])
+        // Successful AI response — count this against their monthly cap
+        logAIUsage('chat_widget')
       }
     } catch (err) {
       console.error('Chat failed:', err)

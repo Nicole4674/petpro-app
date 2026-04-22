@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { checkAICap, logAIUsage } from '../lib/aiUsage'
 
 export default function ClientChatWidget() {
   const [isOpen, setIsOpen] = useState(false)
@@ -9,6 +10,9 @@ export default function ClientChatWidget() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [enabled, setEnabled] = useState(null) // null = loading, true/false = known
+  // Store this client's groomer_id so AI usage is capped against the
+  // SHOP's monthly cap (clients don't have a tier of their own).
+  const [groomerId, setGroomerId] = useState(null)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -138,6 +142,8 @@ export default function ClientChatWidget() {
         setEnabled(false)
         return
       }
+      // Store it so sendMessage() can check + log against the shop's cap
+      setGroomerId(clientRow.groomer_id)
 
       // Layer 1 — MASTER toggle (Classic Mode). If OFF, hide immediately.
       var { data: shop } = await supabase
@@ -247,6 +253,20 @@ export default function ClientChatWidget() {
     }])
 
     try {
+      // Monthly AI cap check — count this against the SHOP's cap, not the client's.
+      // (The client has no tier; we look up their groomer on mount and stash the id.)
+      if (groomerId) {
+        const capStatus = await checkAICap(groomerId)
+        if (!capStatus.allowed) {
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            text: 'Your shop\'s AI assistant is temporarily unavailable for this month. Please message your groomer directly to book.'
+          }])
+          setSending(false)
+          return
+        }
+      }
+
       // Build conversation history (last 10 exchanges, in-memory only)
       const history = []
       const allMessages = [...messages, { role: 'user', text: userMessage }]
@@ -273,6 +293,10 @@ export default function ClientChatWidget() {
         setMessages(prev => [...prev, { role: 'assistant', text: 'Sorry, I had trouble with that. Try again or message your groomer directly.' }])
       } else {
         setMessages(prev => [...prev, { role: 'assistant', text: data.text }])
+        // Successful AI response — count this against the SHOP's monthly cap
+        if (groomerId) {
+          logAIUsage('client_chat_widget', 0, groomerId)
+        }
       }
     } catch (err) {
       console.error('Client chat failed:', err)

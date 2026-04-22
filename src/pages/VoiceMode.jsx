@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { checkAICap, logAIUsage } from '../lib/aiUsage'
 
 export default function VoiceMode() {
     const [status, setStatus] = useState('idle') // idle, listening, processing, speaking
@@ -487,6 +488,16 @@ export default function VoiceMode() {
         try {
             var { data: { user } } = await supabase.auth.getUser()
 
+            // Monthly AI cap check — voice is expensive (Claude + ElevenLabs per turn),
+            // so bail out BEFORE invoking anything if the groomer is over their cap.
+            var capStatus = await checkAICap()
+            if (!capStatus.allowed) {
+                setError('Monthly AI limit reached. Upgrade your plan to keep using voice booking.')
+                setStatus('idle')
+                processingRef.current = false
+                return
+            }
+
             // Build conversation history (last 5 exchanges for voice)
             var recentHistory = []
             var h = historyRef.current
@@ -518,6 +529,11 @@ export default function VoiceMode() {
 
             var aiResponse = data.text || 'Done!'
             setResponse(aiResponse)
+
+            // Successful voice turn — count this against the groomer's monthly cap.
+            // Logged as 'voice_booking' so we can slice voice usage separately
+            // from chat_widget usage in analytics later.
+            logAIUsage('voice_booking')
 
             // Add to history
             setHistory(function (prev) {
