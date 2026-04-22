@@ -11,6 +11,7 @@
 // ====================================================================
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { supabase } from '../lib/supabase'
 
 // ─── Tier data ────────────────────────────────────────────────────
 var TIERS = [
@@ -109,6 +110,16 @@ var TIERS = [
   },
 ]
 
+// ─── Stripe sandbox payment links (tier slug → URL) ───────────────
+// When we switch to LIVE mode, replace these 4 URLs with the live ones.
+// Enterprise has no link — it's Contact Sales only.
+var PAYMENT_LINKS = {
+  basic:    'https://buy.stripe.com/test_4gMdRa98G7AzgMQ5U59MY00',
+  pro:      'https://buy.stripe.com/test_28E7sMgB8f31cwA4Q19MY01',
+  pro_plus: 'https://buy.stripe.com/test_7sY6oI1GedYX548gyJ9MY02',
+  growing:  'https://buy.stripe.com/test_bJe9AUet0bQP68ceqB9MY03',
+}
+
 // ─── Comparison table rows ────────────────────────────────────────
 // Tier order for the table columns: Basic, Pro, Pro+, Growing, Enterprise
 // Each row's `included` array matches that order. "✓" = yes, "—" = no, string = custom value
@@ -200,12 +211,27 @@ export default function Plans() {
   var navigate = useNavigate()
   var [openFaq, setOpenFaq] = useState(null)
 
-  function handleStartTrial(tierSlug) {
+  async function handleStartTrial(tierSlug) {
     if (tierSlug === 'enterprise') {
       // Enterprise = quote only → route to contact
       window.location.href = 'mailto:nicole@trypetpro.com?subject=Enterprise%20plan%20inquiry'
       return
     }
+    // If already logged in, send them straight to Stripe with their UUID
+    // attached so the webhook can match the Stripe subscription back to
+    // their groomers row.
+    var { data: { session } } = await supabase.auth.getSession()
+    if (session && session.user) {
+      var paymentUrl = PAYMENT_LINKS[tierSlug]
+      if (!paymentUrl) {
+        navigate('/signup?tier=' + tierSlug)
+        return
+      }
+      window.location.href = paymentUrl + '?client_reference_id=' + session.user.id
+      return
+    }
+    // Not logged in → send to signup, Signup.jsx will forward them to Stripe
+    // after account creation using the ?tier= param.
     navigate('/signup?tier=' + tierSlug)
   }
 

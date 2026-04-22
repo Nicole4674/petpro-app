@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PetPro — horizontal lockup. Paw + wordmark. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 400" width="1400" height="400">
+  <title>PetPro</title>
+  <g fill="#6C2BD9">
+    <!-- Pawmark (scaled + translated into left third) -->
+    <g transform="translate(60,40) scale(0.625)">
+      <ellipse cx="256" cy="369" rx="169" ry="113"/>
+      <ellipse cx="256" cy="338" rx="138" ry="77"/>
+      <ellipse cx="189" cy="113" rx="49" ry="64"/>
+      <ellipse cx="323" cy="113" rx="49" ry="64"/>
+      <ellipse cx="97"  cy="154" rx="50" ry="66"/>
+      <ellipse cx="415" cy="154" rx="50" ry="66"/>
+    </g>
+    <!-- Wordmark.  Font must be embedded/loaded by host; fallback: system sans. -->
+    <text x="480" y="265"
+          font-family="Outfit, 'Inter', 'Helvetica Neue', Arial, sans-serif"
+          font-weight="700"
+          font-size="210"
+          fill="#6C2BD9">PetPro</text>
+  </g>
+</svg>

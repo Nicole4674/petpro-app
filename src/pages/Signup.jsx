@@ -1,8 +1,19 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
+
+// Stripe Payment Links (sandbox). Kept in sync with Plans.jsx.
+// When we go LIVE, swap these 4 URLs for the live-mode links.
+const PAYMENT_LINKS = {
+  basic:    'https://buy.stripe.com/test_4gMdRa98G7AzgMQ5U59MY00',
+  pro:      'https://buy.stripe.com/test_28E7sMgB8f31cwA4Q19MY01',
+  pro_plus: 'https://buy.stripe.com/test_7sY6oI1GedYX548gyJ9MY02',
+  growing:  'https://buy.stripe.com/test_bJe9AUet0bQP68ceqB9MY03',
+}
 
 export default function Signup() {
+  const [searchParams] = useSearchParams()
+  const tierFromUrl = searchParams.get('tier')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [businessName, setBusinessName] = useState('')
@@ -47,6 +58,15 @@ export default function Signup() {
 
       if (profileError) {
         console.error('Profile creation error:', profileError)
+      }
+
+      // If they came from a pricing tile (?tier=pro etc.), forward them
+      // straight to Stripe checkout with their UUID attached. The webhook
+      // will match the payment back to this groomer row via client_reference_id.
+      if (tierFromUrl && PAYMENT_LINKS[tierFromUrl]) {
+        window.location.href =
+          PAYMENT_LINKS[tierFromUrl] + '?client_reference_id=' + data.user.id
+        return
       }
     }
 
