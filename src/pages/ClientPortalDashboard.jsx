@@ -70,6 +70,11 @@ export default function ClientPortalDashboard() {
   var [upcomingAppts, setUpcomingAppts] = useState([])
   var [upcomingBoarding, setUpcomingBoarding] = useState([])
 
+  // Which appointment IDs already have a pending waitlist entry (so we show
+  // "On waitlist" instead of the Notify button)
+  var [waitlistedApptIds, setWaitlistedApptIds] = useState([])
+  var [waitlistSavingId, setWaitlistSavingId] = useState(null)
+
   // History tabs state
   var [pastGrooming, setPastGrooming] = useState([])
   var [pastBoarding, setPastBoarding] = useState([])
@@ -141,6 +146,17 @@ export default function ClientPortalDashboard() {
       })
       setUpcomingAppts(openAppts)
 
+      // 5b. Load waitlist entries this client already has pending,
+      // so we can show "On waitlist" on those appointment cards.
+      var { data: wlRows } = await supabase
+        .from('grooming_waitlist')
+        .select('appointment_id')
+        .eq('client_id', clientData.id)
+        .in('status', ['waiting', 'notified'])
+        .not('appointment_id', 'is', null)
+
+      setWaitlistedApptIds(((wlRows || []).map(function (r) { return r.appointment_id })).filter(Boolean))
+
       // 6. Load upcoming boarding reservations (end date today or later, not cancelled)
       var todayStr = new Date().toISOString().split('T')[0]
       var { data: boardingData } = await supabase
@@ -204,6 +220,48 @@ export default function ClientPortalDashboard() {
       setError('Could not load your profile. Please try again.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Client self-serve: add an existing appointment to the waitlist
+  // ("Notify me if an earlier slot opens up").
+  async function addAppointmentToWaitlist(appt) {
+    if (!appt || !appt.id || !client) return
+    if (waitlistSavingId) return
+    setWaitlistSavingId(appt.id)
+    try {
+      // Position: put at end of this groomer's waiting list
+      var { data: existing } = await supabase
+        .from('grooming_waitlist')
+        .select('position')
+        .eq('groomer_id', client.groomer_id)
+        .eq('status', 'waiting')
+      var nextPos = ((existing || []).length) + 1
+
+      var record = {
+        groomer_id: client.groomer_id,
+        client_id: client.id,
+        pet_id: appt.pet_id,
+        service_id: appt.service_id || null,
+        appointment_id: appt.id,
+        position: nextPos,
+        status: 'waiting',
+        preferred_days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+        flexible_dates: true,
+        any_time: true,
+        notes: 'Client requested earlier slot from portal'
+      }
+
+      var { error } = await supabase.from('grooming_waitlist').insert([record])
+      if (error) {
+        alert('Could not add to waitlist: ' + error.message)
+      } else {
+        setWaitlistedApptIds(waitlistedApptIds.concat([appt.id]))
+      }
+    } catch (e) {
+      alert('Could not add to waitlist — please try again.')
+    } finally {
+      setWaitlistSavingId(null)
     }
   }
 
@@ -913,6 +971,43 @@ export default function ClientPortalDashboard() {
                               </div>
                               {appt.service_notes && (
                                 <div className="cp-history-notes">📝 {appt.service_notes}</div>
+                              )}
+                              {/* Waitlist: notify me if an earlier slot opens */}
+                              {!isOverdue && (
+                                waitlistedApptIds.indexOf(appt.id) >= 0 ? (
+                                  <div style={{
+                                    marginTop: 10,
+                                    padding: '8px 12px',
+                                    background: '#ecfdf5',
+                                    border: '1px solid #a7f3d0',
+                                    borderRadius: 8,
+                                    color: '#065f46',
+                                    fontSize: 13,
+                                    fontWeight: 600
+                                  }}>
+                                    ✓ On waitlist — we'll text you if an earlier slot opens
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={function () { addAppointmentToWaitlist(appt) }}
+                                    disabled={waitlistSavingId === appt.id}
+                                    style={{
+                                      marginTop: 10,
+                                      padding: '8px 14px',
+                                      background: '#7c3aed',
+                                      color: '#fff',
+                                      border: 'none',
+                                      borderRadius: 8,
+                                      fontSize: 13,
+                                      fontWeight: 600,
+                                      cursor: waitlistSavingId === appt.id ? 'wait' : 'pointer',
+                                      opacity: waitlistSavingId === appt.id ? 0.7 : 1
+                                    }}
+                                  >
+                                    {waitlistSavingId === appt.id ? 'Adding…' : '🔔 Notify me if earlier slot opens'}
+                                  </button>
+                                )
                               )}
                             </div>
                           </div>
