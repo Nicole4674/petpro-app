@@ -34,6 +34,11 @@ export default function ShopSettings() {
   var [groomerAiEnabled, setGroomerAiEnabled] = useState(true)
   var [clientAiBookingEnabled, setClientAiBookingEnabled] = useState(true)
 
+  // One-click migration: flip all existing clients from "New" to "Existing"
+  var [markingExisting, setMarkingExisting] = useState(false)
+  var [markedCount, setMarkedCount] = useState(null)
+  var [markError, setMarkError] = useState('')
+
   useEffect(function () {
     loadSettings()
   }, [])
@@ -183,6 +188,43 @@ export default function ShopSettings() {
     }
   }
 
+  // One-click migration — flips every existing client under this groomer
+  // from is_first_time=true to is_first_time=false. Anyone added after this
+  // still gets is_first_time=true on creation (AddClient.jsx default).
+  async function handleMarkAllExisting() {
+    var ok = window.confirm(
+      'Mark ALL current clients in your system as existing (not new)?\n\n' +
+      'This removes the "New Client" badge from everyone already added. ' +
+      'Any clients you add AFTER this will still be flagged as new.\n\n' +
+      'Do this BEFORE handing out client portal logins to existing customers.'
+    )
+    if (!ok) return
+
+    setMarkingExisting(true)
+    setMarkError('')
+    setMarkedCount(null)
+    try {
+      var { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not signed in')
+
+      // Flip only rows that are still flagged new, owned by this groomer
+      var { data, error: updErr } = await supabase
+        .from('clients')
+        .update({ is_first_time: false })
+        .eq('groomer_id', user.id)
+        .eq('is_first_time', true)
+        .select('id')
+
+      if (updErr) throw updErr
+      setMarkedCount((data || []).length)
+    } catch (err) {
+      console.error('Mark existing failed:', err)
+      setMarkError('Could not update clients: ' + err.message)
+    } finally {
+      setMarkingExisting(false)
+    }
+  }
+
   if (loading) {
     return (
       <div style={{ padding: '40px', textAlign: 'center' }}>
@@ -269,6 +311,49 @@ export default function ShopSettings() {
           Get pinged when a client books, sends a message, or PetPro AI flags an appointment — even when PetPro isn't open. Turn this on in every browser you use.
         </p>
         <EnableNotifications variant="settings" userType="groomer" />
+      </div>
+
+      {/* Client Migration — one-click flip all current clients from "New" to "Existing" */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
+        <div style={{ fontWeight: '700', fontSize: '14px', color: '#374151', marginBottom: '4px' }}>
+          📇 Client Migration
+        </div>
+        <p style={{ margin: '0 0 12px', fontSize: '13px', color: '#6b7280', lineHeight: '1.5' }}>
+          Switching from another system? Click below to mark <strong>all clients currently in PetPro</strong> as existing.
+          This removes the "New Client" badge for everyone already in your system. <strong>Anyone added AFTER this click</strong> will still be flagged as new.
+        </p>
+        <p style={{ margin: '0 0 12px', fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>
+          Tip: click this BEFORE you hand out client portal logins to existing customers.
+        </p>
+
+        <button
+          type="button"
+          onClick={handleMarkAllExisting}
+          disabled={markingExisting}
+          style={{
+            padding: '10px 18px',
+            background: markingExisting ? '#9ca3af' : '#7c3aed',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '8px',
+            fontWeight: '700',
+            fontSize: '14px',
+            cursor: markingExisting ? 'wait' : 'pointer'
+          }}
+        >
+          {markingExisting ? 'Marking…' : '✓ Mark all current clients as existing'}
+        </button>
+
+        {markedCount !== null && !markError && (
+          <div style={{ marginTop: '12px', padding: '10px 14px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', fontSize: '13px', color: '#047857', fontWeight: '600' }}>
+            ✓ Done — {markedCount} client{markedCount === 1 ? '' : 's'} marked as existing.
+          </div>
+        )}
+        {markError && (
+          <div style={{ marginTop: '12px', padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', fontSize: '13px', color: '#b91c1c', fontWeight: '600' }}>
+            {markError}
+          </div>
+        )}
       </div>
 
       {/* AI Features — tier 1 / tier 2 master toggles */}

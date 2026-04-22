@@ -9,6 +9,7 @@ import AddClient from './pages/AddClient'
 import ClientDetail from './pages/ClientDetail'
 import AddPet from './pages/AddPet'
 import Pricing from './pages/Pricing'
+import Plans from './pages/Plans'
 import Calendar from './pages/Calendar'
 import FlaggedBookings from './pages/FlaggedBookings'
 import VoiceMode from './pages/VoiceMode'
@@ -53,7 +54,7 @@ function AppLayout({ children }) {
 
     // Don't show sidebar on login/signup or public legal pages
     var isAuthPage = location.pathname === '/login' || location.pathname === '/signup'
-    var isPublicPage = location.pathname === '/privacy' || location.pathname === '/terms' || location.pathname === '/portal/signup' || location.pathname === '/portal/login'
+    var isPublicPage = location.pathname === '/privacy' || location.pathname === '/terms' || location.pathname === '/portal/signup' || location.pathname === '/portal/login' || location.pathname === '/plans'
     var isPortalPage = location.pathname.indexOf('/portal') === 0
     if (isAuthPage || isPublicPage) {
         return <>{children}</>
@@ -109,6 +110,7 @@ function App() {
                     <Route path="/signup" element={!session ? <Signup /> : <Navigate to="/" />} />
                     <Route path="/privacy" element={<Privacy />} />
                     <Route path="/terms" element={<Terms />} />
+                    <Route path="/plans" element={<Plans />} />
                     <Route path="/portal/signup" element={<ClientSignup />} />
                     <Route path="/portal/login" element={<ClientLogin />} />
                     <Route path="/portal" element={session ? <ClientPortalDashboard /> : <Navigate to="/portal/login" />} />
