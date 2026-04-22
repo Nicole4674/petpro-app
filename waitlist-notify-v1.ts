@@ -146,8 +146,9 @@ async function askHaikuToPick(slotInfo, candidates, filterRules, shopName) {
     '',
     'RULES TO APPLY (in order):',
     '1. HARD FILTER: Apply the groomer\'s filter rules exactly. If a candidate breaks ANY rule, exclude them. No exceptions, no "close enough".',
-    '2. SERVICE FIT: Of the remaining candidates, rank by how well their requested service matches the slot\'s service. A perfect match wins. "Any service" is a neutral score.',
-    '3. TIE-BREAK: If multiple candidates tie, pick the one highest on the waitlist (lowest position number).',
+    '2. TIED APPOINTMENT PRIORITY: Candidates with "tied_to_existing_appointment" are existing clients asking to MOVE an already-booked appointment earlier. They are always preferred over standalone waitlist entries when all other factors are equal.',
+    '3. SERVICE FIT: Of the remaining candidates, rank by how well their requested service matches the slot\'s service. A perfect match wins. "Any service" is a neutral score.',
+    '4. TIE-BREAK: If multiple candidates tie, pick the one highest on the waitlist (lowest position number).',
     '',
     'OUTPUT FORMAT — return ONLY this JSON object, no other text, no markdown code fences:',
     '{',
@@ -320,7 +321,7 @@ Deno.serve(async function (req) {
     // 3. Pull waitlist candidates matching the day
     var { data: allCandidates, error: wlErr } = await supabaseAdmin
       .from('grooming_waitlist')
-      .select('id, client_id, pet_id, service_id, position, preferred_days, preferred_time_start, preferred_time_end, any_time, notes, clients(first_name, last_name, phone, user_id), pets(name, breed, weight), services:service_id(service_name, price)')
+      .select('id, client_id, pet_id, service_id, appointment_id, position, preferred_days, preferred_time_start, preferred_time_end, any_time, notes, clients(first_name, last_name, phone, user_id), pets(name, breed, weight), services:service_id(service_name, price, time_block_minutes), linked_appt:appointment_id(id, service_id, appointment_date, start_time, end_time, linked_service:service_id(service_name, time_block_minutes))')
       .eq('groomer_id', groomerId)
       .eq('status', 'waiting')
       .contains('preferred_days', [slotDay])
@@ -341,6 +342,40 @@ Deno.serve(async function (req) {
       )
     }
 
+    // 3b. Service + duration guard for appointment-tied entries
+    // ("move me earlier" flow — only offer a slot that matches service
+    // AND is long enough to fit the tied appointment's service).
+    var slotStartMs = new Date(startIso).getTime()
+    var slotEndMs = new Date(endIso).getTime()
+    var slotDurationMin = Math.round((slotEndMs - slotStartMs) / 60000)
+
+    allCandidates = allCandidates.filter(function (c) {
+      // Standalone entries (no tied appointment) keep existing behavior
+      if (!c.appointment_id || !c.linked_appt) return true
+
+      var linked = c.linked_appt
+      var linkedSvc = linked.linked_service
+
+      // Must match service if cancelled slot has a specific service
+      if (slotServiceId && linked.service_id && linked.service_id !== slotServiceId) {
+        return false
+      }
+
+      // Must fit duration — can't offer a 30-min slot to a 2-hour groom
+      if (linkedSvc && linkedSvc.time_block_minutes) {
+        if (slotDurationMin < linkedSvc.time_block_minutes) return false
+      }
+
+      return true
+    })
+
+    if (allCandidates.length === 0) {
+      return new Response(
+        JSON.stringify({ notified: false, reason: 'No waitlist entries match slot service/duration' }),
+        { status: 200, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders) }
+      )
+    }
+
     // 4. Load slot's service name (for Haiku + template)
     var slotServiceName = null
     if (slotServiceId) {
@@ -354,6 +389,8 @@ Deno.serve(async function (req) {
 
     // 5. Build compact candidate summary for Haiku
     var candidateSummary = allCandidates.map(function (c) {
+      var tiedAppt = c.linked_appt || null
+      var tiedSvc = (tiedAppt && tiedAppt.linked_service) || null
       return {
         id: c.id,
         position: c.position,
@@ -363,7 +400,12 @@ Deno.serve(async function (req) {
           breed: c.pets.breed,
           weight_lbs: c.pets.weight,
         } : null,
-        requested_service: c.services ? c.services.service_name : 'Any service',
+        requested_service: tiedSvc ? tiedSvc.service_name : (c.services ? c.services.service_name : 'Any service'),
+        tied_to_existing_appointment: tiedAppt ? {
+          date: tiedAppt.appointment_date,
+          start_time: tiedAppt.start_time,
+          service: tiedSvc ? tiedSvc.service_name : null,
+        } : null,
         preferred_time_start: c.preferred_time_start,
         preferred_time_end: c.preferred_time_end,
         any_time: !!c.any_time,

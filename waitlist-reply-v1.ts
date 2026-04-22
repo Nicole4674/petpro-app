@@ -235,7 +235,7 @@ Deno.serve(async function (req) {
     var nowIso = new Date().toISOString()
     var { data: offers } = await supabaseAdmin
       .from('grooming_waitlist')
-      .select('id, pet_id, service_id, staff_id, offered_slot_start, offered_slot_end, expires_at, pets:pet_id(name)')
+      .select('id, pet_id, service_id, staff_id, appointment_id, offered_slot_start, offered_slot_end, expires_at, pets:pet_id(name)')
       .eq('client_id', clientId)
       .eq('groomer_id', groomerId)
       .eq('status', 'notified')
@@ -320,24 +320,48 @@ Deno.serve(async function (req) {
       var startTime = (slotStart.split('T')[1] || '').slice(0, 5)
       var endTime = (slotEnd.split('T')[1] || '').slice(0, 5)
 
-      console.log('[waitlist-reply] auto-booking:', apptDate, startTime, '-', endTime)
+      console.log('[waitlist-reply] auto-booking:', apptDate, startTime, '-', endTime, 'tied_appt:', offer.appointment_id || 'none')
 
-      var { data: newAppt, error: apptErr } = await supabaseAdmin
-        .from('appointments')
-        .insert({
-          groomer_id: groomerId,
-          client_id: clientId,
-          pet_id: offer.pet_id,
-          service_id: offer.service_id || null,
-          staff_id: offer.staff_id || null,
-          appointment_date: apptDate,
-          start_time: startTime,
-          end_time: endTime,
-          status: 'confirmed',
-          service_notes: 'Auto-booked from waitlist by PetPro AI',
-        })
-        .select('id')
-        .single()
+      // Branch: if tied to an existing appointment, MOVE it (update date/time).
+      // Otherwise, CREATE a new appointment (legacy standalone waitlist path).
+      var newAppt = null
+      var apptErr = null
+      if (offer.appointment_id) {
+        var { data: movedAppt, error: moveErr } = await supabaseAdmin
+          .from('appointments')
+          .update({
+            appointment_date: apptDate,
+            start_time: startTime,
+            end_time: endTime,
+            staff_id: offer.staff_id || null,
+            status: 'confirmed',
+            service_notes: 'Moved earlier from waitlist by PetPro AI',
+          })
+          .eq('id', offer.appointment_id)
+          .select('id')
+          .single()
+        newAppt = movedAppt
+        apptErr = moveErr
+      } else {
+        var { data: insertedAppt, error: insertErr } = await supabaseAdmin
+          .from('appointments')
+          .insert({
+            groomer_id: groomerId,
+            client_id: clientId,
+            pet_id: offer.pet_id,
+            service_id: offer.service_id || null,
+            staff_id: offer.staff_id || null,
+            appointment_date: apptDate,
+            start_time: startTime,
+            end_time: endTime,
+            status: 'confirmed',
+            service_notes: 'Auto-booked from waitlist by PetPro AI',
+          })
+          .select('id')
+          .single()
+        newAppt = insertedAppt
+        apptErr = insertErr
+      }
 
       if (apptErr) {
         console.error('[waitlist-reply] auto-book insert failed:', apptErr.message, JSON.stringify(apptErr))
@@ -363,31 +387,42 @@ Deno.serve(async function (req) {
         })
       }
 
-      // Junction row so Calendar.jsx renders the appt
-      await supabaseAdmin
-        .from('appointment_pets')
-        .insert({
-          appointment_id: newAppt.id,
-          pet_id: offer.pet_id,
-          service_id: offer.service_id || null,
-        })
+      // Junction row: only INSERT one when we created a new appointment.
+      // Moved appointments already have their appointment_pets row.
+      if (!offer.appointment_id) {
+        await supabaseAdmin
+          .from('appointment_pets')
+          .insert({
+            appointment_id: newAppt.id,
+            pet_id: offer.pet_id,
+            service_id: offer.service_id || null,
+          })
+      }
 
       await supabaseAdmin
         .from('grooming_waitlist')
         .update({ status: 'booked' })
         .eq('id', offer.id)
 
+      var isMove = !!offer.appointment_id
       sendPushToUser(
         groomerId,
-        '✅ Waitlist auto-booked!',
-        clientFirst + ' ' + clientLast + ' (' + petName + ') is on the books for ' + slotLabel,
+        isMove ? '✅ Waitlist moved earlier!' : '✅ Waitlist auto-booked!',
+        clientFirst + ' ' + clientLast + ' (' + petName + ')' + (isMove ? ' moved to ' : ' is on the books for ') + slotLabel,
         '/calendar',
         'waitlist-book-' + offer.id
       )
 
-      await postThreadReply(threadId, groomerId, clientId, 'You\'re all set! ' + petName + ' is booked for ' + slotLabel + '. See you then 🐾')
+      await postThreadReply(
+        threadId,
+        groomerId,
+        clientId,
+        isMove
+          ? 'You\'re all set! ' + petName + '\'s appointment has been moved to ' + slotLabel + '. See you then 🐾'
+          : 'You\'re all set! ' + petName + ' is booked for ' + slotLabel + '. See you then 🐾'
+      )
 
-      return new Response(JSON.stringify({ handled: true, verdict: 'yes', action: 'booked' }), {
+      return new Response(JSON.stringify({ handled: true, verdict: 'yes', action: isMove ? 'moved' : 'booked' }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
