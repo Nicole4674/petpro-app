@@ -129,7 +129,7 @@ function Privacy() {
         <li><strong>Billing information:</strong> we use Stripe to collect your payment details. Stripe provides us with a customer ID, subscription ID, billing address, the last four digits of your card, card brand (e.g., Visa), and renewal dates. We do not receive or store full card numbers.</li>
         <li><strong>Usage information:</strong> login times, pages used, features accessed, and basic device/browser information for security and troubleshooting.</li>
         <li><strong>Support communications:</strong> any messages you send us and our replies.</li>
-        <li><strong>Voice input (if used):</strong> if you use PetPro's voice booking feature, your spoken input is transcribed and then discarded after the booking is created. We do not retain audio recordings.</li>
+        <li><strong>Voice input (if used):</strong> if you use PetPro's voice booking feature, speech-to-text is performed locally by your web browser's built-in speech recognition. Your audio is not sent to PetPro or a third-party server. Only the resulting transcribed text is sent to PetPro's AI for booking processing. We do not record or retain audio.</li>
       </ul>
 
       <h2>8. Information Collected About Your Clients (as a PetPro Subscriber)</h2>
@@ -171,7 +171,8 @@ function Privacy() {
         <li><strong>Stripe</strong> — processes subscription payments and stores billing details.</li>
         <li><strong>Twilio</strong> — sends SMS messages (appointment reminders, confirmations, etc.) on behalf of PetPro subscribers to their own clients.</li>
         <li><strong>Anthropic</strong> — provides the Claude AI model that powers PetPro's AI-assisted booking validation and scheduling features.</li>
-        <li><strong>OpenAI</strong> — provides the Whisper speech-to-text model used for PetPro's voice booking feature.</li>
+        <li><strong>ElevenLabs</strong> — provides the text-to-speech voice synthesis used when PetPro reads responses aloud. Only the text to be spoken is sent to ElevenLabs; no customer audio or identifying information is transmitted.</li>
+        <li><strong>Browser Speech Recognition (built-in):</strong> voice input is transcribed locally on your device by your web browser. No audio is sent to PetPro or any third party.</li>
       </ul>
       <p>
         These providers are bound by their own privacy and security commitments. We do not permit
@@ -181,10 +182,12 @@ function Privacy() {
       <h2>11. AI Features and Data Handling</h2>
       <p>
         PetPro's AI-assisted features (booking validation, scheduling suggestions, voice commands)
-        send limited booking-related data to Anthropic and/or OpenAI to generate a response. We do
-        not send full client lists, financial records, or information that is not needed for the
-        specific AI task. AI providers process this data to return a result and, per their
-        business-tier agreements, do not use it to train their models.
+        send limited booking-related data to Anthropic (Claude) to generate a response. When voice
+        output is used, only the text to be spoken aloud is sent to ElevenLabs for voice synthesis.
+        Voice input is transcribed locally by your web browser and is never sent to a third-party
+        server as audio. We do not send full client lists, financial records, or information that is
+        not needed for the specific AI task. AI providers process this data to return a result and,
+        per their business-tier agreements, do not use it to train their models.
       </p>
 
       <h2>12. Data Retention for Subscribers</h2>
