@@ -33,10 +33,12 @@ export default function Waitlist() {
   var [filterDate, setFilterDate] = useState('')
   var [clientSearchText, setClientSearchText] = useState('')
   var [showClientDropdown, setShowClientDropdown] = useState(false)
+  var [clientAppointments, setClientAppointments] = useState([])
   var [newEntry, setNewEntry] = useState({
     client_id: '',
     pet_id: '',
     service_id: '',
+    appointment_id: '',
     preferred_date: '',
     preferred_time_start: '',
     preferred_time_end: '',
@@ -75,6 +77,44 @@ export default function Waitlist() {
   useEffect(function() {
     fetchAll()
   }, [])
+
+  // When a client is selected, load their upcoming appointments so groomer
+  // can tie the waitlist entry to an existing appt ("move me earlier" flow).
+  useEffect(function() {
+    async function loadAppts() {
+      if (!newEntry.client_id) {
+        setClientAppointments([])
+        return
+      }
+      var today = new Date().toISOString().split('T')[0]
+      var { data: apptData } = await supabase
+        .from('appointments')
+        .select('id, appointment_date, start_time, end_time, pet_id, service_id, pets:pet_id(name), services:service_id(service_name)')
+        .eq('client_id', newEntry.client_id)
+        .gte('appointment_date', today)
+        .in('status', ['confirmed', 'pending'])
+        .order('appointment_date', { ascending: true })
+        .order('start_time', { ascending: true })
+      setClientAppointments(apptData || [])
+    }
+    loadAppts()
+  }, [newEntry.client_id])
+
+  // When groomer picks an existing appointment, auto-fill pet + service
+  // and lock them (waitlist is just asking to move that appt earlier).
+  function pickAppointment(apptId) {
+    if (!apptId) {
+      setNewEntry(Object.assign({}, newEntry, { appointment_id: '' }))
+      return
+    }
+    var appt = clientAppointments.find(function(a) { return a.id === apptId })
+    if (!appt) return
+    setNewEntry(Object.assign({}, newEntry, {
+      appointment_id: apptId,
+      pet_id: appt.pet_id || '',
+      service_id: appt.service_id || ''
+    }))
+  }
 
   async function fetchAll() {
     var { data: { user } } = await supabase.auth.getUser()
@@ -154,6 +194,7 @@ export default function Waitlist() {
 
     // Only add optional fields if they have values
     if (newEntry.service_id) record.service_id = newEntry.service_id
+    if (newEntry.appointment_id) record.appointment_id = newEntry.appointment_id
     if (newEntry.preferred_date) record.preferred_date = newEntry.preferred_date
     if (newEntry.preferred_time_start) record.preferred_time_start = newEntry.preferred_time_start
     if (newEntry.preferred_time_end) record.preferred_time_end = newEntry.preferred_time_end
@@ -168,7 +209,7 @@ export default function Waitlist() {
     if (!error) {
       setShowAddForm(false)
       setNewEntry({
-        client_id: '', pet_id: '', service_id: '',
+        client_id: '', pet_id: '', service_id: '', appointment_id: '',
         preferred_date: '', preferred_time_start: '', preferred_time_end: '',
         preferred_days: [],
         flexible_dates: false, any_time: false, notes: ''
@@ -630,14 +671,45 @@ export default function Waitlist() {
                 />
               </div>
 
+              {/* Tie to existing appointment (optional) — "move me earlier" flow */}
+              {newEntry.client_id && clientAppointments.length > 0 && (
+                <div className="sl-form-group">
+                  <label className="sl-label">Tie to existing appointment (optional)</label>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+                    Pick an existing appointment if they want to MOVE it earlier when a slot opens. Pet &amp; service will lock to that appointment.
+                  </div>
+                  <select
+                    value={newEntry.appointment_id}
+                    onChange={function(e) { pickAppointment(e.target.value) }}
+                    className="sl-input"
+                  >
+                    <option value="">— None (standalone waitlist entry) —</option>
+                    {clientAppointments.map(function(a) {
+                      var petName = (a.pets && a.pets.name) || 'pet'
+                      var svcName = (a.services && a.services.service_name) || 'service'
+                      var timeStr = (a.start_time || '').slice(0, 5)
+                      return (
+                        <option key={a.id} value={a.id}>
+                          {a.appointment_date} at {timeStr} — {petName} — {svcName}
+                        </option>
+                      )
+                    })}
+                  </select>
+                </div>
+              )}
+
               {/* Pet */}
               <div className="sl-form-group">
-                <label className="sl-label">Pet *</label>
+                <label className="sl-label">
+                  Pet *
+                  {newEntry.appointment_id && <span style={{ fontSize: 12, color: '#059669', marginLeft: 8 }}>🔒 locked to appointment</span>}
+                </label>
                 <select
                   value={newEntry.pet_id}
                   onChange={function(e) { setNewEntry(Object.assign({}, newEntry, { pet_id: e.target.value })) }}
                   className="sl-input"
                   required
+                  disabled={!!newEntry.appointment_id}
                 >
                   <option value="">Select pet...</option>
                   {filteredPets.map(function(p) {
@@ -648,11 +720,15 @@ export default function Waitlist() {
 
               {/* Service */}
               <div className="sl-form-group">
-                <label className="sl-label">Service Requested</label>
+                <label className="sl-label">
+                  Service Requested
+                  {newEntry.appointment_id && <span style={{ fontSize: 12, color: '#059669', marginLeft: 8 }}>🔒 locked to appointment</span>}
+                </label>
                 <select
                   value={newEntry.service_id}
                   onChange={function(e) { setNewEntry(Object.assign({}, newEntry, { service_id: e.target.value })) }}
                   className="sl-input"
+                  disabled={!!newEntry.appointment_id}
                 >
                   <option value="">Any service</option>
                   {services.map(function(s) {

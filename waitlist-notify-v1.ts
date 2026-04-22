@@ -284,6 +284,7 @@ Deno.serve(async function (req) {
     var endIso = body.end_time
     var cancelledApptId = body.cancelled_appointment_id || null
     var slotServiceId = body.service_id || null
+    var staffId = body.staff_id || null
 
     // Validate input
     if (!groomerId || !startIso || !endIso) {
@@ -486,6 +487,7 @@ Deno.serve(async function (req) {
         offered_slot_start: startIso,
         offered_slot_end: endIso,
         offered_appointment_id: cancelledApptId,
+        staff_id: staffId,
         updated_at: new Date().toISOString(),
       })
       .eq('id', picked.id)

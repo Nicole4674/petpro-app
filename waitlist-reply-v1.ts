@@ -235,7 +235,7 @@ Deno.serve(async function (req) {
     var nowIso = new Date().toISOString()
     var { data: offers } = await supabaseAdmin
       .from('grooming_waitlist')
-      .select('id, pet_id, service_id, offered_slot_start, offered_slot_end, expires_at, pets:pet_id(name)')
+      .select('id, pet_id, service_id, staff_id, offered_slot_start, offered_slot_end, expires_at, pets:pet_id(name)')
       .eq('client_id', clientId)
       .eq('groomer_id', groomerId)
       .eq('status', 'notified')
@@ -329,6 +329,7 @@ Deno.serve(async function (req) {
           client_id: clientId,
           pet_id: offer.pet_id,
           service_id: offer.service_id || null,
+          staff_id: offer.staff_id || null,
           appointment_date: apptDate,
           start_time: startTime,
           end_time: endTime,
