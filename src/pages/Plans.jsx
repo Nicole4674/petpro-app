@@ -34,6 +34,7 @@ var TIERS = [
       'Recurring appointments',
       'Boarding & kennel management',
       'Printable intake & check-in forms',
+      { text: '500 AI actions / month', founder: true },  // ← FOUNDER DEAL: remove after first 100 signups
     ],
   },
   {
@@ -52,6 +53,7 @@ var TIERS = [
       'In-app messaging (no more phone tag)',
       'Online vaccine records + health info',
       'Clients request appointments (you approve)',
+      { text: '800 AI actions / month', founder: true },  // ← FOUNDER DEAL: remove after first 100 signups
     ],
   },
   {
@@ -151,23 +153,23 @@ var COMPARISON_SECTIONS = [
   {
     title: '🤖 PetPro AI',
     rows: [
-      { feature: 'Dashboard AI chat', included: ['—', '—', '✓', '✓', '✓'] },
-      { feature: 'Voice booking 🎙️', included: ['—', '—', '✓', '✓', '✓'] },
-      { feature: 'Client self-booking AI', included: ['—', '—', '✓', '✓', '✓'] },
-      { feature: 'AI booking rules (breed/vax/allergy)', included: ['—', '—', '✓', '✓', '✓'] },
-      { feature: 'Conflict & double-booking prevention', included: ['—', '—', '✓', '✓', '✓'] },
-      { feature: 'AI texts clients FOR you 💬', included: ['—', '—', '—', '✓', '✓'] },
-      { feature: 'Photo uploads (groomer ↔ client) 📸', included: ['—', '—', '—', '✓', '✓'] },
-      { feature: 'AI reads vaccine certs', included: ['—', '—', '—', '✓', '✓'] },
-      { feature: 'AI reads chat photos (tangles/skin)', included: ['—', '—', '—', '✓', '✓'] },
-      { feature: 'Smart waitlist — auto-books cancellations', included: ['—', '—', '—', '✓', '✓'] },
-      { feature: 'Auto-rebook reminder cycles', included: ['—', '—', '—', '✓', '✓'] },
+      { feature: 'Dashboard AI chat', included: ['✓*', '✓*', '✓', '✓', '✓'] },
+      { feature: 'Voice booking 🎙️', included: ['✓*', '✓*', '✓', '✓', '✓'] },
+      { feature: 'Client self-booking AI', included: ['✓*', '✓*', '✓', '✓', '✓'] },
+      { feature: 'AI booking rules (breed/vax/allergy)', included: ['✓*', '✓*', '✓', '✓', '✓'] },
+      { feature: 'Conflict & double-booking prevention', included: ['✓*', '✓*', '✓', '✓', '✓'] },
+      { feature: 'AI texts clients FOR you 💬', included: ['✓*', '✓*', '✓*', '✓', '✓'] },
+      { feature: 'Photo uploads (groomer ↔ client) 📸', included: ['✓*', '✓*', '✓*', '✓', '✓'] },
+      { feature: 'AI reads vaccine certs', included: ['✓*', '✓*', '✓*', '✓', '✓'] },
+      { feature: 'AI reads chat photos (tangles/skin)', included: ['✓*', '✓*', '✓*', '✓', '✓'] },
+      { feature: 'Smart waitlist — auto-books cancellations', included: ['✓*', '✓*', '✓*', '✓', '✓'] },
+      { feature: 'Auto-rebook reminder cycles', included: ['✓*', '✓*', '✓*', '✓', '✓'] },
     ],
   },
   {
     title: 'Usage & Support',
     rows: [
-      { feature: 'AI actions per month', included: ['—', '—', '1,000', '3,000', '10,000+'] },
+      { feature: 'AI actions per month', included: ['500*', '800*', '1,000', '3,000', '10,000+'] },
       { feature: 'Free trial', included: ['30 days', '30 days', '14 days', '14 days', 'Custom'] },
       { feature: 'Support', included: ['Email', 'Email', 'Email', 'Priority', 'Dedicated'] },
     ],
@@ -316,14 +318,31 @@ export default function Plans() {
                         <tr key={si + '-' + ri}>
                           <td style={featureCellStyle}>{row.feature}</td>
                           {row.included.map(function (val, ci) {
+                            // FOUNDER DEAL: values ending in '*' are first-100 grants.
+                            // Render with yellow highlight + pill. Remove after founder window closes.
+                            var isFounder = typeof val === 'string' && val.endsWith('*')
+                            var display = isFounder ? val.slice(0, -1) : val
+                            var isCheck = display === '✓'
+                            var isDash = display === '—'
                             return (
                               <td key={ci} style={{
                                 ...valueCellStyle,
-                                color: val === '✓' ? '#10b981' : val === '—' ? '#d1d5db' : '#111827',
-                                fontWeight: val === '✓' ? '700' : (val === '—' ? '400' : '600'),
-                                fontSize: val === '✓' || val === '—' ? '18px' : '13px',
+                                background: isFounder ? '#fef3c7' : 'transparent',
+                                color: isFounder ? '#b45309' : (isCheck ? '#10b981' : isDash ? '#d1d5db' : '#111827'),
+                                fontWeight: isCheck ? '700' : (isDash ? '400' : '600'),
+                                fontSize: isCheck || isDash ? '18px' : '13px',
                               }}>
-                                {val}
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  {display}
+                                  {isFounder && (
+                                    <span style={{
+                                      fontSize: '9px',
+                                      fontWeight: '700',
+                                      color: '#b45309',
+                                      letterSpacing: '0.03em',
+                                    }}>*</span>
+                                  )}
+                                </span>
                               </td>
                             )
                           })}
@@ -335,6 +354,20 @@ export default function Plans() {
               })}
             </tbody>
           </table>
+        </div>
+
+        {/* ─── Founder Deal footnote (remove after first 100 signups window closes) ─── */}
+        <div style={{
+          marginTop: '16px',
+          padding: '12px 16px',
+          background: '#fef3c7',
+          border: '1px dashed #f59e0b',
+          borderRadius: '10px',
+          fontSize: '13px',
+          color: '#92400e',
+          lineHeight: '1.5',
+        }}>
+          <strong>* Founder Deal</strong> — these features are unlocked on Basic & Pro for the first 100 signups only. Your access locks in forever on your account. After the window closes, they'll require an upgrade.
         </div>
       </div>
 
@@ -535,10 +568,37 @@ function TierCard({ tier, onStartTrial }) {
 
       <div style={{ borderTop: '1px solid #f3f4f6', paddingTop: '14px' }}>
         {tier.features.map(function (f, i) {
+          var isFounder = typeof f === 'object' && f.founder
+          var text = isFounder ? f.text : f
           return (
-            <div key={i} style={{ display: 'flex', gap: '8px', fontSize: '13px', color: '#374151', marginBottom: '8px', lineHeight: '1.4' }}>
-              <span style={{ color: '#10b981', fontWeight: '700', flexShrink: 0 }}>✓</span>
-              <span>{f}</span>
+            <div key={i} style={{
+              display: 'flex',
+              gap: '8px',
+              fontSize: '13px',
+              color: '#374151',
+              marginBottom: '8px',
+              lineHeight: '1.4',
+              alignItems: 'center',
+              background: isFounder ? '#fef3c7' : 'transparent',
+              padding: isFounder ? '6px 8px' : '0',
+              borderRadius: isFounder ? '6px' : '0',
+              border: isFounder ? '1px dashed #f59e0b' : 'none',
+            }}>
+              <span style={{ color: isFounder ? '#f59e0b' : '#10b981', fontWeight: '700', flexShrink: 0 }}>✓</span>
+              <span style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
+                {text}
+                {isFounder && (
+                  <span style={{
+                    padding: '1px 6px',
+                    background: '#f59e0b',
+                    color: '#fff',
+                    borderRadius: '4px',
+                    fontSize: '9px',
+                    fontWeight: '700',
+                    letterSpacing: '0.03em',
+                  }}>LIMITED TIME</span>
+                )}
+              </span>
             </div>
           )
         })}
