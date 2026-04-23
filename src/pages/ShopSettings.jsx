@@ -7,6 +7,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import EnableNotifications from '../components/EnableNotifications'
+import AIUsageWidget from '../components/AIUsageWidget'
 
 export default function ShopSettings() {
   var navigate = useNavigate()
@@ -384,6 +385,9 @@ export default function ShopSettings() {
           </div>
         )}
       </div>
+
+      {/* AI Usage widget — shows used / cap for current month */}
+      <AIUsageWidget />
 
       {/* Logo upload */}
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
