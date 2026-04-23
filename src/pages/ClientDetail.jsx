@@ -5,12 +5,40 @@ import { supabase } from '../lib/supabase'
 const TABS = [
   { key: 'overview', label: '🐾 Overview' },
   { key: 'upcoming', label: '📅 Upcoming' },
+  { key: 'contacts', label: '📞 Contacts' },
   { key: 'grooming', label: '✂️ Past Grooming' },
   { key: 'boarding', label: '🏠 Past Boarding' },
   { key: 'vaccinations', label: '💉 Vaccinations' },
   { key: 'payments', label: '💳 Payments' },
   { key: 'notes', label: '📝 Notes' },
 ]
+
+// Freeform relationship suggestions (shown as datalist in the form)
+const CONTACT_RELATIONSHIP_SUGGESTIONS = [
+  'Spouse', 'Parent', 'Sibling', 'Child', 'Roommate',
+  'Pickup person', 'Pet sitter', 'Dog walker', 'Neighbor',
+  'Vet', 'Emergency contact', 'Other'
+]
+
+// Shared form styles for the Contacts tab
+const contactLabelStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '4px',
+  fontSize: '13px',
+  fontWeight: '600',
+  color: '#374151'
+}
+
+const contactInputStyle = {
+  padding: '10px 12px',
+  fontSize: '14px',
+  border: '1px solid #d1d5db',
+  borderRadius: '8px',
+  fontWeight: '400',
+  outline: 'none',
+  fontFamily: 'inherit'
+}
 
 export default function ClientDetail() {
   const { id } = useParams()
@@ -42,6 +70,17 @@ export default function ClientDetail() {
   const [lastApptPerPet, setLastApptPerPet] = useState({})
   // Most recent completed appointment overall for this client (for the header "Book Again" button)
   const [lastApptOverall, setLastApptOverall] = useState(null)
+
+  // ===== Contacts tab state (Task #97 / #98) =====
+  // Multi-contact support — spouse, pickup people, emergency, vet, etc.
+  const [contacts, setContacts] = useState([])
+  const [contactForm, setContactForm] = useState({
+    first_name: '', last_name: '', phone: '', email: '',
+    relationship: '', is_emergency: false, can_pickup: true, notes: ''
+  })
+  const [editingContactId, setEditingContactId] = useState(null) // null = adding new; otherwise editing this row
+  const [savingContact, setSavingContact] = useState(false)
+  const [showContactForm, setShowContactForm] = useState(false)
 
   useEffect(() => {
     fetchClientAndPets()
@@ -117,6 +156,7 @@ export default function ClientDetail() {
     if (activeTab === 'notes') fetchNotes()
     if (activeTab === 'payments') fetchClientPayments()
     if (activeTab === 'upcoming') fetchUpcomingAppointments()
+    if (activeTab === 'contacts') fetchContacts()
   }, [activeTab, id])
 
   // Fetch ALL real payments for this client (from payments table)
@@ -408,6 +448,91 @@ export default function ClientDetail() {
       alert('Error saving note: ' + error.message)
     }
     setSavingNote(false)
+  }
+
+  // ===== Contacts CRUD (Task #97 / #98) =====
+  // Fetch all extra contacts for this client (emergency, pickup people, etc.)
+  const fetchContacts = async () => {
+    setLoadingTab(true)
+    const { data, error } = await supabase
+      .from('client_contacts')
+      .select('*')
+      .eq('client_id', id)
+      // Emergency contacts first, then pickup-allowed, then newest
+      .order('is_emergency', { ascending: false })
+      .order('can_pickup', { ascending: false })
+      .order('created_at', { ascending: false })
+    if (!error) setContacts(data || [])
+    else setContacts([])
+    setLoadingTab(false)
+  }
+
+  const resetContactForm = () => {
+    setContactForm({
+      first_name: '', last_name: '', phone: '', email: '',
+      relationship: '', is_emergency: false, can_pickup: true, notes: ''
+    })
+    setEditingContactId(null)
+    setShowContactForm(false)
+  }
+
+  const startEditContact = (c) => {
+    setContactForm({
+      first_name: c.first_name || '',
+      last_name: c.last_name || '',
+      phone: c.phone || '',
+      email: c.email || '',
+      relationship: c.relationship || '',
+      is_emergency: !!c.is_emergency,
+      can_pickup: c.can_pickup !== false,
+      notes: c.notes || ''
+    })
+    setEditingContactId(c.id)
+    setShowContactForm(true)
+  }
+
+  const saveContact = async () => {
+    const first = (contactForm.first_name || '').trim()
+    const phone = (contactForm.phone || '').trim()
+    if (!first) { alert('First name is required'); return }
+    if (!phone) { alert('Phone number is required'); return }
+
+    setSavingContact(true)
+    const payload = {
+      client_id: id,
+      first_name: first,
+      last_name: (contactForm.last_name || '').trim() || null,
+      phone: phone,
+      email: (contactForm.email || '').trim() || null,
+      relationship: (contactForm.relationship || '').trim() || null,
+      is_emergency: !!contactForm.is_emergency,
+      can_pickup: contactForm.can_pickup !== false,
+      notes: (contactForm.notes || '').trim() || null,
+    }
+
+    let error
+    if (editingContactId) {
+      const res = await supabase.from('client_contacts').update(payload).eq('id', editingContactId)
+      error = res.error
+    } else {
+      const res = await supabase.from('client_contacts').insert(payload)
+      error = res.error
+    }
+
+    if (error) {
+      alert('Error saving contact: ' + error.message)
+    } else {
+      resetContactForm()
+      fetchContacts()
+    }
+    setSavingContact(false)
+  }
+
+  const deleteContact = async (contactId) => {
+    if (!window.confirm('Delete this contact? This cannot be undone.')) return
+    const { error } = await supabase.from('client_contacts').delete().eq('id', contactId)
+    if (error) alert('Error deleting: ' + error.message)
+    else fetchContacts()
   }
 
   // Helper functions
@@ -1121,6 +1246,227 @@ export default function ClientDetail() {
             </div>
           )
         })()}
+
+        {/* ═══════ CONTACTS TAB (Task #97 / #98) ═══════ */}
+        {/* Multi-contact support: spouse, pickup people, emergency, vet, etc. */}
+        {activeTab === 'contacts' && (
+          <div className="cp-contacts">
+            {/* Explainer card */}
+            <div className="cp-card" style={{ marginBottom: '16px', background: '#faf5ff', border: '1px solid #ddd6fe' }}>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                <span style={{ fontSize: '22px' }}>📞</span>
+                <div>
+                  <div style={{ fontWeight: '700', marginBottom: '4px' }}>Additional contacts for {client.first_name}</div>
+                  <div style={{ fontSize: '13px', color: '#6b7280', lineHeight: '1.5' }}>
+                    Spouse, pickup people, pet sitters, vet, emergency — anyone who might drop off, pick up, or need to be called. The <strong>primary</strong> phone on this client's profile stays where it is — this is for <em>extra</em> people.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Existing contacts list */}
+            {loadingTab ? (
+              <div className="cp-loading">Loading contacts...</div>
+            ) : contacts.length === 0 ? (
+              <div className="cp-card" style={{ textAlign: 'center', padding: '24px', color: '#6b7280' }}>
+                No extra contacts yet.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
+                {contacts.map(function (c) {
+                  const fullName = ((c.first_name || '') + ' ' + (c.last_name || '')).trim()
+                  return (
+                    <div
+                      key={c.id}
+                      className="cp-card"
+                      style={{
+                        borderLeft: c.is_emergency ? '4px solid #dc2626' : '4px solid #7c3aed',
+                        padding: '14px 16px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: '180px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                            <strong style={{ fontSize: '15px' }}>{fullName}</strong>
+                            {c.relationship && (
+                              <span style={{
+                                fontSize: '11px', padding: '2px 8px', borderRadius: '999px',
+                                background: '#ede9fe', color: '#6d28d9', fontWeight: '600'
+                              }}>{c.relationship}</span>
+                            )}
+                            {c.is_emergency && (
+                              <span style={{
+                                fontSize: '11px', padding: '2px 8px', borderRadius: '999px',
+                                background: '#fee2e2', color: '#991b1b', fontWeight: '700'
+                              }}>🚨 EMERGENCY</span>
+                            )}
+                            {!c.can_pickup && (
+                              <span style={{
+                                fontSize: '11px', padding: '2px 8px', borderRadius: '999px',
+                                background: '#fef3c7', color: '#92400e', fontWeight: '600'
+                              }}>NOT AUTHORIZED TO PICKUP</span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '14px', color: '#374151', marginBottom: '2px' }}>
+                            📞 <a href={'tel:' + c.phone} style={{ color: '#7c3aed', textDecoration: 'none' }}>{c.phone}</a>
+                          </div>
+                          {c.email && (
+                            <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '2px' }}>
+                              ✉️ {c.email}
+                            </div>
+                          )}
+                          {c.notes && (
+                            <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '6px', fontStyle: 'italic' }}>
+                              {c.notes}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button
+                            type="button"
+                            onClick={function () { startEditContact(c) }}
+                            style={{ padding: '6px 12px', fontSize: '12px', fontWeight: '600', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer' }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={function () { deleteContact(c.id) }}
+                            style={{ padding: '6px 12px', fontSize: '12px', fontWeight: '600', background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '6px', cursor: 'pointer' }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Add / Edit form */}
+            {!showContactForm ? (
+              <button
+                type="button"
+                onClick={function () { resetContactForm(); setShowContactForm(true) }}
+                style={{
+                  width: '100%', padding: '14px', background: '#7c3aed', color: '#fff',
+                  border: 'none', borderRadius: '10px', fontWeight: '700', fontSize: '15px',
+                  cursor: 'pointer'
+                }}
+              >
+                + Add a contact
+              </button>
+            ) : (
+              <div className="cp-card" style={{ padding: '20px' }}>
+                <h3 style={{ margin: '0 0 14px', fontSize: '16px' }}>
+                  {editingContactId ? 'Edit contact' : 'Add a contact'}
+                </h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <label style={contactLabelStyle}>
+                    First name *
+                    <input
+                      type="text"
+                      value={contactForm.first_name}
+                      onChange={function (e) { setContactForm({ ...contactForm, first_name: e.target.value }) }}
+                      style={contactInputStyle}
+                    />
+                  </label>
+                  <label style={contactLabelStyle}>
+                    Last name
+                    <input
+                      type="text"
+                      value={contactForm.last_name}
+                      onChange={function (e) { setContactForm({ ...contactForm, last_name: e.target.value }) }}
+                      style={contactInputStyle}
+                    />
+                  </label>
+                  <label style={contactLabelStyle}>
+                    Phone *
+                    <input
+                      type="tel"
+                      value={contactForm.phone}
+                      onChange={function (e) { setContactForm({ ...contactForm, phone: e.target.value }) }}
+                      placeholder="(555) 123-4567"
+                      style={contactInputStyle}
+                    />
+                  </label>
+                  <label style={contactLabelStyle}>
+                    Email
+                    <input
+                      type="email"
+                      value={contactForm.email}
+                      onChange={function (e) { setContactForm({ ...contactForm, email: e.target.value }) }}
+                      style={contactInputStyle}
+                    />
+                  </label>
+                  <label style={{ ...contactLabelStyle, gridColumn: '1 / -1' }}>
+                    Relationship (who they are)
+                    <input
+                      type="text"
+                      list="contact-relationship-options"
+                      value={contactForm.relationship}
+                      onChange={function (e) { setContactForm({ ...contactForm, relationship: e.target.value }) }}
+                      placeholder="e.g. Spouse, Pickup person, Vet, Mom"
+                      style={contactInputStyle}
+                    />
+                    <datalist id="contact-relationship-options">
+                      {CONTACT_RELATIONSHIP_SUGGESTIONS.map(function (r) {
+                        return <option key={r} value={r} />
+                      })}
+                    </datalist>
+                  </label>
+                  <label style={{ ...contactLabelStyle, gridColumn: '1 / -1' }}>
+                    Notes
+                    <textarea
+                      value={contactForm.notes}
+                      onChange={function (e) { setContactForm({ ...contactForm, notes: e.target.value }) }}
+                      placeholder="e.g. Only picks up Tuesdays, Call after 5pm"
+                      rows={2}
+                      style={{ ...contactInputStyle, resize: 'vertical' }}
+                    />
+                  </label>
+                </div>
+                <div style={{ display: 'flex', gap: '18px', marginTop: '14px', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px' }}>
+                    <input
+                      type="checkbox"
+                      checked={contactForm.is_emergency}
+                      onChange={function (e) { setContactForm({ ...contactForm, is_emergency: e.target.checked }) }}
+                    />
+                    🚨 Emergency contact
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px' }}>
+                    <input
+                      type="checkbox"
+                      checked={contactForm.can_pickup}
+                      onChange={function (e) { setContactForm({ ...contactForm, can_pickup: e.target.checked }) }}
+                    />
+                    Authorized to pick up pet
+                  </label>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '18px' }}>
+                  <button
+                    type="button"
+                    onClick={resetContactForm}
+                    disabled={savingContact}
+                    style={{ padding: '10px 18px', background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveContact}
+                    disabled={savingContact}
+                    style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', cursor: 'pointer', opacity: savingContact ? 0.6 : 1 }}
+                  >
+                    {savingContact ? 'Saving...' : (editingContactId ? 'Save changes' : 'Add contact')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ═══════ NOTES TAB ═══════ */}
         {activeTab === 'notes' && (
