@@ -570,6 +570,20 @@ export default function ClientPortalDashboard() {
             {shopSettings && shopSettings.tagline && (
               <div style={{ fontSize: '11px', opacity: 0.9 }}>{shopSettings.tagline}</div>
             )}
+            {/* Shop address + Get Directions — helps every-3-months clients who forget where to go */}
+            {shopSettings && shopSettings.address && (
+              <div style={{ fontSize: '11px', opacity: 0.9, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span>📍 {shopSettings.address}</span>
+                <a
+                  href={'https://maps.google.com/?q=' + encodeURIComponent(shopSettings.address)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#fff', textDecoration: 'underline', fontWeight: '600' }}
+                >
+                  Get Directions →
+                </a>
+              </div>
+            )}
           </div>
         </div>
         <button

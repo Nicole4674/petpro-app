@@ -147,6 +147,24 @@ export default function Calendar() {
     const [showRecurringDates, setShowRecurringDates] = useState(false) // Task #77 — toggles "View all dates" list in popup
     const [view, setView] = useState('week')
     const [currentDate, setCurrentDate] = useState(new Date())
+    // Sidebar collapse toggle — persists across sessions so groomers don't
+    // have to re-collapse every login. Especially useful on mobile.
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(function () {
+        try { return localStorage.getItem('petpro_calendar_sidebar_collapsed') === 'true' }
+        catch (e) { return false }
+    })
+    // Drag-to-reschedule state (Item #6 from app to-do list).
+    // draggedAppt — the appointment currently being dragged
+    // dragConfirm — when user drops, store drop info and show confirm modal
+    const [draggedAppt, setDraggedAppt] = useState(null)
+    const [dragConfirm, setDragConfirm] = useState(null)
+    function toggleSidebar() {
+        setSidebarCollapsed(function (prev) {
+            const next = !prev
+            try { localStorage.setItem('petpro_calendar_sidebar_collapsed', String(next)) } catch (e) {}
+            return next
+        })
+    }
     const [appointments, setAppointments] = useState([])
     const [clients, setClients] = useState([])
     const [pets, setPets] = useState([])
@@ -385,6 +403,96 @@ export default function Calendar() {
         // Task #38 — empty-slot click now opens a chooser (Book vs Block) instead of jumping
         // straight to the booking form. Nicole wanted this so she can block lunch/errand time.
         setSlotChooser({ date: date, hour: hour, staffId: staffId || null })
+    }
+
+    // ===== Drag-to-reschedule handlers (Item #6) =====
+    // When groomer drags an appointment block onto a different time slot,
+    // we stash the drop info and pop a confirm modal before updating.
+    // Staff-id switch in day view = reassigning to that groomer.
+    const handleApptDragStart = (appt) => {
+        // Don't allow dragging cancelled / completed / checked-out appointments
+        if (!appt) return
+        if (appt.status === 'cancelled' || appt.status === 'completed' || appt.checked_out_at) return
+        setDraggedAppt(appt)
+    }
+    const handleApptDragEnd = () => {
+        setDraggedAppt(null)
+    }
+    const handleSlotDrop = (date, hour, staffId) => {
+        if (!draggedAppt) return
+        const newDate = dateToString(date)
+        const newTime = String(hour).padStart(2, '0') + ':00'
+        const currentDate = draggedAppt.appointment_date
+        const currentStart = draggedAppt.start_time ? draggedAppt.start_time.slice(0, 5) : ''
+        const currentStaff = draggedAppt.staff_id || null
+        const dropStaff = staffId !== undefined ? (staffId || null) : currentStaff
+        // Same spot = no-op (cancel drag)
+        if (newDate === currentDate && newTime === currentStart && dropStaff === currentStaff) {
+            setDraggedAppt(null)
+            return
+        }
+        setDragConfirm({
+            appt: draggedAppt,
+            newDate: newDate,
+            newTime: newTime,
+            newStaffId: dropStaff,
+            staffIdPassed: staffId !== undefined, // track whether day-view drop (includes staff change)
+        })
+        setDraggedAppt(null)
+    }
+    // Confirm the drop → update DB with new date/time (and staff if day view)
+    const handleConfirmDrop = async () => {
+        if (!dragConfirm) return
+        const { appt, newDate, newTime, newStaffId, staffIdPassed } = dragConfirm
+        // Calculate duration from the existing start/end
+        const [sh, smRaw] = appt.start_time.split(':').map(Number)
+        const [eh, emRaw] = appt.end_time.split(':').map(Number)
+        const sm = smRaw || 0
+        const em = emRaw || 0
+        const durationMin = Math.max(15, (eh * 60 + em) - (sh * 60 + sm))
+        // Compute new end time
+        const [nh, nm] = newTime.split(':').map(Number)
+        const totalEndMin = nh * 60 + nm + durationMin
+        const newEndHour = Math.floor(totalEndMin / 60)
+        const newEndMin = totalEndMin % 60
+        const newEndTime = String(newEndHour).padStart(2, '0') + ':' + String(newEndMin).padStart(2, '0')
+        // Conflict check — any other active appt overlapping new slot for same groomer
+        const conflict = appointments.find((a) => {
+            if (a.id === appt.id) return false
+            if (a.status === 'cancelled' || a.status === 'no_show' || a.status === 'rescheduled') return false
+            if (a.appointment_date !== newDate) return false
+            if ((a.staff_id || null) !== (newStaffId || null)) return false
+            const aStart = a.start_time ? a.start_time.slice(0, 5) : ''
+            const aEnd = a.end_time ? a.end_time.slice(0, 5) : ''
+            if (!aStart || !aEnd) return false
+            return newTime < aEnd && newEndTime > aStart
+        })
+        if (conflict) {
+            const who = (conflict.clients?.first_name || '') + ' ' + (conflict.clients?.last_name || '')
+            alert('Can\'t move — conflicts with ' + who.trim() + ' at ' + conflict.start_time.slice(0, 5) + '.')
+            setDragConfirm(null)
+            return
+        }
+        // Build update payload
+        const updateFields = {
+            appointment_date: newDate,
+            start_time: newTime + ':00',
+            end_time: newEndTime + ':00',
+        }
+        if (staffIdPassed) {
+            updateFields.staff_id = newStaffId
+        }
+        const { error } = await supabase
+            .from('appointments')
+            .update(updateFields)
+            .eq('id', appt.id)
+        if (error) {
+            alert('Error moving appointment: ' + error.message)
+            setDragConfirm(null)
+            return
+        }
+        setDragConfirm(null)
+        fetchData()
     }
 
     // ===== Task #38 — chooser handlers =====
@@ -1498,25 +1606,42 @@ export default function Calendar() {
                             onCheckOut={handleCheckOut}
                             checkingIn={checkingIn}
                             checkingOut={checkingOut}
+                            onApptDragStart={handleApptDragStart}
+                            onApptDragEnd={handleApptDragEnd}
+                            onSlotDrop={handleSlotDrop}
+                            draggedApptId={draggedAppt ? draggedAppt.id : null}
                         />
                     )}
                 </div>
 
-                {/* Revenue Sidebar */}
-                <div className="revenue-panel">
-                    {/* Mini Calendar */}
-                    <MiniCalendar
-                        currentDate={currentDate}
-                        appointments={appointments}
-                        onDayClick={(date) => { setCurrentDate(date); setView('day') }}
-                    />
+                {/* Revenue Sidebar — collapsible for more calendar room (mobile especially) */}
+                <div className={'revenue-panel' + (sidebarCollapsed ? ' revenue-panel-collapsed' : '')}>
+                    {/* Collapse / expand toggle */}
+                    <button
+                        type="button"
+                        className="sidebar-toggle-btn"
+                        onClick={toggleSidebar}
+                        title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                        aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                    >
+                        {sidebarCollapsed ? '›' : '‹'}
+                    </button>
 
-                    {/* Quick Jump — 1 to 14 weeks out from today (matches MoeGo) */}
-                    <QuickJump
-                        onJump={(date) => { setCurrentDate(date); setView('day') }}
-                    />
+                    {!sidebarCollapsed && (
+                        <>
+                            {/* Mini Calendar */}
+                            <MiniCalendar
+                                currentDate={currentDate}
+                                appointments={appointments}
+                                onDayClick={(date) => { setCurrentDate(date); setView('day') }}
+                            />
 
-                    <h2>Revenue</h2>
+                            {/* Quick Jump — 1 to 14 weeks out from today (matches MoeGo) */}
+                            <QuickJump
+                                onJump={(date) => { setCurrentDate(date); setView('day') }}
+                            />
+
+                            <h2>Revenue</h2>
                     <div className="revenue-label">
                         {view === 'day' ? 'Today' : view === 'week' ? 'This Week' : 'This Month'}
                     </div>
@@ -1546,6 +1671,8 @@ export default function Calendar() {
                     >
                         + New Appointment
                     </button>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -1594,6 +1721,16 @@ export default function Calendar() {
                     onSave={handleSaveBlock}
                     onDelete={handleDeleteBlock}
                     onClose={() => setBlockModal(null)}
+                />
+            )}
+
+            {/* Drag-to-reschedule Confirm Modal (Item #6) */}
+            {dragConfirm && (
+                <DragDropConfirmModal
+                    dragConfirm={dragConfirm}
+                    staffMembers={staffMembers}
+                    onCancel={() => setDragConfirm(null)}
+                    onConfirm={handleConfirmDrop}
                 />
             )}
 
@@ -2999,7 +3136,7 @@ export default function Calendar() {
     )
 }
 
-function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, onSlotClick, onApptClick, onBlockClick, onCheckIn, onCheckOut, checkingIn, checkingOut }) {
+function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, onSlotClick, onApptClick, onBlockClick, onCheckIn, onCheckOut, checkingIn, checkingOut, onApptDragStart, onApptDragEnd, onSlotDrop, draggedApptId }) {
     const dates = view === 'day' ? [currentDate] : getWeekDates(currentDate)
     const today = new Date()
     const isDayView = view === 'day'
@@ -3087,11 +3224,13 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                 return (
                                     <div
                                         key={col.id || 'unassigned'}
-                                        className="time-cell"
+                                        className={'time-cell' + (draggedApptId ? ' time-cell-drop-target' : '')}
                                         style={{ position: 'relative' }}
                                         onClick={() => onSlotClick(currentDate, hour, col.id)}
+                                        onDragOver={(e) => { if (draggedApptId) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } }}
+                                        onDrop={(e) => { e.preventDefault(); if (onSlotDrop) onSlotDrop(currentDate, hour, col.id || null) }}
                                     >
-                                        {renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut, hour)}
+                                        {renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut, hour, onApptDragStart, onApptDragEnd, draggedApptId)}
                                         {renderBlockedTimes(slotBlocks, onBlockClick, hour)}
                                     </div>
                                 )
@@ -3114,9 +3253,11 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                             return (
                                 <div
                                     key={i}
-                                    className="time-cell"
+                                    className={'time-cell' + (draggedApptId ? ' time-cell-drop-target' : '')}
                                     style={{ position: 'relative' }}
                                     onClick={() => onSlotClick(date, hour)}
+                                    onDragOver={(e) => { if (draggedApptId) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } }}
+                                    onDrop={(e) => { e.preventDefault(); if (onSlotDrop) onSlotDrop(date, hour, undefined) }}
                                 >
                                     {slotAppts.map((appt) => {
                                         // Task #72 fix — size the block by ACTUAL minutes, not whole hours.
@@ -3152,6 +3293,8 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                             else if (apptStatus === 'confirmed') statusBadge = { label: '✓ CONFIRMED', bg: '#065f46', fg: '#d1fae5' }
                                             else if (apptStatus === 'unconfirmed') statusBadge = { label: '❓ UNCONFIRMED', bg: '#92400e', fg: '#fef3c7' }
                                         }
+                                        const isDraggable = !isCancelled && apptStatus !== 'completed' && !appt.checked_out_at
+                                        const isBeingDragged = draggedApptId === appt.id
                                         return (
                                             <div
                                                 key={appt.id}
@@ -3162,8 +3305,17 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                     (appt.checked_out_at ? ' appt-checked-out' : '') +
                                                     (hasConflict ? ' appt-recurring-conflict' : '') +
                                                     (isCancelled ? ' appt-cancelled' : '') +
-                                                    (isPending ? ' appt-pending' : '')
+                                                    (isPending ? ' appt-pending' : '') +
+                                                    (isBeingDragged ? ' appt-dragging' : '')
                                                 }
+                                                draggable={isDraggable}
+                                                onDragStart={(e) => {
+                                                    if (!isDraggable) { e.preventDefault(); return }
+                                                    e.dataTransfer.effectAllowed = 'move'
+                                                    e.dataTransfer.setData('text/plain', appt.id)
+                                                    if (onApptDragStart) onApptDragStart(appt)
+                                                }}
+                                                onDragEnd={() => { if (onApptDragEnd) onApptDragEnd() }}
                                                 style={{
                                                     position: 'absolute',
                                                     top: 'calc(' + topPct + '% + 2px)',
@@ -3174,13 +3326,13 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                     zIndex: 5,
                                                     backgroundColor: blockBg,
                                                     borderLeft: '4px solid ' + blockBorder,
-                                                    cursor: 'pointer',
-                                                    opacity: isCancelled ? 0.6 : 1,
+                                                    cursor: isDraggable ? 'grab' : 'pointer',
+                                                    opacity: isBeingDragged ? 0.4 : (isCancelled ? 0.6 : 1),
                                                     textDecoration: isCancelled ? 'line-through' : 'none',
                                                     boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
                                                 }}
                                                 onClick={(e) => onApptClick(appt, e)}
-                                                title={'Groomer: ' + groomerName + ' · Status: ' + apptStatus + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '')}
+                                                title={'Groomer: ' + groomerName + ' · Status: ' + apptStatus + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '') + (isDraggable ? ' · Drag to reschedule' : '')}
                                             >
                                                 <span className="appt-time">{formatTime(appt.start_time)}</span>
                                                 <span className="appt-pet">{(appt.appointment_pets && appt.appointment_pets.length > 0) ? appt.appointment_pets.map(function(ap){ return ap.pets?.name }).filter(Boolean).join(', ') : appt.pets?.name}</span>
@@ -3293,7 +3445,7 @@ function renderBlockedTimes(slotBlocks, onBlockClick, hour) {
     })
 }
 
-function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut, hour) {
+function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut, hour, onApptDragStart, onApptDragEnd, draggedApptId) {
     return slotAppts.map((appt) => {
         // Task #72 fix — size blocks by actual minutes, not whole hours
         const [sh, smRaw] = appt.start_time.split(':').map(Number)
@@ -3312,6 +3464,10 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
         const hasConflict = !!appt.recurring_conflict
         // Phase 6 — booking-rule flag pending (AI held it for groomer approval)
         const isFlaggedPending = appt.flag_status === 'pending'
+        const apptStatus = appt.status || 'confirmed'
+        const isCancelled = apptStatus === 'cancelled'
+        const isDraggable = !isCancelled && apptStatus !== 'completed' && !appt.checked_out_at
+        const isBeingDragged = draggedApptId === appt.id
         return (
             <div
                 key={appt.id}
@@ -3320,8 +3476,17 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                     (!appt.staff_members ? ' appt-unassigned' : '') +
                     (appt.checked_in_at && !appt.checked_out_at ? ' appt-checked-in' : '') +
                     (appt.checked_out_at ? ' appt-checked-out' : '') +
-                    (hasConflict ? ' appt-recurring-conflict' : '')
+                    (hasConflict ? ' appt-recurring-conflict' : '') +
+                    (isBeingDragged ? ' appt-dragging' : '')
                 }
+                draggable={isDraggable}
+                onDragStart={(e) => {
+                    if (!isDraggable) { e.preventDefault(); return }
+                    e.dataTransfer.effectAllowed = 'move'
+                    e.dataTransfer.setData('text/plain', appt.id)
+                    if (onApptDragStart) onApptDragStart(appt)
+                }}
+                onDragEnd={() => { if (onApptDragEnd) onApptDragEnd() }}
                 style={{
                     position: 'absolute',
                     top: 'calc(' + topPct + '% + 2px)',
@@ -3332,11 +3497,12 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                     zIndex: 5,
                     backgroundColor: groomerColor,
                     borderLeft: '4px solid ' + groomerColor,
-                    cursor: 'pointer',
+                    cursor: isDraggable ? 'grab' : 'pointer',
+                    opacity: isBeingDragged ? 0.4 : 1,
                     boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
                 }}
                 onClick={(e) => onApptClick(appt, e)}
-                title={'Groomer: ' + groomerName + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '') + (isFlaggedPending ? ' · ⏳ Needs approval' : '')}
+                title={'Groomer: ' + groomerName + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '') + (isFlaggedPending ? ' · ⏳ Needs approval' : '') + (isDraggable ? ' · Drag to reschedule' : '')}
             >
                 <span className="appt-time">{formatTime(appt.start_time)}</span>
                 <span className="appt-pet">{(appt.appointment_pets && appt.appointment_pets.length > 0) ? appt.appointment_pets.map(function(ap){ return ap.pets?.name }).filter(Boolean).join(', ') : appt.pets?.name}</span>
@@ -4516,6 +4682,75 @@ function AddPetToBookingModal({ filteredPets, services, petsAlreadyAdded, onClos
 // ══════════ RescheduleModal — Task #26 + #19 (recurring) ══════════
 // Non-recurring appointments: simple date/time swap.
 // Recurring: 3-option picker — this one / this + following / all client recurring.
+// ─────────────────────────────────────────────────────────────────────
+// DragDropConfirmModal — "Are you sure you want to move this?"
+// Item #6: shown after a drag-and-drop reschedule, so a stray drag
+// doesn't silently move an appointment. Staff change is shown too if
+// the drop crossed groomer columns.
+// ─────────────────────────────────────────────────────────────────────
+function DragDropConfirmModal({ dragConfirm, staffMembers, onConfirm, onCancel }) {
+    if (!dragConfirm) return null
+    const { appt, newDate, newTime, newStaffId, staffIdPassed } = dragConfirm
+    const petName = (appt.appointment_pets && appt.appointment_pets.length > 0)
+        ? appt.appointment_pets.map(function (ap) { return ap.pets?.name }).filter(Boolean).join(', ')
+        : (appt.pets?.name || 'Unknown')
+    const clientName = (appt.clients?.first_name || '') + ' ' + (appt.clients?.last_name || '')
+    const formatTimeStr = function (t) {
+        if (!t) return ''
+        const [h, m] = t.split(':').map(Number)
+        const period = h >= 12 ? 'pm' : 'am'
+        const h12 = h % 12 || 12
+        return h12 + ':' + String(m).padStart(2, '0') + ' ' + period
+    }
+    const oldDate = appt.appointment_date
+    const oldTime = appt.start_time ? appt.start_time.slice(0, 5) : ''
+    const oldStaffId = appt.staff_id || null
+    const oldStaff = (staffMembers || []).find(function (s) { return s.id === oldStaffId })
+    const newStaff = (staffMembers || []).find(function (s) { return s.id === newStaffId })
+    const oldStaffName = oldStaff ? (oldStaff.first_name + ' ' + (oldStaff.last_name || '')).trim() : 'Unassigned'
+    const newStaffName = newStaff ? (newStaff.first_name + ' ' + (newStaff.last_name || '')).trim() : 'Unassigned'
+    const isRecurring = !!appt.recurring_series_id
+    const staffChanged = staffIdPassed && oldStaffId !== newStaffId
+    return (
+        <div className="modal-overlay" onClick={onCancel} style={{ zIndex: 9999 }}>
+            <div className="modal-content" style={{ maxWidth: '440px' }} onClick={function (e) { e.stopPropagation() }}>
+                <h3 style={{ margin: '0 0 16px', fontSize: '18px' }}>Move this appointment?</h3>
+                <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px', lineHeight: '1.6' }}>
+                    <div style={{ fontWeight: '700', marginBottom: '6px' }}>{clientName.trim()} — {petName}</div>
+                    <div style={{ color: '#64748b', marginBottom: '10px' }}>Service: {appt.services?.service_name || 'N/A'}</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr', gap: '4px 12px' }}>
+                        <span style={{ color: '#64748b' }}>From:</span>
+                        <span>{oldDate} at {formatTimeStr(oldTime)}{staffChanged ? ' · ' + oldStaffName : ''}</span>
+                        <span style={{ color: '#64748b' }}>To:</span>
+                        <span style={{ fontWeight: '700', color: '#7c3aed' }}>{newDate} at {formatTimeStr(newTime)}{staffChanged ? ' · ' + newStaffName : ''}</span>
+                    </div>
+                </div>
+                {isRecurring && (
+                    <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', color: '#92400e', padding: '10px', borderRadius: '8px', fontSize: '12px', marginBottom: '16px' }}>
+                        ⚠️ This is a recurring appointment. Only <strong>this one</strong> will be moved — future appointments in the series stay on their original schedule. Use the appointment popup if you need to reschedule the whole series.
+                    </div>
+                )}
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                    <button
+                        type="button"
+                        onClick={onCancel}
+                        style={{ padding: '10px 18px', background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', color: '#475569' }}
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onConfirm}
+                        style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', cursor: 'pointer' }}
+                    >
+                        Yes, move it
+                    </button>
+                </div>
+            </div>
+        </div>
+    )
+}
+
 function RescheduleModal({ appt, appointments, onClose, onSaved }) {
     const [newDate, setNewDate] = useState(appt.appointment_date || '')
     const [newTime, setNewTime] = useState(appt.start_time ? appt.start_time.slice(0, 5) : '09:00')
