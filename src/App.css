@@ -4082,6 +4082,61 @@
 }
 
 /* ============================================ */
+/* ============================================ */
+/* QUICK JUMP (calendar sidebar)                */
+/* 1-14 weeks out — matches MoeGo layout        */
+/* ============================================ */
+
+.quick-jump {
+  margin-bottom: 20px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.quick-jump-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e293b;
+  text-align: center;
+  padding: 6px 0 10px;
+  border-bottom: 1px solid #f1f5f9;
+  margin-bottom: 10px;
+}
+
+.quick-jump-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.quick-jump-btn {
+  padding: 8px 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.quick-jump-btn:hover {
+  background: #faf5ff;
+  border-color: #7c3aed;
+  color: #7c3aed;
+}
+
+.quick-jump-btn:active {
+  background: #7c3aed;
+  color: white;
+  border-color: #7c3aed;
+}
+
+/* ============================================ */
 /* MINI CALENDAR                               */
 /* ============================================ */
 

@@ -1511,6 +1511,11 @@ export default function Calendar() {
                         onDayClick={(date) => { setCurrentDate(date); setView('day') }}
                     />
 
+                    {/* Quick Jump — 1 to 14 weeks out from today (matches MoeGo) */}
+                    <QuickJump
+                        onJump={(date) => { setCurrentDate(date); setView('day') }}
+                    />
+
                     <h2>Revenue</h2>
                     <div className="revenue-label">
                         {view === 'day' ? 'Today' : view === 'week' ? 'This Week' : 'This Month'}
@@ -3434,6 +3439,43 @@ function MonthView({ currentDate, appointments, onDayClick }) {
                         })}
                     </div>
                 ))}
+            </div>
+        </div>
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// QuickJump — 1 through 14 weeks out from today (matches MoeGo).
+// Click a button → calendar jumps to that date and switches to day view.
+// Clients constantly ask "book me in 4 weeks" / "book me in 8 weeks" —
+// this saves clicking week-by-week through the mini calendar.
+// ─────────────────────────────────────────────────────────────────────
+function QuickJump({ onJump }) {
+    const WEEKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+
+    function jumpToWeeksOut(n) {
+        const target = new Date()
+        target.setHours(0, 0, 0, 0)
+        target.setDate(target.getDate() + (n * 7))
+        onJump(target)
+    }
+
+    return (
+        <div className="quick-jump">
+            <div className="quick-jump-title">Quick jump</div>
+            <div className="quick-jump-grid">
+                {WEEKS.map(function (n) {
+                    return (
+                        <button
+                            key={n}
+                            type="button"
+                            className="quick-jump-btn"
+                            onClick={function () { jumpToWeeksOut(n) }}
+                        >
+                            {n === 1 ? '1 week out' : n + ' weeks out'}
+                        </button>
+                    )
+                })}
             </div>
         </div>
     )
