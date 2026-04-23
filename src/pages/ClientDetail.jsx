@@ -600,6 +600,40 @@ export default function ClientDetail() {
     else fetchContacts()
   }
 
+  // ===== Delete Client =====
+  // Wipes the client row (cascades pets / appointments / payments / contacts / notes)
+  // AND their auth user if they had a portal account (frees up the email).
+  const [deletingClient, setDeletingClient] = useState(false)
+  const handleDeleteClient = async () => {
+    if (!client) return
+    const name = ((client.first_name || '') + ' ' + (client.last_name || '')).trim()
+    const petCount = pets.length
+    const warn =
+      'PERMANENTLY DELETE ' + name + '?\n\n' +
+      'This will erase:\n' +
+      '  • This client record\n' +
+      '  • ' + petCount + ' pet' + (petCount === 1 ? '' : 's') + '\n' +
+      '  • ALL their appointments (past & upcoming)\n' +
+      '  • ALL their payment history\n' +
+      '  • ALL their notes & contacts\n' +
+      (client.user_id ? '  • Their portal login (email frees up for re-signup)\n' : '') +
+      '\nThis CANNOT be undone. Type their first name to confirm.'
+    const typed = window.prompt(warn)
+    if (!typed) return
+    if (typed.trim().toLowerCase() !== (client.first_name || '').trim().toLowerCase()) {
+      alert('Name did not match. Delete cancelled.')
+      return
+    }
+    setDeletingClient(true)
+    const { error } = await supabase.rpc('delete_client_and_auth', { p_client_id: id })
+    if (error) {
+      alert('Error deleting: ' + error.message)
+      setDeletingClient(false)
+      return
+    }
+    navigate('/clients')
+  }
+
   // Helper functions
   const getStatusColor = (status) => {
     const colors = {
@@ -679,13 +713,33 @@ export default function ClientDetail() {
       <div className="cp-header">
         <div className="cp-header-top">
           <Link to="/clients" className="cp-back">← Back to Clients</Link>
-          <button
-            className="cp-book-again-btn"
-            onClick={handleBookAgainFromHeader}
-            title={lastApptOverall ? `Rebook last service` : 'No history to rebook from'}
-          >
-            📅 Book Again
-          </button>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button
+              className="cp-book-again-btn"
+              onClick={handleBookAgainFromHeader}
+              title={lastApptOverall ? `Rebook last service` : 'No history to rebook from'}
+            >
+              📅 Book Again
+            </button>
+            <button
+              onClick={handleDeleteClient}
+              disabled={deletingClient}
+              title="Permanently delete this client (and their portal login if they have one)"
+              style={{
+                padding: '8px 14px',
+                background: '#fff',
+                color: '#b91c1c',
+                border: '1px solid #fecaca',
+                borderRadius: '8px',
+                fontWeight: '600',
+                fontSize: '13px',
+                cursor: deletingClient ? 'wait' : 'pointer',
+                opacity: deletingClient ? 0.6 : 1,
+              }}
+            >
+              {deletingClient ? 'Deleting...' : '🗑️ Delete'}
+            </button>
+          </div>
         </div>
         <div className="cp-header-row">
           <div className="cp-avatar-big" style={{ background: getPetAvatar({ name: client.first_name }) }}>
