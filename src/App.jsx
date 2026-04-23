@@ -40,6 +40,7 @@ import Terms from './pages/Terms'
 import Contact from './pages/Contact'
 import ClientSignup from './pages/ClientSignup'
 import ClientLogin from './pages/ClientLogin'
+import EmailConfirmed from './pages/EmailConfirmed'
 import ClientPortalDashboard from './pages/ClientPortalDashboard'
 import ClientPortalMessages from './pages/ClientPortalMessages'
 import ClientPortalThread from './pages/ClientPortalThread'
@@ -54,7 +55,7 @@ function AppLayout({ children }) {
 
     // Don't show sidebar on login/signup or public legal pages
     var isAuthPage = location.pathname === '/login' || location.pathname === '/signup'
-    var isPublicPage = location.pathname === '/privacy' || location.pathname === '/terms' || location.pathname === '/portal/signup' || location.pathname === '/portal/login' || location.pathname === '/plans'
+    var isPublicPage = location.pathname === '/privacy' || location.pathname === '/terms' || location.pathname === '/portal/signup' || location.pathname === '/portal/login' || location.pathname === '/portal/confirmed' || location.pathname === '/plans'
     var isPortalPage = location.pathname.indexOf('/portal') === 0
     if (isAuthPage || isPublicPage) {
         return <>{children}</>
@@ -113,6 +114,7 @@ function App() {
                     <Route path="/plans" element={<Plans />} />
                     <Route path="/portal/signup" element={<ClientSignup />} />
                     <Route path="/portal/login" element={<ClientLogin />} />
+                    <Route path="/portal/confirmed" element={<EmailConfirmed />} />
                     <Route path="/portal" element={session ? <ClientPortalDashboard /> : <Navigate to="/portal/login" />} />
                     <Route path="/portal/messages" element={session ? <ClientPortalMessages /> : <Navigate to="/portal/login" />} />
                     <Route path="/portal/messages/:threadId" element={session ? <ClientPortalThread /> : <Navigate to="/portal/login" />} />
