@@ -368,16 +368,24 @@ export default function Calendar() {
     const goToToday = () => setCurrentDate(new Date())
 
     // Revenue calculation
+    // Completed = checked_out / completed appts (money already earned)
+    // Expected  = everything ELSE on the calendar (scheduled, confirmed,
+    //            unconfirmed, pending, checked_in) — money we should earn.
+    // Excluded  = cancelled, no_show, rescheduled (won't bring money).
     const getRevenue = () => {
         let filtered = appointments
         if (view === 'day') {
             filtered = appointments.filter((a) => a.appointment_date === dateToString(currentDate))
         }
-        const completed = filtered.filter((a) => a.status === 'completed')
-        const confirmed = filtered.filter((a) => a.status === 'confirmed')
+        const DONE_STATUSES = ['completed', 'checked_out']
+        const DEAD_STATUSES = ['cancelled', 'no_show', 'rescheduled']
+        const completed = filtered.filter((a) => DONE_STATUSES.indexOf(a.status) >= 0)
+        const expected = filtered.filter((a) =>
+            DONE_STATUSES.indexOf(a.status) < 0 && DEAD_STATUSES.indexOf(a.status) < 0
+        )
         const totalCompleted = completed.reduce((sum, a) => sum + (parseFloat(a.final_price) || parseFloat(a.quoted_price) || 0), 0)
-        const totalExpected = confirmed.reduce((sum, a) => sum + (parseFloat(a.quoted_price) || 0), 0)
-        const activeCount = filtered.filter((a) => a.status !== 'cancelled' && a.status !== 'rescheduled').length
+        const totalExpected = expected.reduce((sum, a) => sum + (parseFloat(a.quoted_price) || 0), 0)
+        const activeCount = filtered.filter((a) => DEAD_STATUSES.indexOf(a.status) < 0).length
         return { completed: totalCompleted, expected: totalExpected, total: totalCompleted + totalExpected, count: activeCount }
     }
 
