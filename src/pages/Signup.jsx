@@ -2,13 +2,13 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Link, useSearchParams } from 'react-router-dom'
 
-// Stripe Payment Links (sandbox). Kept in sync with Plans.jsx.
-// When we go LIVE, swap these 4 URLs for the live-mode links.
+// Stripe Payment Links (LIVE). Kept in sync with Plans.jsx.
+// Replaced sandbox `test_` URLs on launch.
 const PAYMENT_LINKS = {
-  basic:    'https://buy.stripe.com/test_4gMdRa98G7AzgMQ5U59MY00',
-  pro:      'https://buy.stripe.com/test_28E7sMgB8f31cwA4Q19MY01',
-  pro_plus: 'https://buy.stripe.com/test_7sY6oI1GedYX548gyJ9MY02',
-  growing:  'https://buy.stripe.com/test_bJe9AUet0bQP68ceqB9MY03',
+  basic:    'https://buy.stripe.com/dRm9AV7Vb1yG3VReO77ok02',
+  pro:      'https://buy.stripe.com/eVq9AV4IZ4KS1NJcFZ7ok03',
+  pro_plus: 'https://buy.stripe.com/cNi5kF1wN3GO7835dx7ok01',
+  growing:  'https://buy.stripe.com/9B614pdfv1yGcsn6hB7ok00',
 }
 
 export default function Signup() {

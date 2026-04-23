@@ -51,15 +51,15 @@ const supabase = createClient(
 )
 
 // ---------------------------------------------------------------------------
-// Price ID -> Tier mapping (SANDBOX)
-// When we go LIVE, these IDs will change - see "Stripe Price IDs.md"
+// Price ID -> Tier mapping (LIVE)
+// Swapped from sandbox IDs on launch. Sandbox IDs archived in git history.
 // ---------------------------------------------------------------------------
 
 const PRICE_TO_TIER: Record<string, string> = {
-  'price_1TOtWmLx8nm3a7PZNUYZuMbt': 'basic',     // $70
-  'price_1TOtqULx8nm3a7PZMlqDZaHa': 'pro',       // $129
-  'price_1TOtupLx8nm3a7PZYktElWcP': 'pro_plus',  // $199
-  'price_1TOtzFLx8nm3a7PZI6CsmUIO': 'growing',   // $399
+  'price_1TP34TQ63eOdno0Tewysfzrl': 'basic',     // $70
+  'price_1TP34PQ63eOdno0T329riWag': 'pro',       // $129
+  'price_1TP34TQ63eOdno0TFn95AcPS': 'pro_plus',  // $199
+  'price_1TP34PQ63eOdno0TCNtSNRyv': 'growing',   // $399
 }
 
 // Helper: convert Stripe's unix-second timestamp to an ISO string (or null)
