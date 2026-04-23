@@ -600,6 +600,79 @@ export default function ClientDetail() {
     else fetchContacts()
   }
 
+  // ===== Merge Clients =====
+  // Move this client's data (pets, appointments, payments, notes, contacts,
+  // portal login) INTO another client record. This one gets deleted after.
+  // Covers the scenario where a new signup creates a duplicate of an
+  // existing client whose phone/email didn't match at signup time.
+  const [showMergeModal, setShowMergeModal] = useState(false)
+  const [mergeSearch, setMergeSearch] = useState('')
+  const [mergeCandidates, setMergeCandidates] = useState([])
+  const [mergeSearching, setMergeSearching] = useState(false)
+  const [merging, setMerging] = useState(false)
+
+  const openMergeModal = () => {
+    setMergeSearch('')
+    setMergeCandidates([])
+    setShowMergeModal(true)
+  }
+
+  const searchMergeCandidates = async (q) => {
+    setMergeSearch(q)
+    if (!q || q.trim().length < 2) {
+      setMergeCandidates([])
+      return
+    }
+    setMergeSearching(true)
+    const term = q.trim()
+    const digits = term.replace(/[^0-9]/g, '')
+    // Search by name OR phone, EXCLUDE the current client
+    let query = supabase
+      .from('clients')
+      .select('id, first_name, last_name, phone, email, user_id')
+      .neq('id', id)
+      .limit(20)
+    if (digits.length >= 3) {
+      // looks like a phone search
+      query = query.ilike('phone', '%' + digits + '%')
+    } else {
+      // name search — OR first_name/last_name
+      query = query.or('first_name.ilike.%' + term + '%,last_name.ilike.%' + term + '%')
+    }
+    const { data, error } = await query
+    if (!error) setMergeCandidates(data || [])
+    setMergeSearching(false)
+  }
+
+  const confirmMerge = async (target) => {
+    if (!target || !client) return
+    const sourceName = ((client.first_name || '') + ' ' + (client.last_name || '')).trim()
+    const targetName = ((target.first_name || '') + ' ' + (target.last_name || '')).trim()
+    const warn =
+      'MERGE ' + sourceName + ' into ' + targetName + '?\n\n' +
+      'This will:\n' +
+      '  • Move ALL of ' + sourceName + '\'s pets, appointments, payments, notes, and contacts to ' + targetName + '\n' +
+      (client.user_id ? '  • Transfer the portal login to ' + targetName + ' (they\'ll log in with ' + (client.email || 'their email') + ')\n' : '') +
+      '  • DELETE the ' + sourceName + ' record\n\n' +
+      'This CANNOT be undone. Type "merge" to confirm.'
+    const typed = window.prompt(warn)
+    if (!typed || typed.trim().toLowerCase() !== 'merge') {
+      return
+    }
+    setMerging(true)
+    const { error } = await supabase.rpc('merge_clients', {
+      p_source_id: id,
+      p_target_id: target.id,
+    })
+    if (error) {
+      alert('Merge failed: ' + error.message)
+      setMerging(false)
+      return
+    }
+    // Redirect to the target client — where all the data now lives
+    navigate('/clients/' + target.id)
+  }
+
   // ===== Delete Client =====
   // Wipes the client row (cascades pets / appointments / payments / contacts / notes)
   // AND their auth user if they had a portal account (frees up the email).
@@ -716,13 +789,31 @@ export default function ClientDetail() {
       <div className="cp-header">
         <div className="cp-header-top">
           <Link to="/clients" className="cp-back">← Back to Clients</Link>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               className="cp-book-again-btn"
               onClick={handleBookAgainFromHeader}
               title={lastApptOverall ? `Rebook last service` : 'No history to rebook from'}
             >
               📅 Book Again
+            </button>
+            <button
+              onClick={openMergeModal}
+              disabled={merging}
+              title="Merge this client into another client record (e.g., combine a duplicate from portal signup with the real record)"
+              style={{
+                padding: '8px 14px',
+                background: '#fff',
+                color: '#7c3aed',
+                border: '1px solid #7c3aed',
+                borderRadius: '8px',
+                fontWeight: '600',
+                fontSize: '13px',
+                cursor: merging ? 'wait' : 'pointer',
+                opacity: merging ? 0.6 : 1,
+              }}
+            >
+              {merging ? 'Merging...' : '🔀 Merge'}
             </button>
             <button
               onClick={handleDeleteClient}
@@ -1889,6 +1980,102 @@ export default function ClientDetail() {
         )}
 
       </div>
+
+      {/* ═══════ MERGE CLIENTS MODAL ═══════ */}
+      {showMergeModal && (
+        <div
+          onClick={function () { setShowMergeModal(false) }}
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.55)', zIndex: 9999,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
+          }}
+        >
+          <div
+            onClick={function (e) { e.stopPropagation() }}
+            style={{
+              background: '#fff', borderRadius: '16px', padding: '24px',
+              maxWidth: '520px', width: '100%', maxHeight: '80vh',
+              overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+            }}
+          >
+            <h2 style={{ margin: '0 0 6px', fontSize: '20px', fontWeight: '800' }}>
+              🔀 Merge {client.first_name} into another client
+            </h2>
+            <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#6b7280', lineHeight: '1.5' }}>
+              Search for the client you want to merge this one INTO. All pets, appointments, payments, notes, and contacts will move there. This record will be deleted.
+            </p>
+
+            <input
+              type="text"
+              autoFocus
+              placeholder="Search by name or phone..."
+              value={mergeSearch}
+              onChange={function (e) { searchMergeCandidates(e.target.value) }}
+              style={{
+                width: '100%', boxSizing: 'border-box',
+                padding: '12px 14px', fontSize: '15px',
+                border: '1px solid #d1d5db', borderRadius: '10px', marginBottom: '14px'
+              }}
+            />
+
+            {mergeSearching && (
+              <div style={{ textAlign: 'center', padding: '16px', color: '#9ca3af', fontSize: '13px' }}>
+                Searching...
+              </div>
+            )}
+
+            {!mergeSearching && mergeSearch.trim().length >= 2 && mergeCandidates.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '16px', color: '#9ca3af', fontSize: '13px' }}>
+                No other clients match "{mergeSearch}".
+              </div>
+            )}
+
+            {mergeCandidates.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
+                {mergeCandidates.map(function (c) {
+                  const fullName = ((c.first_name || '') + ' ' + (c.last_name || '')).trim()
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={function () { confirmMerge(c) }}
+                      disabled={merging}
+                      style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        padding: '12px 14px', background: '#f9fafb',
+                        border: '1px solid #e5e7eb', borderRadius: '10px',
+                        cursor: merging ? 'wait' : 'pointer', textAlign: 'left', width: '100%',
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: '700', fontSize: '14px', color: '#111827' }}>{fullName || 'Unnamed'}</div>
+                        <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+                          {c.phone || 'No phone'} {c.email && '· ' + c.email}
+                          {c.user_id && <span style={{ marginLeft: '6px', padding: '1px 6px', background: '#ede9fe', color: '#6d28d9', borderRadius: '999px', fontSize: '10px', fontWeight: '700' }}>HAS LOGIN</span>}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: '13px', color: '#7c3aed', fontWeight: '700' }}>Merge →</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+              <button
+                onClick={function () { setShowMergeModal(false) }}
+                disabled={merging}
+                style={{
+                  padding: '10px 18px', background: '#f1f5f9', color: '#475569',
+                  border: '1px solid #e2e8f0', borderRadius: '8px', fontWeight: '600', cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
