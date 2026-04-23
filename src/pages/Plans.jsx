@@ -186,7 +186,7 @@ var FAQS = [
   },
   {
     q: 'Do I need a credit card for the free trial?',
-    a: 'Nope. Basic and Pro give you 30 days, Pro+ and Growing give you 14 days — all with no credit card required. You only add a card when you\'re ready to continue.',
+    a: 'Yes. Basic and Pro get 30 days, Pro+ and Growing get 14 days — card captured upfront, nothing charged until the trial ends. Cancel anytime before then and you won\'t pay a cent.',
   },
   {
     q: 'What happens if I cancel?',
@@ -246,9 +246,8 @@ export default function Plans() {
         fontSize: '15px',
         fontWeight: '600',
       }}>
-        🎉 <strong>LAUNCH SPECIAL — 50% OFF your first month.</strong>{' '}
-        Use code <span style={{ background: 'rgba(255,255,255,0.25)', padding: '2px 10px', borderRadius: '6px', fontFamily: 'monospace', margin: '0 4px' }}>LAUNCH50</span>{' '}
-        at checkout. Limited time.
+        🚀 <strong>FOUNDER DEAL — First 100 signups get full access to every feature on every plan.</strong>{' '}
+        Locked in forever — limited time.
       </div>
 
       {/* ─── Header ─── */}
@@ -257,7 +256,7 @@ export default function Plans() {
           Pick your PetPro plan
         </h1>
         <p style={{ fontSize: '18px', color: '#6b7280', margin: 0, maxWidth: '640px', marginLeft: 'auto', marginRight: 'auto' }}>
-          Built by a groomer, for groomers. Start free — no credit card required. Upgrade or downgrade anytime.
+          Built by a groomer, for groomers. 30-day free trial, cancel anytime. Upgrade or downgrade whenever.
         </p>
       </div>
 
@@ -415,7 +414,7 @@ export default function Plans() {
           Ready to try PetPro?
         </h2>
         <p style={{ fontSize: '17px', opacity: 0.95, margin: '0 0 28px' }}>
-          Start free — no credit card required.
+          Start your free trial today. Cancel anytime before it ends.
         </p>
         <button
           onClick={function () { handleStartTrial('pro_plus') }}
