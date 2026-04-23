@@ -25,6 +25,10 @@ Work through one at a time. Check off as we finish each.
 
 ---
 
+## Known Bugs to Fix Before Invites Go Out
+
+- [x] **Client portal confirm-email redirect lands on groomer dashboard** — fixed. App.jsx `/` route was blindly sending any logged-in user to the groomer Dashboard. Added `RootRedirect` component that checks if the user has a `clients` row → routes to `/portal`. Groomers still go to Dashboard.
+
 ## Notes
 
 - Add more items here tomorrow as they come up.

@@ -41,6 +41,36 @@ import Contact from './pages/Contact'
 import ClientSignup from './pages/ClientSignup'
 import ClientLogin from './pages/ClientLogin'
 import EmailConfirmed from './pages/EmailConfirmed'
+
+// ─────────────────────────────────────────────────────────────────
+// RootRedirect — smart routing at "/" based on user type.
+// Without this, logged-in clients landed on the groomer Dashboard.
+// Now: no session → /login. Client user → /portal. Groomer → Dashboard.
+// ─────────────────────────────────────────────────────────────────
+function RootRedirect({ session }) {
+    const [userType, setUserType] = useState(null) // 'client' | 'groomer'
+    const [checking, setChecking] = useState(true)
+    useEffect(() => {
+        if (!session) { setChecking(false); return }
+        let cancelled = false
+        supabase
+            .from('clients')
+            .select('id')
+            .eq('user_id', session.user.id)
+            .maybeSingle()
+            .then(({ data }) => {
+                if (cancelled) return
+                setUserType(data ? 'client' : 'groomer')
+                setChecking(false)
+            })
+        return () => { cancelled = true }
+    }, [session])
+
+    if (checking) return <div className="loading">Loading PetPro...</div>
+    if (!session) return <Navigate to="/login" replace />
+    if (userType === 'client') return <Navigate to="/portal" replace />
+    return <Dashboard />
+}
 import ClientPortalDashboard from './pages/ClientPortalDashboard'
 import ClientPortalMessages from './pages/ClientPortalMessages'
 import ClientPortalThread from './pages/ClientPortalThread'
@@ -118,7 +148,7 @@ function App() {
                     <Route path="/portal" element={session ? <ClientPortalDashboard /> : <Navigate to="/portal/login" />} />
                     <Route path="/portal/messages" element={session ? <ClientPortalMessages /> : <Navigate to="/portal/login" />} />
                     <Route path="/portal/messages/:threadId" element={session ? <ClientPortalThread /> : <Navigate to="/portal/login" />} />
-                    <Route path="/" element={session ? <Dashboard /> : <Navigate to="/login" />} />
+                    <Route path="/" element={<RootRedirect session={session} />} />
                     <Route path="/clients" element={session ? <Clients /> : <Navigate to="/login" />} />
                     <Route path="/clients/new" element={session ? <AddClient /> : <Navigate to="/login" />} />
                     <Route path="/clients/:id" element={session ? <ClientDetail /> : <Navigate to="/login" />} />

@@ -92,6 +92,9 @@ export default function ClientSignup() {
         email: email.trim().toLowerCase(),
         password: password,
         options: {
+          // After verifying email, Supabase sends them to this URL.
+          // Lands on our "Email Confirmed!" success page, not root.
+          emailRedirectTo: window.location.origin + '/portal/confirmed',
           data: {
             full_name: fullName.trim(),
             phone: phone.trim(),
