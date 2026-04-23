@@ -617,11 +617,14 @@ export default function ClientDetail() {
       '  • ALL their payment history\n' +
       '  • ALL their notes & contacts\n' +
       (client.user_id ? '  • Their portal login (email frees up for re-signup)\n' : '') +
-      '\nThis CANNOT be undone. Type their first name to confirm.'
+      '\nThis CANNOT be undone. Type their first name (' + (client.first_name || '') + ') OR full name to confirm.'
     const typed = window.prompt(warn)
     if (!typed) return
-    if (typed.trim().toLowerCase() !== (client.first_name || '').trim().toLowerCase()) {
-      alert('Name did not match. Delete cancelled.')
+    const typedLower = typed.trim().toLowerCase()
+    const firstNameLower = (client.first_name || '').trim().toLowerCase()
+    const fullNameLower = ((client.first_name || '') + ' ' + (client.last_name || '')).trim().toLowerCase()
+    if (typedLower !== firstNameLower && typedLower !== fullNameLower) {
+      alert('Name did not match. Delete cancelled.\n\nExpected "' + (client.first_name || '') + '" or "' + name + '".')
       return
     }
     setDeletingClient(true)
