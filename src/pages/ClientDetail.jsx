@@ -71,6 +71,17 @@ export default function ClientDetail() {
   // Most recent completed appointment overall for this client (for the header "Book Again" button)
   const [lastApptOverall, setLastApptOverall] = useState(null)
 
+  // ===== Edit Client state (inline edit on Contact Information card) =====
+  // Lets the groomer fix name/email/phone/address — handles marriage name
+  // changes, typos, missing emails (important before sending portal invites).
+  const [editingClient, setEditingClient] = useState(false)
+  const [editClientForm, setEditClientForm] = useState({
+    first_name: '', last_name: '', phone: '', email: '',
+    preferred_contact: 'text', address: ''
+  })
+  const [savingClientEdit, setSavingClientEdit] = useState(false)
+  const [editClientError, setEditClientError] = useState('')
+
   // ===== Contacts tab state (Task #97 / #98) =====
   // Multi-contact support — spouse, pickup people, emergency, vet, etc.
   const [contacts, setContacts] = useState([])
@@ -450,6 +461,60 @@ export default function ClientDetail() {
     setSavingNote(false)
   }
 
+  // ===== Edit Client handlers =====
+  const startEditClient = () => {
+    if (!client) return
+    setEditClientForm({
+      first_name: client.first_name || '',
+      last_name: client.last_name || '',
+      phone: client.phone || '',
+      email: client.email || '',
+      preferred_contact: client.preferred_contact || 'text',
+      address: client.address || ''
+    })
+    setEditClientError('')
+    setEditingClient(true)
+  }
+
+  const cancelEditClient = () => {
+    setEditClientError('')
+    setEditingClient(false)
+  }
+
+  const saveClientEdit = async () => {
+    setEditClientError('')
+    // Validate
+    if (!editClientForm.first_name.trim()) {
+      setEditClientError('First name is required.')
+      return
+    }
+    if (!editClientForm.phone.trim()) {
+      setEditClientError('Phone number is required.')
+      return
+    }
+
+    setSavingClientEdit(true)
+    const { error } = await supabase
+      .from('clients')
+      .update({
+        first_name: editClientForm.first_name.trim(),
+        last_name: editClientForm.last_name.trim() || null,
+        phone: editClientForm.phone.trim(),
+        email: editClientForm.email.trim() || null,
+        preferred_contact: editClientForm.preferred_contact,
+        address: editClientForm.address.trim() || null,
+      })
+      .eq('id', id)
+
+    if (error) {
+      setEditClientError('Could not save: ' + error.message)
+    } else {
+      await fetchClientAndPets()
+      setEditingClient(false)
+    }
+    setSavingClientEdit(false)
+  }
+
   // ===== Contacts CRUD (Task #97 / #98) =====
   // Fetch all extra contacts for this client (emergency, pickup people, etc.)
   const fetchContacts = async () => {
@@ -691,29 +756,169 @@ export default function ClientDetail() {
           <div className="cp-overview">
             {/* Contact Card */}
             <div className="cp-card">
-              <h3 className="cp-card-title">📋 Contact Information</h3>
-              <div className="cp-contact-grid">
-                <div className="cp-contact-item">
-                  <span className="cp-contact-label">Phone</span>
-                  <span className="cp-contact-value">{client.phone || 'Not provided'}</span>
-                </div>
-                <div className="cp-contact-item">
-                  <span className="cp-contact-label">Email</span>
-                  <span className="cp-contact-value">{client.email || 'Not provided'}</span>
-                </div>
-                <div className="cp-contact-item">
-                  <span className="cp-contact-label">Preferred Contact</span>
-                  <span className="cp-contact-value">{client.preferred_contact || 'Not set'}</span>
-                </div>
-                <div className="cp-contact-item">
-                  <span className="cp-contact-label">Address</span>
-                  <span className="cp-contact-value">{client.address || 'Not provided'}</span>
-                </div>
+              <div className="cp-card-title-row">
+                <h3 className="cp-card-title">📋 Contact Information</h3>
+                {!editingClient && (
+                  <button
+                    onClick={startEditClient}
+                    style={{
+                      padding: '6px 12px',
+                      background: '#fff',
+                      color: '#7c3aed',
+                      border: '1px solid #7c3aed',
+                      borderRadius: '6px',
+                      fontWeight: '600',
+                      fontSize: '13px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    ✏️ Edit
+                  </button>
+                )}
               </div>
-              {client.notes && (
-                <div className="cp-client-notes-preview">
-                  <strong>Notes:</strong> {client.notes}
-                </div>
+
+              {!editingClient ? (
+                <>
+                  {/* ─── View Mode ─── */}
+                  <div className="cp-contact-grid">
+                    <div className="cp-contact-item">
+                      <span className="cp-contact-label">Name</span>
+                      <span className="cp-contact-value">{client.first_name} {client.last_name || ''}</span>
+                    </div>
+                    <div className="cp-contact-item">
+                      <span className="cp-contact-label">Phone</span>
+                      <span className="cp-contact-value">{client.phone || 'Not provided'}</span>
+                    </div>
+                    <div className="cp-contact-item">
+                      <span className="cp-contact-label">Email</span>
+                      <span className="cp-contact-value">{client.email || 'Not provided'}</span>
+                    </div>
+                    <div className="cp-contact-item">
+                      <span className="cp-contact-label">Preferred Contact</span>
+                      <span className="cp-contact-value">{client.preferred_contact || 'Not set'}</span>
+                    </div>
+                    <div className="cp-contact-item">
+                      <span className="cp-contact-label">Address</span>
+                      <span className="cp-contact-value">{client.address || 'Not provided'}</span>
+                    </div>
+                  </div>
+                  {client.notes && (
+                    <div className="cp-client-notes-preview">
+                      <strong>Notes:</strong> {client.notes}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* ─── Edit Mode ─── */}
+                  {editClientError && (
+                    <div style={{
+                      padding: '10px 12px',
+                      background: '#fee2e2',
+                      border: '1px solid #ef4444',
+                      borderRadius: '8px',
+                      color: '#991b1b',
+                      marginBottom: '12px',
+                      fontSize: '13px'
+                    }}>
+                      {editClientError}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <label style={contactLabelStyle}>
+                      First name *
+                      <input
+                        type="text"
+                        value={editClientForm.first_name}
+                        onChange={function (e) { setEditClientForm({ ...editClientForm, first_name: e.target.value }) }}
+                        style={contactInputStyle}
+                      />
+                    </label>
+                    <label style={contactLabelStyle}>
+                      Last name
+                      <input
+                        type="text"
+                        value={editClientForm.last_name}
+                        onChange={function (e) { setEditClientForm({ ...editClientForm, last_name: e.target.value }) }}
+                        style={contactInputStyle}
+                      />
+                    </label>
+                    <label style={contactLabelStyle}>
+                      Phone *
+                      <input
+                        type="tel"
+                        value={editClientForm.phone}
+                        onChange={function (e) { setEditClientForm({ ...editClientForm, phone: e.target.value }) }}
+                        placeholder="(555) 123-4567"
+                        style={contactInputStyle}
+                      />
+                    </label>
+                    <label style={contactLabelStyle}>
+                      Email
+                      <input
+                        type="email"
+                        value={editClientForm.email}
+                        onChange={function (e) { setEditClientForm({ ...editClientForm, email: e.target.value }) }}
+                        placeholder="sandy@example.com"
+                        style={contactInputStyle}
+                      />
+                    </label>
+                    <label style={contactLabelStyle}>
+                      Preferred Contact
+                      <select
+                        value={editClientForm.preferred_contact}
+                        onChange={function (e) { setEditClientForm({ ...editClientForm, preferred_contact: e.target.value }) }}
+                        style={{ ...contactInputStyle, background: '#fff' }}
+                      >
+                        <option value="text">Text</option>
+                        <option value="call">Call</option>
+                        <option value="email">Email</option>
+                      </select>
+                    </label>
+                    <label style={{ ...contactLabelStyle, gridColumn: '1 / -1' }}>
+                      Address
+                      <input
+                        type="text"
+                        value={editClientForm.address}
+                        onChange={function (e) { setEditClientForm({ ...editClientForm, address: e.target.value }) }}
+                        placeholder="123 Main St, City, State ZIP"
+                        style={contactInputStyle}
+                      />
+                    </label>
+                  </div>
+
+                  {editClientForm.email && client.email && editClientForm.email.trim().toLowerCase() !== client.email.toLowerCase() && client.user_id && (
+                    <div style={{
+                      marginTop: '12px',
+                      padding: '10px 12px',
+                      background: '#fef3c7',
+                      border: '1px solid #f59e0b',
+                      borderRadius: '8px',
+                      color: '#92400e',
+                      fontSize: '12px'
+                    }}>
+                      ⚠️ This client already signed up for the portal with their old email. Changing the email here won't change their login — they'll still log in with <strong>{client.email}</strong>.
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '14px' }}>
+                    <button
+                      onClick={cancelEditClient}
+                      disabled={savingClientEdit}
+                      style={{ padding: '10px 18px', background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={saveClientEdit}
+                      disabled={savingClientEdit}
+                      style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', cursor: 'pointer', opacity: savingClientEdit ? 0.6 : 1 }}
+                    >
+                      {savingClientEdit ? 'Saving...' : '💾 Save changes'}
+                    </button>
+                  </div>
+                </>
               )}
             </div>
 
