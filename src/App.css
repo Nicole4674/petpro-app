@@ -1393,7 +1393,7 @@
 .time-row {
     display: flex;
     min-height: 120px;
-    border-bottom: 1px solid #cbd5e1;
+    border-bottom: 1.5px solid #94a3b8;
 }
 
 .time-gutter {
@@ -1401,7 +1401,7 @@
     min-width: 80px;
     padding: 6px 10px;
     text-align: right;
-    border-right: 1px solid #e2e8f0;
+    border-right: 1.5px solid #94a3b8;
     font-size: 14px;
     font-weight: 700;
     color: #475569;
@@ -1409,7 +1409,7 @@
 
 .time-cell {
     flex: 1;
-    border-right: 1px solid #cbd5e1;
+    border-right: 1.5px solid #94a3b8;
     position: relative;
     cursor: pointer;
     min-height: 120px;

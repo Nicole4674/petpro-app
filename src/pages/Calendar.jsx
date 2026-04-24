@@ -2185,6 +2185,49 @@ export default function Calendar() {
                                 </div>
                             </div>
 
+                            {/* Booked-at timestamp — when this appointment was created */}
+                            {selectedAppt.created_at && (
+                                <div style={{
+                                    marginTop: '10px',
+                                    padding: '8px 12px',
+                                    background: '#f8fafc',
+                                    border: '1px solid #e5e7eb',
+                                    borderRadius: '8px',
+                                    fontSize: '12px',
+                                    color: '#64748b',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px'
+                                }}>
+                                    <span style={{ fontSize: '14px' }}>📝</span>
+                                    <span>
+                                        <strong style={{ color: '#475569', fontWeight: 600 }}>Booked:</strong>{' '}
+                                        {(() => {
+                                            const d = new Date(selectedAppt.created_at)
+                                            const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                            const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+                                            const diffMs = Date.now() - d.getTime()
+                                            const diffDays = Math.floor(diffMs / 86400000)
+                                            let rel = ''
+                                            if (diffDays <= 0) rel = 'today'
+                                            else if (diffDays === 1) rel = 'yesterday'
+                                            else if (diffDays < 7) rel = diffDays + ' days ago'
+                                            else if (diffDays < 30) {
+                                                const w = Math.floor(diffDays / 7)
+                                                rel = w + ' week' + (w === 1 ? '' : 's') + ' ago'
+                                            } else if (diffDays < 365) {
+                                                const m = Math.floor(diffDays / 30)
+                                                rel = m + ' month' + (m === 1 ? '' : 's') + ' ago'
+                                            } else {
+                                                const y = Math.floor(diffDays / 365)
+                                                rel = y + ' year' + (y === 1 ? '' : 's') + ' ago'
+                                            }
+                                            return dateStr + ' at ' + timeStr + ' · ' + rel
+                                        })()}
+                                    </span>
+                                </div>
+                            )}
+
                             {/* Task #19 — Recurring series info */}
                             {selectedAppt.recurring_series_id && selectedAppt.recurring_series && (() => {
                                 const remaining = selectedAppt.recurring_upcoming_count || 0
@@ -5071,36 +5114,169 @@ function DragDropConfirmModal({ dragConfirm, staffMembers, onConfirm, onCancel }
     const isRecurring = !!appt.recurring_series_id
     const staffChanged = staffIdPassed && oldStaffId !== newStaffId
     return (
-        <div className="modal-overlay" onClick={onCancel} style={{ zIndex: 9999 }}>
-            <div className="modal-content" style={{ maxWidth: '440px' }} onClick={function (e) { e.stopPropagation() }}>
-                <h3 style={{ margin: '0 0 16px', fontSize: '18px' }}>Move this appointment?</h3>
-                <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px', lineHeight: '1.6' }}>
-                    <div style={{ fontWeight: '700', marginBottom: '6px' }}>{clientName.trim()} — {petName}</div>
-                    <div style={{ color: '#64748b', marginBottom: '10px' }}>Service: {appt.services?.service_name || 'N/A'}</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr', gap: '4px 12px' }}>
-                        <span style={{ color: '#64748b' }}>From:</span>
-                        <span>{oldDate} at {formatTimeStr(oldTime)}{staffChanged ? ' · ' + oldStaffName : ''}</span>
-                        <span style={{ color: '#64748b' }}>To:</span>
-                        <span style={{ fontWeight: '700', color: '#7c3aed' }}>{newDate} at {formatTimeStr(newTime)}{staffChanged ? ' · ' + newStaffName : ''}</span>
+        <div
+            onClick={onCancel}
+            style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: 'rgba(15, 23, 42, 0.55)',
+                backdropFilter: 'blur(2px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 9999,
+                padding: '16px'
+            }}
+        >
+            <div
+                onClick={function (e) { e.stopPropagation() }}
+                style={{
+                    width: '100%',
+                    maxWidth: '460px',
+                    background: '#ffffff',
+                    color: '#111827',
+                    borderRadius: '16px',
+                    padding: '24px',
+                    boxShadow: '0 20px 60px rgba(0, 0, 0, 0.25)',
+                    border: '1px solid #e5e7eb'
+                }}
+            >
+                {/* Header */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                    <div style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '10px',
+                        background: '#ede9fe',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '18px'
+                    }}>📅</div>
+                    <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#111827' }}>
+                        Move this appointment?
+                    </h3>
+                </div>
+                <p style={{ margin: '0 0 18px', color: '#6b7280', fontSize: '13px' }}>
+                    Confirm the new time before the schedule updates.
+                </p>
+
+                {/* Appointment summary card */}
+                <div style={{
+                    background: '#f9fafb',
+                    border: '1px solid #e5e7eb',
+                    padding: '14px 16px',
+                    borderRadius: '12px',
+                    marginBottom: '16px',
+                    fontSize: '14px',
+                    lineHeight: '1.5'
+                }}>
+                    <div style={{ fontWeight: 700, color: '#111827', marginBottom: '4px' }}>
+                        {clientName.trim()} — {petName}
+                    </div>
+                    <div style={{ color: '#6b7280', fontSize: '13px', marginBottom: '12px' }}>
+                        {appt.services?.service_name || 'Service'}
+                    </div>
+
+                    {/* From → To rows */}
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: '8px 0',
+                        borderTop: '1px solid #e5e7eb'
+                    }}>
+                        <span style={{
+                            display: 'inline-block',
+                            minWidth: '50px',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            color: '#9ca3af',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.5px'
+                        }}>From</span>
+                        <span style={{ color: '#6b7280', textDecoration: 'line-through' }}>
+                            {oldDate} at {formatTimeStr(oldTime)}
+                            {staffChanged ? ' · ' + oldStaffName : ''}
+                        </span>
+                    </div>
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: '8px 0 0',
+                        borderTop: '1px solid #e5e7eb'
+                    }}>
+                        <span style={{
+                            display: 'inline-block',
+                            minWidth: '50px',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            color: '#7c3aed',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.5px'
+                        }}>To</span>
+                        <span style={{ fontWeight: 700, color: '#111827' }}>
+                            {newDate} at {formatTimeStr(newTime)}
+                            {staffChanged ? ' · ' + newStaffName : ''}
+                        </span>
                     </div>
                 </div>
+
+                {/* Recurring warning */}
                 {isRecurring && (
-                    <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', color: '#92400e', padding: '10px', borderRadius: '8px', fontSize: '12px', marginBottom: '16px' }}>
-                        ⚠️ This is a recurring appointment. Only <strong>this one</strong> will be moved — future appointments in the series stay on their original schedule. Use the appointment popup if you need to reschedule the whole series.
+                    <div style={{
+                        background: '#fffbeb',
+                        border: '1px solid #fde68a',
+                        color: '#92400e',
+                        padding: '12px 14px',
+                        borderRadius: '10px',
+                        fontSize: '12.5px',
+                        lineHeight: '1.5',
+                        marginBottom: '16px',
+                        display: 'flex',
+                        gap: '8px'
+                    }}>
+                        <span style={{ fontSize: '16px', lineHeight: 1 }}>⚠️</span>
+                        <span>
+                            This is a recurring appointment. Only <strong>this one</strong> will move — future appointments in the series stay on their original schedule.
+                        </span>
                     </div>
                 )}
-                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+
+                {/* Buttons */}
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '4px' }}>
                     <button
                         type="button"
                         onClick={onCancel}
-                        style={{ padding: '10px 18px', background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', color: '#475569' }}
+                        style={{
+                            padding: '10px 18px',
+                            background: '#ffffff',
+                            border: '1px solid #d1d5db',
+                            borderRadius: '10px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            color: '#374151',
+                            fontSize: '14px'
+                        }}
                     >
                         Cancel
                     </button>
                     <button
                         type="button"
                         onClick={onConfirm}
-                        style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', cursor: 'pointer' }}
+                        style={{
+                            padding: '10px 20px',
+                            background: '#7c3aed',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '10px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                            boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)'
+                        }}
                     >
                         Yes, move it
                     </button>
