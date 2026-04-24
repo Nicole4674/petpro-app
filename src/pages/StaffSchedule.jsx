@@ -8,6 +8,10 @@ export default function StaffSchedule() {
   var [weekStart, setWeekStart] = useState(getWeekStart(new Date()))
   var [staff, setStaff] = useState([])
   var [shifts, setShifts] = useState([])
+  // clockMinsByStaff = { staffId: totalClockedMinutesForThisWeek }
+  // Populated from the time_clock table so managers can compare scheduled
+  // vs actual hours per employee (catches overtime + no-shows).
+  var [clockMinsByStaff, setClockMinsByStaff] = useState({})
   var [loading, setLoading] = useState(true)
   var [showAddShift, setShowAddShift] = useState(false)
   var [editingShift, setEditingShift] = useState(null)
@@ -96,6 +100,26 @@ export default function StaffSchedule() {
     return total
   }
 
+  // Clocked (actual) hours this week from the time_clock table
+  function getStaffClockedHours(staffId) {
+    var mins = clockMinsByStaff[staffId] || 0
+    return mins / 60
+  }
+
+  // Traffic-light color based on clocked vs scheduled:
+  //   gray   — nothing scheduled and nothing clocked
+  //   green  — clocked < scheduled (on track, still have hours left)
+  //   orange — clocked ≈ scheduled (within 1 hour, about to hit cap)
+  //   red    — clocked > scheduled + 0.5 (overtime territory)
+  function getClockedColor(clockedHrs, scheduledHrs) {
+    if (scheduledHrs <= 0 && clockedHrs <= 0) return '#9ca3af'
+    if (scheduledHrs <= 0) return '#dc2626'
+    var diff = clockedHrs - scheduledHrs
+    if (diff > 0.5) return '#dc2626'  // red = overtime
+    if (diff >= -1) return '#ea580c'  // orange = near cap
+    return '#16a34a'                   // green = under cap
+  }
+
   async function fetchData() {
     setLoading(true)
     var { data: { user } } = await supabase.auth.getUser()
@@ -127,6 +151,30 @@ export default function StaffSchedule() {
       .lte('shift_date', formatDateISO(weekEnd))
 
     setShifts(shiftData || [])
+
+    // Fetch actual clocked time from time_clock for the same week.
+    // Sum total_minutes per staff so we can show scheduled vs clocked.
+    var weekEndPlusOne = new Date(weekEnd.getTime() + 86400000)
+    var { data: clockData } = await supabase
+      .from('time_clock')
+      .select('staff_id, clock_in, clock_out, total_minutes, break_minutes')
+      .eq('groomer_id', user.id)
+      .gte('clock_in', weekStart.toISOString())
+      .lte('clock_in', weekEndPlusOne.toISOString())
+
+    var minsByStaff = {}
+    ;(clockData || []).forEach(function (e) {
+      if (!e.staff_id) return
+      var mins = 0
+      if (e.total_minutes) {
+        mins = e.total_minutes
+      } else if (e.clock_in && e.clock_out) {
+        mins = Math.max(0, Math.round((new Date(e.clock_out) - new Date(e.clock_in)) / 60000) - (e.break_minutes || 0))
+      }
+      minsByStaff[e.staff_id] = (minsByStaff[e.staff_id] || 0) + mins
+    })
+    setClockMinsByStaff(minsByStaff)
+
     setLoading(false)
   }
 
@@ -284,7 +332,11 @@ export default function StaffSchedule() {
 
   // Total hours for the whole week across all staff
   var totalWeekHours = 0
-  staff.forEach(function(s) { totalWeekHours += getStaffWeekHours(s.id) })
+  var totalClockedHours = 0
+  staff.forEach(function(s) {
+    totalWeekHours    += getStaffWeekHours(s.id)
+    totalClockedHours += getStaffClockedHours(s.id)
+  })
 
   if (loading) return <div className="ss-loading">Loading schedule...</div>
 
@@ -338,7 +390,16 @@ export default function StaffSchedule() {
             <div className="ss-grid-header">
               <div className="ss-grid-employee-header">
                 <span>Employee</span>
-                <span className="ss-total-hours">{totalWeekHours.toFixed(1)} hrs total</span>
+                <span className="ss-total-hours" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
+                  <span style={{ fontSize: '11px', color: '#e0e7ff' }}>{totalWeekHours.toFixed(1)} hrs scheduled</span>
+                  <span style={{
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: getClockedColor(totalClockedHours, totalWeekHours)
+                  }}>
+                    {totalClockedHours.toFixed(1)} hrs clocked
+                  </span>
+                </span>
               </div>
               {weekDays.map(function(day) {
                 return (
@@ -353,6 +414,9 @@ export default function StaffSchedule() {
             {/* Staff Rows */}
             {staff.map(function(member) {
               var weekHrs = getStaffWeekHours(member.id)
+              var clockedHrs = getStaffClockedHours(member.id)
+              var clockedColor = getClockedColor(clockedHrs, weekHrs)
+              var isOvertime = (clockedHrs - weekHrs) > 0.5
               return (
                 <div key={member.id} className="ss-grid-row">
                   {/* Employee Info Cell */}
@@ -363,7 +427,18 @@ export default function StaffSchedule() {
                     <div className="ss-emp-info">
                       <div className="ss-emp-name">{member.first_name} {member.last_name}</div>
                       <div className="ss-emp-role">{ROLE_LABELS[member.role] || member.role}</div>
-                      <div className="ss-emp-hours">{weekHrs.toFixed(1)} hrs</div>
+                      <div className="ss-emp-hours" style={{ fontSize: '11px', color: '#9ca3af' }}>
+                        {weekHrs.toFixed(1)} hrs scheduled
+                      </div>
+                      <div style={{
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        color: clockedColor,
+                        marginTop: '2px'
+                      }}>
+                        {isOvertime && '🚨 '}
+                        {clockedHrs.toFixed(1)} hrs clocked
+                      </div>
                     </div>
                   </div>
 
