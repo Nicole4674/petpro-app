@@ -10,7 +10,7 @@
 // Read-only for staff — owner/manager sets the schedule.
 // =======================================================
 import { useState, useEffect } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -185,13 +185,9 @@ export default function StaffMe() {
               {hours.entries.length} clock-in{hours.entries.length === 1 ? '' : 's'}
             </div>
           </div>
-          <Link to="/kiosk" style={{
-            padding: '10px 16px', background: '#7c3aed', color: '#fff',
-            border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '13px',
-            textDecoration: 'none', whiteSpace: 'nowrap',
-          }}>
-            ⏱️ Clock in at the lobby kiosk →
-          </Link>
+          <div style={{ fontSize: '13px', color: '#6b7280', fontStyle: 'italic' }}>
+            ⏱️ Clock in at the shop lobby kiosk
+          </div>
         </div>
 
         {/* Schedule — 7-column grid like owner-side */}

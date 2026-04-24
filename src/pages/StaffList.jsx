@@ -193,7 +193,31 @@ export default function StaffList() {
           <h1 className="sl-title">👥 Staff & Team</h1>
           <p className="sl-subtitle">Manage your team, roles, and permissions</p>
         </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={function () {
+              var link = window.location.origin + '/staff/login'
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(link).then(function () {
+                  alert('Staff login link copied!\n\n' + link + '\n\nSend this to your staff. They click "Set up your account" the first time to create their password.')
+                }, function () {
+                  window.prompt('Copy this link to send to staff:', link)
+                })
+              } else {
+                window.prompt('Copy this link to send to staff:', link)
+              }
+            }}
+            title="Copy the staff login URL — send this to newly added staff so they can set up their password and view their schedule"
+            style={{
+              padding: '10px 18px', background: '#fff', color: '#16a34a',
+              border: '1px solid #16a34a', borderRadius: '10px',
+              fontWeight: '700', fontSize: '14px', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: '6px',
+            }}
+          >
+            🔗 Copy Staff Invite Link
+          </button>
           <a
             href="/kiosk"
             target="_blank"

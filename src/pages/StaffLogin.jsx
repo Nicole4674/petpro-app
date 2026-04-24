@@ -259,10 +259,8 @@ export default function StaffLogin() {
                 </>
               )}
             </p>
-            <p style={{ margin: '8px 0 0', textAlign: 'center', fontSize: '12px' }}>
-              <Link to="/kiosk" style={{ color: '#7c3aed', fontWeight: '600', textDecoration: 'none' }}>
-                Need to clock in? Open the lobby kiosk →
-              </Link>
+            <p style={{ margin: '8px 0 0', textAlign: 'center', fontSize: '11px', color: '#9ca3af' }}>
+              Clock in at the shop's lobby kiosk — ask your owner for access.
             </p>
           </form>
         )}
