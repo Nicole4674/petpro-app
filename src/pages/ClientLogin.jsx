@@ -60,15 +60,40 @@ export default function ClientLogin() {
       })
 
       if (signInError) {
-        if (signInError.message.toLowerCase().includes('invalid login credentials')) {
+        var errMsg = signInError.message.toLowerCase()
+        if (errMsg.includes('invalid login credentials')) {
           setError('Wrong email or password. Try again.')
-        } else if (signInError.message.toLowerCase().includes('email not confirmed')) {
-          setError('Please verify your email before logging in. Check your inbox.')
+        } else if (errMsg.includes('email not confirmed')) {
+          // Email confirmation links are fragile (Gmail scanners, deliverability,
+          // template mismatches). Instead of blocking the customer, we auto-confirm
+          // them via a security-definer RPC so they can log in immediately. The
+          // password they typed already proves they own the account.
+          try {
+            await supabase.rpc('confirm_user_email', { p_email: email.trim().toLowerCase() })
+            // Retry the login now that they're confirmed
+            var retry = await supabase.auth.signInWithPassword({
+              email: email.trim().toLowerCase(),
+              password: password,
+            })
+            if (retry.error) {
+              setError('Login still failing. Please contact your groomer.')
+              setSubmitting(false)
+              return
+            }
+            // Replace signInData so the rest of the flow continues with the
+            // newly authenticated session
+            signInData = retry.data
+          } catch (rpcErr) {
+            console.error('[ClientLogin] auto-confirm error:', rpcErr)
+            setError('Login failed. Please contact your groomer to reset your account.')
+            setSubmitting(false)
+            return
+          }
         } else {
           setError('Login failed: ' + signInError.message)
+          setSubmitting(false)
+          return
         }
-        setSubmitting(false)
-        return
       }
 
       // Step 2: Make sure they have a client record (portal account)
