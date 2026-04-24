@@ -42,34 +42,43 @@ import ClientSignup from './pages/ClientSignup'
 import ClientLogin from './pages/ClientLogin'
 import EmailConfirmed from './pages/EmailConfirmed'
 import Kiosk from './pages/Kiosk'
+import StaffLogin from './pages/StaffLogin'
+import StaffMe from './pages/StaffMe'
 
 // ─────────────────────────────────────────────────────────────────
 // RootRedirect — smart routing at "/" based on user type.
-// Without this, logged-in clients landed on the groomer Dashboard.
-// Now: no session → /login. Client user → /portal. Groomer → Dashboard.
+// Without this, any logged-in user landed on the groomer Dashboard.
+// Now: no session → /login. Client → /portal. Staff → /staff/me.
+// Groomer (owner) → Dashboard.
 // ─────────────────────────────────────────────────────────────────
 function RootRedirect({ session }) {
-    const [userType, setUserType] = useState(null) // 'client' | 'groomer'
+    const [userType, setUserType] = useState(null) // 'client' | 'staff' | 'groomer'
     const [checking, setChecking] = useState(true)
     useEffect(() => {
         if (!session) { setChecking(false); return }
         let cancelled = false
-        supabase
-            .from('clients')
-            .select('id')
-            .eq('user_id', session.user.id)
-            .maybeSingle()
-            .then(({ data }) => {
-                if (cancelled) return
-                setUserType(data ? 'client' : 'groomer')
-                setChecking(false)
-            })
+        // Check both clients AND staff_members in parallel; whichever hits wins.
+        Promise.all([
+            supabase.from('clients').select('id').eq('user_id', session.user.id).maybeSingle(),
+            supabase.from('staff_members').select('id, role').eq('auth_user_id', session.user.id).maybeSingle(),
+        ]).then(([clientRes, staffRes]) => {
+            if (cancelled) return
+            if (clientRes.data) setUserType('client')
+            else if (staffRes.data) {
+                // Owner role still acts as groomer (they own the shop)
+                if (staffRes.data.role === 'owner') setUserType('groomer')
+                else setUserType('staff')
+            }
+            else setUserType('groomer')
+            setChecking(false)
+        })
         return () => { cancelled = true }
     }, [session])
 
     if (checking) return <div className="loading">Loading PetPro...</div>
     if (!session) return <Navigate to="/login" replace />
     if (userType === 'client') return <Navigate to="/portal" replace />
+    if (userType === 'staff') return <Navigate to="/staff/me" replace />
     return <Dashboard />
 }
 import ClientPortalDashboard from './pages/ClientPortalDashboard'
@@ -86,7 +95,7 @@ function AppLayout({ children }) {
 
     // Don't show sidebar on login/signup or public legal pages
     var isAuthPage = location.pathname === '/login' || location.pathname === '/signup'
-    var isPublicPage = location.pathname === '/privacy' || location.pathname === '/terms' || location.pathname === '/portal/signup' || location.pathname === '/portal/login' || location.pathname === '/portal/confirmed' || location.pathname === '/plans' || location.pathname === '/kiosk'
+    var isPublicPage = location.pathname === '/privacy' || location.pathname === '/terms' || location.pathname === '/portal/signup' || location.pathname === '/portal/login' || location.pathname === '/portal/confirmed' || location.pathname === '/plans' || location.pathname === '/kiosk' || location.pathname === '/staff/login' || location.pathname === '/staff/me'
     var isPortalPage = location.pathname.indexOf('/portal') === 0
     if (isAuthPage || isPublicPage) {
         return <>{children}</>
@@ -167,6 +176,9 @@ function App() {
                     <Route path="/staff" element={session ? <StaffList /> : <Navigate to="/login" />} />
                     {/* Lobby Kiosk — leave open on a tablet; staff type PIN to clock in/out */}
                     <Route path="/kiosk" element={session ? <Kiosk /> : <Navigate to="/login" />} />
+                    {/* Staff personal portal — email/password login + read-only schedule view */}
+                    <Route path="/staff/login" element={<StaffLogin />} />
+                    <Route path="/staff/me" element={session ? <StaffMe /> : <Navigate to="/staff/login" />} />
                     <Route path="/staff/:id" element={session ? <StaffDetail /> : <Navigate to="/login" />} />
                     <Route path="/waitlist" element={session ? <Waitlist /> : <Navigate to="/login" />} />
                     <Route path="/staff/schedule" element={session ? <StaffSchedule /> : <Navigate to="/login" />} />
