@@ -110,9 +110,9 @@ export default function IncidentModal({ mode, petId, clientId, appointmentId, st
       var failed = []
       for (var i = 0; i < files.length; i++) {
         var f = files[i]
-        // Use the existing vax-certs bucket under an incidents/ folder.
-        // vax-certs is already public + already works for vaccine photos.
-        var path = 'incidents/' + user.id + '/' + Date.now() + '-' + i + '-' + f.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+        // Use the existing vax-certs bucket. Path must start with the user's
+        // auth id (RLS policy requires auth.uid() to match the first folder).
+        var path = user.id + '/incidents/' + Date.now() + '-' + i + '-' + f.name.replace(/[^a-zA-Z0-9._-]/g, '_')
         var { data, error: upErr } = await supabase.storage.from('vax-certs').upload(path, f, { upsert: false })
         if (upErr) {
           console.error('[IncidentModal] upload error:', upErr)
