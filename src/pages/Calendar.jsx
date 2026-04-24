@@ -1816,16 +1816,76 @@ export default function Calendar() {
                     })
                     if (recipients.length === 0) { alert('No recipients selected'); return }
                     if (!window.confirm('Send this message to ' + recipients.length + ' client' + (recipients.length === 1 ? '' : 's') + '?\n\n"' + massTextMessage + '"')) return
+
                     setMassTextSending(true)
+                    const { data: { user } } = await supabase.auth.getUser()
                     const results = { sent: 0, failed: 0, errors: [] }
+                    const msgText = massTextMessage.trim()
+
                     for (const r of recipients) {
                         try {
-                            const res = await supabase.functions.invoke('send-sms', {
-                                body: { to: r.phone, message: massTextMessage },
-                            })
-                            if (res.error) { results.failed++; results.errors.push(r.name + ': ' + res.error.message) }
-                            else if (res.data && res.data.success === false) { results.failed++; results.errors.push(r.name + ': ' + res.data.error) }
-                            else { results.sent++ }
+                            // 1. Find or create a thread for (groomer, client)
+                            let { data: thread } = await supabase
+                                .from('threads')
+                                .select('id')
+                                .eq('groomer_id', user.id)
+                                .eq('client_id', r.id)
+                                .order('last_message_at', { ascending: false, nullsFirst: false })
+                                .limit(1)
+                                .maybeSingle()
+
+                            let threadId = thread && thread.id
+                            if (!threadId) {
+                                const { data: newThread, error: threadErr } = await supabase
+                                    .from('threads')
+                                    .insert({ groomer_id: user.id, client_id: r.id, subject: null })
+                                    .select('id')
+                                    .single()
+                                if (threadErr) throw threadErr
+                                threadId = newThread.id
+                            }
+
+                            // 2. Insert the message into the in-app thread
+                            const { data: inserted, error: msgErr } = await supabase
+                                .from('messages')
+                                .insert({
+                                    thread_id: threadId,
+                                    groomer_id: user.id,
+                                    client_id: r.id,
+                                    sender_type: 'groomer',
+                                    text: msgText,
+                                    read_by_groomer: true,
+                                    read_by_client: false,
+                                })
+                                .select()
+                                .single()
+                            if (msgErr) throw msgErr
+
+                            // 3. Bump thread timestamp
+                            await supabase
+                                .from('threads')
+                                .update({ last_message_at: inserted.created_at })
+                                .eq('id', threadId)
+
+                            // 4. Fire the SMS via Twilio (best-effort)
+                            try {
+                                const smsRes = await supabase.functions.invoke('send-sms', {
+                                    body: { to: r.phone, message: msgText },
+                                })
+                                if (smsRes.error || (smsRes.data && smsRes.data.success === false)) {
+                                    // SMS failed but in-app message saved — count as partial success
+                                    results.failed++
+                                    const errMsg = smsRes.error ? smsRes.error.message : (smsRes.data && smsRes.data.error) || 'SMS failed'
+                                    results.errors.push(r.name + ': ' + errMsg + ' (in-app saved)')
+                                    continue
+                                }
+                            } catch (smsErr) {
+                                results.failed++
+                                results.errors.push(r.name + ': SMS error — ' + smsErr.message + ' (in-app saved)')
+                                continue
+                            }
+
+                            results.sent++
                         } catch (err) {
                             results.failed++
                             results.errors.push(r.name + ': ' + err.message)

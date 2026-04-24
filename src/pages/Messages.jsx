@@ -468,7 +468,7 @@ export default function Messages() {
     // Delete all messages first, then the thread
     var { error: msgErr } = await supabase.from('messages').delete().eq('thread_id', selectedThreadId)
     if (msgErr) { alert('Could not delete messages: ' + msgErr.message); return }
-    var { error: threadErr } = await supabase.from('message_threads').delete().eq('id', selectedThreadId)
+    var { error: threadErr } = await supabase.from('threads').delete().eq('id', selectedThreadId)
     if (threadErr) { alert('Could not delete thread: ' + threadErr.message); return }
     setThreads(function (prev) { return prev.filter(function (t) { return t.id !== selectedThreadId }) })
     setMessages([])
