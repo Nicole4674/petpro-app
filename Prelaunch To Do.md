@@ -1,20 +1,35 @@
 # Prelaunch To Do
 
 **Created:** April 22, 2026
+**Last updated:** April 24, 2026
 **Purpose:** The ONLY 6 things that must happen to flip PetPro from sandbox to live. Everything else (tier gating, client contacts, AI usage caps, rename, staff logins, FlaggedBookings polish) is **post-launch improvement** — the app works without them.
 
 ---
 
-## STATUS AT A GLANCE
+## 🎉 STATUS AT A GLANCE — ALL 6 BLOCKERS COMPLETE ✅
 
 | # | Item | Who | Status |
 |---|------|-----|--------|
-| 1 | Stripe LIVE activation | Nicole | [ ] Not started |
-| 2 | Terms of Service + Privacy Policy pages live on site | Nicole + Claude | [ ] Not started |
-| 3 | DNS: `app.trypetpro.com` pointed at Vercel | Nicole or Viktor | [ ] Not started |
-| 4 | Swap sandbox Price IDs → live Price IDs in webhook | Claude | [ ] Blocked by #1 |
-| 5 | Swap sandbox Payment Links → live Payment Links | Claude | [ ] Blocked by #1 |
-| 6 | Add live-mode Stripe webhook endpoint + secret | Claude | [ ] Blocked by #1 |
+| 1 | Stripe LIVE activation | Nicole | [x] **APPROVED** — `pk_live_51T0tFaQ...` confirmed in dashboard |
+| 2 | Terms of Service + Privacy Policy pages live on site | Nicole + Claude | [x] **DONE** — live at `/terms` and `/privacy` |
+| 3 | DNS: `app.trypetpro.com` pointed at Vercel | Nicole or Viktor | [x] **DONE** (Nicole) |
+| 4 | Swap sandbox Price IDs → live Price IDs in webhook | Claude | [x] **DONE** — live IDs in `Stripe Webhook Code v1.ts` |
+| 5 | Swap sandbox Payment Links → live Payment Links | Claude | [x] **DONE** (Nicole confirmed Apr 24) |
+| 6 | Add live-mode Stripe webhook endpoint + secret | Claude | [x] **DONE** (Nicole confirmed Apr 24) |
+
+## 🚀 LAUNCH IS UNBLOCKED
+
+Nothing is stopping launch. You can accept real customers today.
+
+---
+
+## Final polish (optional, not blockers)
+
+- [ ] Tip handling (~30 min) — staff tip tracking on payments, staff portal visibility
+- [ ] Test Incident Reports end-to-end as you groom (do 1-2 fake incidents per dog)
+- [ ] Help/User Guide — Google Doc is fine for v1
+
+Everything else in `PetPro_App_Todo.md` is **post-launch** — build when you have time after real customers start flowing.
 
 ---
 
