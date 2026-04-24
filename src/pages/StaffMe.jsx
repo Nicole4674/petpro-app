@@ -66,8 +66,15 @@ export default function StaffMe() {
       .eq('auth_user_id', user.id)
       .maybeSingle()
 
-    if (staffErr || !staffRow) {
-      setError('Could not load your staff profile.')
+    if (staffErr) {
+      console.error('[StaffMe] staff_members query error:', staffErr)
+      setError('DB error: ' + staffErr.message + ' (code: ' + (staffErr.code || 'n/a') + ')')
+      setLoading(false)
+      return
+    }
+    if (!staffRow) {
+      console.warn('[StaffMe] No staff row found for user', user.id)
+      setError('No staff profile linked to your login. (user: ' + user.id.slice(0, 8) + '…)')
       setLoading(false)
       return
     }
