@@ -158,6 +158,16 @@ export default function Calendar() {
     // dragConfirm — when user drops, store drop info and show confirm modal
     const [draggedAppt, setDraggedAppt] = useState(null)
     const [dragConfirm, setDragConfirm] = useState(null)
+
+    // ===== Mass Text state (emergency / day-of cancellations) =====
+    // Pulls every client with an appt on the chosen date, shows them,
+    // lets Nicole uncheck any, type ONE message, send to all via Twilio.
+    const [showMassText, setShowMassText] = useState(false)
+    const [massTextDate, setMassTextDate] = useState(null)
+    const [massTextMessage, setMassTextMessage] = useState('')
+    const [massTextRecipients, setMassTextRecipients] = useState({}) // { clientId: bool }
+    const [massTextSending, setMassTextSending] = useState(false)
+    const [massTextResults, setMassTextResults] = useState(null) // { sent, failed, errors }
     function toggleSidebar() {
         setSidebarCollapsed(function (prev) {
             const next = !prev
@@ -1583,6 +1593,18 @@ export default function Calendar() {
                     <span className="calendar-date-label">{getHeaderText()}</span>
                 </div>
                 <div className="calendar-header-right">
+                    <button
+                        onClick={() => { setShowMassText(true); setMassTextDate(dateToString(currentDate)) }}
+                        title="Mass text every client with an appointment on a given day (for emergencies / day-of cancellations)"
+                        style={{
+                            padding: '8px 14px', background: '#fff',
+                            color: '#dc2626', border: '1px solid #fecaca',
+                            borderRadius: '8px', fontWeight: '600', fontSize: '13px',
+                            cursor: 'pointer', marginRight: '10px',
+                        }}
+                    >
+                        📣 Mass Text
+                    </button>
                     <div className="view-toggle">
                         <button className={view === 'day' ? 'active' : ''} onClick={() => setView('day')}>Day</button>
                         <button className={view === 'week' ? 'active' : ''} onClick={() => setView('week')}>Week</button>
@@ -1756,6 +1778,201 @@ export default function Calendar() {
                     onClose={() => setBlockModal(null)}
                 />
             )}
+
+            {/* Mass Text Modal */}
+            {showMassText && (() => {
+                // Find all active appointments on the selected date
+                const dayAppts = appointments.filter(function (a) {
+                    if (a.appointment_date !== massTextDate) return false
+                    if (a.status === 'cancelled' || a.status === 'no_show' || a.status === 'rescheduled') return false
+                    return true
+                })
+                // Dedupe clients + pull phone/name
+                const clientMap = {}
+                dayAppts.forEach(function (a) {
+                    const c = a.clients
+                    if (!c || !c.id) return
+                    if (!clientMap[c.id]) {
+                        clientMap[c.id] = {
+                            id: c.id,
+                            name: ((c.first_name || '') + ' ' + (c.last_name || '')).trim(),
+                            phone: c.phone,
+                            times: [],
+                        }
+                    }
+                    if (a.start_time) clientMap[c.id].times.push(a.start_time.slice(0, 5))
+                })
+                const clientList = Object.values(clientMap)
+                const selectedCount = clientList.filter(function (c) {
+                    // Default all to checked if massTextRecipients[id] is undefined
+                    return massTextRecipients[c.id] !== false && c.phone
+                }).length
+                const noPhoneCount = clientList.filter(function (c) { return !c.phone }).length
+
+                async function handleSendMassText() {
+                    if (!massTextMessage.trim()) { alert('Type a message first'); return }
+                    const recipients = clientList.filter(function (c) {
+                        return massTextRecipients[c.id] !== false && c.phone
+                    })
+                    if (recipients.length === 0) { alert('No recipients selected'); return }
+                    if (!window.confirm('Send this message to ' + recipients.length + ' client' + (recipients.length === 1 ? '' : 's') + '?\n\n"' + massTextMessage + '"')) return
+                    setMassTextSending(true)
+                    const results = { sent: 0, failed: 0, errors: [] }
+                    for (const r of recipients) {
+                        try {
+                            const res = await supabase.functions.invoke('send-sms', {
+                                body: { to: r.phone, message: massTextMessage },
+                            })
+                            if (res.error) { results.failed++; results.errors.push(r.name + ': ' + res.error.message) }
+                            else if (res.data && res.data.success === false) { results.failed++; results.errors.push(r.name + ': ' + res.data.error) }
+                            else { results.sent++ }
+                        } catch (err) {
+                            results.failed++
+                            results.errors.push(r.name + ': ' + err.message)
+                        }
+                    }
+                    setMassTextResults(results)
+                    setMassTextSending(false)
+                }
+
+                function closeMassText() {
+                    setShowMassText(false)
+                    setMassTextMessage('')
+                    setMassTextRecipients({})
+                    setMassTextResults(null)
+                }
+
+                return (
+                    <div className="modal-overlay" onClick={closeMassText} style={{ zIndex: 9999 }}>
+                        <div className="modal-content" style={{ maxWidth: '560px', maxHeight: '85vh', overflowY: 'auto' }} onClick={function (e) { e.stopPropagation() }}>
+                            <h2 style={{ margin: '0 0 6px', fontSize: '20px' }}>📣 Mass Text</h2>
+                            <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#6b7280' }}>
+                                Send one message to every client with an appointment on a specific day. For emergencies / day-of cancellations.
+                            </p>
+
+                            {massTextResults ? (
+                                <div>
+                                    <div style={{ padding: '16px', background: massTextResults.failed === 0 ? '#f0fdf4' : '#fffbeb', border: '1px solid ' + (massTextResults.failed === 0 ? '#bbf7d0' : '#fde68a'), borderRadius: '10px', marginBottom: '14px' }}>
+                                        <div style={{ fontSize: '15px', fontWeight: '700', marginBottom: '6px' }}>
+                                            {massTextResults.failed === 0 ? '✅ All messages sent' : '⚠️ Partial success'}
+                                        </div>
+                                        <div style={{ fontSize: '13px', color: '#374151' }}>
+                                            Sent: <strong>{massTextResults.sent}</strong>
+                                            {massTextResults.failed > 0 && <> · Failed: <strong>{massTextResults.failed}</strong></>}
+                                        </div>
+                                        {massTextResults.errors.length > 0 && (
+                                            <div style={{ marginTop: '10px', fontSize: '12px', color: '#92400e' }}>
+                                                <strong>Failures:</strong>
+                                                <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                                                    {massTextResults.errors.slice(0, 5).map(function (e, i) { return <li key={i}>{e}</li> })}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                        <button onClick={closeMassText} style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', cursor: 'pointer' }}>Done</button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    {/* Date picker */}
+                                    <div style={{ marginBottom: '14px' }}>
+                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase' }}>Date</label>
+                                        <input
+                                            type="date"
+                                            value={massTextDate || ''}
+                                            onChange={function (e) { setMassTextDate(e.target.value); setMassTextRecipients({}) }}
+                                            style={{ padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', width: '100%', boxSizing: 'border-box' }}
+                                        />
+                                    </div>
+
+                                    {/* Recipients */}
+                                    <div style={{ marginBottom: '14px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                                            <label style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>
+                                                Recipients ({selectedCount} selected)
+                                            </label>
+                                            {noPhoneCount > 0 && (
+                                                <span style={{ fontSize: '11px', color: '#dc2626' }}>{noPhoneCount} missing phone — will skip</span>
+                                            )}
+                                        </div>
+                                        {clientList.length === 0 ? (
+                                            <div style={{ padding: '16px', textAlign: 'center', color: '#9ca3af', background: '#f9fafb', borderRadius: '8px', fontSize: '13px' }}>
+                                                No appointments on this date.
+                                            </div>
+                                        ) : (
+                                            <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '6px' }}>
+                                                {clientList.map(function (c) {
+                                                    const checked = massTextRecipients[c.id] !== false && !!c.phone
+                                                    return (
+                                                        <label
+                                                            key={c.id}
+                                                            style={{
+                                                                display: 'flex', alignItems: 'center', gap: '10px',
+                                                                padding: '8px 10px', cursor: c.phone ? 'pointer' : 'not-allowed',
+                                                                opacity: c.phone ? 1 : 0.5, fontSize: '13px',
+                                                                borderRadius: '6px',
+                                                            }}
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={checked}
+                                                                disabled={!c.phone}
+                                                                onChange={function (e) {
+                                                                    setMassTextRecipients(Object.assign({}, massTextRecipients, { [c.id]: e.target.checked }))
+                                                                }}
+                                                            />
+                                                            <span style={{ flex: 1 }}>
+                                                                <strong>{c.name || 'Unnamed'}</strong>
+                                                                <span style={{ color: '#6b7280', marginLeft: '6px' }}>
+                                                                    {c.phone || '(no phone)'} {c.times.length > 0 && '· ' + c.times.join(', ')}
+                                                                </span>
+                                                            </span>
+                                                        </label>
+                                                    )
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Message */}
+                                    <div style={{ marginBottom: '14px' }}>
+                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase' }}>
+                                            Message ({massTextMessage.length} chars)
+                                        </label>
+                                        <textarea
+                                            value={massTextMessage}
+                                            onChange={function (e) { setMassTextMessage(e.target.value) }}
+                                            rows={4}
+                                            placeholder="Hi, we have an emergency today and need to cancel your appointment. Please reach out to reschedule. Thank you!"
+                                            style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', fontFamily: 'inherit', boxSizing: 'border-box', resize: 'vertical' }}
+                                        />
+                                        <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
+                                            SMS fits 160 chars; longer messages may be split into multiple texts.
+                                        </div>
+                                    </div>
+
+                                    {/* Actions */}
+                                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                                        <button onClick={closeMassText} disabled={massTextSending} style={{ padding: '10px 18px', background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}>Cancel</button>
+                                        <button
+                                            onClick={handleSendMassText}
+                                            disabled={massTextSending || selectedCount === 0 || !massTextMessage.trim()}
+                                            style={{
+                                                padding: '10px 20px',
+                                                background: (massTextSending || selectedCount === 0 || !massTextMessage.trim()) ? '#9ca3af' : '#dc2626',
+                                                color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', cursor: 'pointer',
+                                            }}
+                                        >
+                                            {massTextSending ? 'Sending...' : '📣 Send to ' + selectedCount}
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                )
+            })()}
 
             {/* Drag-to-reschedule Confirm Modal (Item #6) */}
             {dragConfirm && (

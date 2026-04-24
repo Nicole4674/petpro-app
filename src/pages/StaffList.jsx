@@ -12,6 +12,32 @@ var ROLE_LABELS = {
   trainer: 'Trainer'
 }
 
+// Preset color swatches — two rows:
+//   BRIGHT (default, high-contrast, easy to spot on a busy calendar)
+//   NEUTRAL (for groomers who prefer calmer, earth-tone colors)
+// Click any swatch to set the staff member's calendar color.
+// Custom color picker below stays for anyone who wants a specific hex.
+var BRIGHT_COLORS = [
+  { name: 'Purple',  hex: '#7c3aed' },
+  { name: 'Blue',    hex: '#2563eb' },
+  { name: 'Cyan',    hex: '#0891b2' },
+  { name: 'Green',   hex: '#16a34a' },
+  { name: 'Amber',   hex: '#f59e0b' },
+  { name: 'Orange',  hex: '#ea580c' },
+  { name: 'Red',     hex: '#dc2626' },
+  { name: 'Pink',    hex: '#d946ef' },
+]
+var NEUTRAL_COLORS = [
+  { name: 'Tan',        hex: '#d4a574' },
+  { name: 'Taupe',      hex: '#a8937a' },
+  { name: 'Cream',      hex: '#e8dfd0' },
+  { name: 'Sage',       hex: '#9caf88' },
+  { name: 'Dusty Rose', hex: '#c9a0a0' },
+  { name: 'Stone',      hex: '#9ca3af' },
+  { name: 'Slate',      hex: '#64748b' },
+  { name: 'Charcoal',   hex: '#334155' },
+]
+
 var ROLE_COLORS = {
   owner: '#7c3aed',
   manager: '#2563eb',
@@ -417,6 +443,46 @@ export default function StaffList() {
                 </div>
                 <div className="sl-form-group">
                   <label className="sl-label">Calendar Color</label>
+                  {/* Bright swatches */}
+                  <div style={{ display: 'flex', gap: '6px', marginBottom: '6px', flexWrap: 'wrap' }}>
+                    {BRIGHT_COLORS.map(function (c) {
+                      var selected = newStaff.color_code === c.hex
+                      return (
+                        <button
+                          key={c.hex}
+                          type="button"
+                          title={c.name + ' (bright)'}
+                          onClick={function () { setNewStaff(Object.assign({}, newStaff, { color_code: c.hex })) }}
+                          style={{
+                            width: '28px', height: '28px', borderRadius: '50%',
+                            border: selected ? '3px solid #111827' : '2px solid #fff',
+                            boxShadow: '0 0 0 1px #e5e7eb',
+                            background: c.hex, cursor: 'pointer', padding: 0,
+                          }}
+                        />
+                      )
+                    })}
+                  </div>
+                  {/* Neutral swatches */}
+                  <div style={{ display: 'flex', gap: '6px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                    {NEUTRAL_COLORS.map(function (c) {
+                      var selected = newStaff.color_code === c.hex
+                      return (
+                        <button
+                          key={c.hex}
+                          type="button"
+                          title={c.name + ' (neutral)'}
+                          onClick={function () { setNewStaff(Object.assign({}, newStaff, { color_code: c.hex })) }}
+                          style={{
+                            width: '28px', height: '28px', borderRadius: '50%',
+                            border: selected ? '3px solid #111827' : '2px solid #fff',
+                            boxShadow: '0 0 0 1px #e5e7eb',
+                            background: c.hex, cursor: 'pointer', padding: 0,
+                          }}
+                        />
+                      )
+                    })}
+                  </div>
                   <div className="sl-color-picker-row">
                     <input
                       type="color"
@@ -426,6 +492,7 @@ export default function StaffList() {
                     />
                     <span className="sl-color-preview" style={{ backgroundColor: newStaff.color_code }}></span>
                     <span className="sl-color-hex">{newStaff.color_code}</span>
+                    <span style={{ fontSize: '11px', color: '#9ca3af', marginLeft: '8px' }}>or pick custom</span>
                   </div>
                 </div>
               </div>
