@@ -3827,8 +3827,9 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                 style={{
                                                     position: 'absolute',
                                                     top: 'calc(' + topPct + '% + 1px)',
-                                                    left: 'calc(' + wLeftPct + '% + 2px)',
-                                                    width: 'calc(' + wWidthPct + '% - 4px)',
+                                                    // Bigger side padding (8px each side) — matches MoeGo look.
+                                                    left: 'calc(' + wLeftPct + '% + 8px)',
+                                                    width: 'calc(' + wWidthPct + '% - 16px)',
                                                     height: 'calc(' + heightPct + '% - 4px)',
                                                     minHeight: '18px',
                                                     zIndex: 5,
@@ -3929,8 +3930,8 @@ function renderBlockedTimes(slotBlocks, onBlockClick, hour) {
                 style={{
                     position: 'absolute',
                     top: 'calc(' + topPct + '% + 1px)',
-                    left: '2px',
-                    right: '2px',
+                    left: '8px',
+                    right: '8px',
                     height: 'calc(' + heightPct + '% - 4px)',
                     minHeight: '18px',
                     zIndex: 4,
@@ -4005,8 +4006,10 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                 style={{
                     position: 'absolute',
                     top: 'calc(' + topPct + '% + 1px)',
-                    left: 'calc(' + leftPct + '% + 2px)',
-                    width: 'calc(' + widthPct + '% - 4px)',
+                    // Bigger side padding (8px each side) so blocks don't
+                    // touch the column divider lines — matches MoeGo look.
+                    left: 'calc(' + leftPct + '% + 8px)',
+                    width: 'calc(' + widthPct + '% - 16px)',
                     height: 'calc(' + heightPct + '% - 2px)',
                     minHeight: '18px',
                     zIndex: 5,
