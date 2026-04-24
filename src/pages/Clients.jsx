@@ -6,6 +6,8 @@ export default function Clients() {
   const [clients, setClients] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  // Active/inactive toggle — default to active only
+  const [showInactive, setShowInactive] = useState(false)
 
   useEffect(() => {
     fetchClients()
@@ -35,6 +37,8 @@ export default function Clients() {
   }
 
   const filteredClients = clients.filter((client) => {
+    // Hide inactive clients unless the toggle is on
+    if (!showInactive && client.is_active === false) return false
     const q = search.toLowerCase().trim()
     if (!q) return true
     const fullName = `${client.first_name || ''} ${client.last_name || ''}`.toLowerCase()
@@ -44,6 +48,9 @@ export default function Clients() {
     return fullName.includes(q) || phone.includes(q) || email.includes(q) || petNames.includes(q)
   })
 
+  const activeCount = clients.filter(c => c.is_active !== false).length
+  const inactiveCount = clients.filter(c => c.is_active === false).length
+
   if (loading) return <div className="loading">Loading clients...</div>
 
   return (
@@ -51,18 +58,29 @@ export default function Clients() {
       <div className="page-header">
         <div>
           <h1>Clients</h1>
-          <p>{clients.length} total clients</p>
+          <p>{activeCount} active {inactiveCount > 0 && <span style={{ color: '#9ca3af' }}>· {inactiveCount} inactive</span>}</p>
         </div>
         <Link to="/clients/new" className="btn-primary">+ Add Client</Link>
       </div>
 
-      <div className="search-bar">
+      <div className="search-bar" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
         <input
           type="text"
           placeholder="Search by name or phone..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: 1 }}
         />
+        {inactiveCount > 0 && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#475569', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(e) => setShowInactive(e.target.checked)}
+            />
+            Show inactive ({inactiveCount})
+          </label>
+        )}
       </div>
 
       {filteredClients.length === 0 ? (
@@ -72,9 +90,25 @@ export default function Clients() {
       ) : (
         <div className="client-list">
           {filteredClients.map((client) => (
-            <Link to={`/clients/${client.id}`} key={client.id} className="client-card">
+            <Link
+              to={`/clients/${client.id}`}
+              key={client.id}
+              className="client-card"
+              style={client.is_active === false ? { opacity: 0.6 } : {}}
+            >
               <div className="client-card-header">
                 <h3>{client.first_name} {client.last_name}</h3>
+                {client.is_active === false && (
+                  <span style={{
+                    marginLeft: '8px',
+                    padding: '2px 8px',
+                    background: '#f3f4f6',
+                    color: '#6b7280',
+                    borderRadius: '999px',
+                    fontSize: '10px',
+                    fontWeight: '700',
+                  }}>💤 INACTIVE</span>
+                )}
                 {client.is_first_time && <span className="badge badge-new">New Client</span>}
               </div>
               <p className="client-phone">{client.phone}</p>

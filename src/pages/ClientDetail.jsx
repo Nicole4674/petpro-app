@@ -600,6 +600,27 @@ export default function ClientDetail() {
     else fetchContacts()
   }
 
+  // ===== Inactive / Active toggle =====
+  const [togglingActive, setTogglingActive] = useState(false)
+  const handleToggleActive = async () => {
+    if (!client) return
+    const newVal = !(client.is_active !== false) // flip (default true if null)
+    const verb = newVal ? 'reactivate' : 'mark as inactive'
+    if (!window.confirm(verb.toUpperCase() + ' ' + (client.first_name || 'this client') + '?\n\n' +
+        (newVal ? 'They\'ll show up in your default client list again.' : 'They\'ll be hidden from the default client list. Their data stays — use the "Show inactive" toggle to see them later.'))) return
+    setTogglingActive(true)
+    const { error } = await supabase
+      .from('clients')
+      .update({ is_active: newVal })
+      .eq('id', id)
+    if (error) {
+      alert('Error: ' + error.message)
+    } else {
+      await fetchClientAndPets()
+    }
+    setTogglingActive(false)
+  }
+
   // ===== Merge Clients =====
   // Move this client's data (pets, appointments, payments, notes, contacts,
   // portal login) INTO another client record. This one gets deleted after.
@@ -798,6 +819,26 @@ export default function ClientDetail() {
               📅 Book Again
             </button>
             <button
+              onClick={handleToggleActive}
+              disabled={togglingActive}
+              title={client.is_active === false ? 'Reactivate this client' : 'Mark inactive (hide from default client list)'}
+              style={{
+                padding: '8px 14px',
+                background: '#fff',
+                color: client.is_active === false ? '#16a34a' : '#6b7280',
+                border: '1px solid ' + (client.is_active === false ? '#bbf7d0' : '#d1d5db'),
+                borderRadius: '8px',
+                fontWeight: '600',
+                fontSize: '13px',
+                cursor: togglingActive ? 'wait' : 'pointer',
+                opacity: togglingActive ? 0.6 : 1,
+              }}
+            >
+              {togglingActive
+                ? '...'
+                : (client.is_active === false ? '♻️ Reactivate' : '💤 Mark Inactive')}
+            </button>
+            <button
               onClick={openMergeModal}
               disabled={merging}
               title="Merge this client into another client record (e.g., combine a duplicate from portal signup with the real record)"
@@ -842,6 +883,18 @@ export default function ClientDetail() {
           <div className="cp-header-info">
             <h1 className="cp-name">
               {client.first_name} {client.last_name}
+              {client.is_active === false && (
+                <span style={{
+                  marginLeft: '10px',
+                  padding: '4px 10px',
+                  background: '#f3f4f6',
+                  color: '#6b7280',
+                  borderRadius: '999px',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  verticalAlign: 'middle',
+                }}>💤 INACTIVE</span>
+              )}
               {client.is_first_time && <span className="cp-badge-new">New Client</span>}
               {overdueCount > 0 && (
                 <span
