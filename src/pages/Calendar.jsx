@@ -3504,14 +3504,123 @@ export default function Calendar() {
     )
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Side-by-side overlap layout (MoeGo-style)
+// When two appointments overlap within the same groomer column, split
+// the column width between them instead of stacking (which squashes
+// them). Implements the standard "lane assignment" pattern used by
+// Google Calendar, MoeGo, Fantastical, etc.
+//
+// Returns: {
+//   lanes:       apptId -> lane index (0, 1, 2...)
+//   totalLanes:  apptId -> how many lanes its overlap group needs
+// }
+// Style usage (per appt):
+//   width = 100/totalLanes %     left = width * laneIndex %
+// ─────────────────────────────────────────────────────────────────────
+function computeLaneLayout(appts) {
+    const timeToMin = function (t) {
+        if (!t) return 0
+        const parts = t.split(':').map(Number)
+        return (parts[0] || 0) * 60 + (parts[1] || 0)
+    }
+
+    const sorted = (appts || [])
+        .filter(function (a) { return a.status !== 'cancelled' && a.status !== 'rescheduled' })
+        .map(function (a) {
+            return { id: a.id, start: timeToMin(a.start_time), end: timeToMin(a.end_time) }
+        })
+        .sort(function (a, b) { return a.start - b.start || a.end - b.end })
+
+    const lanes = {}
+    const totalLanes = {}
+    let currentGroup = []
+    let groupEnd = 0
+    let laneEndTimes = []
+
+    const closeGroup = function () {
+        const groupLaneCount = laneEndTimes.length
+        for (let i = 0; i < currentGroup.length; i++) {
+            totalLanes[currentGroup[i].id] = groupLaneCount
+        }
+        currentGroup = []
+        groupEnd = 0
+        laneEndTimes = []
+    }
+
+    for (let i = 0; i < sorted.length; i++) {
+        const a = sorted[i]
+        // If this appt starts at/after the group's latest end, close the group.
+        if (a.start >= groupEnd && currentGroup.length > 0) closeGroup()
+
+        // Find the earliest available lane (where last end is <= this start).
+        let lane = -1
+        for (let j = 0; j < laneEndTimes.length; j++) {
+            if (laneEndTimes[j] <= a.start) { lane = j; break }
+        }
+        if (lane === -1) {
+            lane = laneEndTimes.length
+            laneEndTimes.push(a.end)
+        } else {
+            laneEndTimes[lane] = a.end
+        }
+
+        lanes[a.id] = lane
+        currentGroup.push(a)
+        if (a.end > groupEnd) groupEnd = a.end
+    }
+    closeGroup()
+
+    return { lanes: lanes, totalLanes: totalLanes }
+}
+
 function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, onSlotClick, onApptClick, onBlockClick, onCheckIn, onCheckOut, checkingIn, checkingOut, onApptDragStart, onApptDragEnd, onSlotDrop, draggedApptId }) {
     const dates = view === 'day' ? [currentDate] : getWeekDates(currentDate)
     const today = new Date()
     const isDayView = view === 'day'
-    // In Day view: one column per groomer + "Unassigned" at the end. In Week view: one column per day.
+
+    // Hide the "Unassigned" column when no unassigned appts exist for today.
+    // Saves horizontal space for the real groomer columns.
+    const unassignedCount = isDayView
+        ? appointments.filter(function (a) {
+            return a.appointment_date === dateToString(currentDate)
+                && !a.staff_id
+                && a.status !== 'cancelled'
+                && a.status !== 'rescheduled'
+          }).length
+        : 0
+
+    // In Day view: one column per groomer + conditional "Unassigned". In Week view: one column per day.
     const dayColumns = isDayView
-        ? [...(staff || []), { id: null, first_name: 'Unassigned', color_code: '#9ca3af' }]
+        ? [
+            ...(staff || []),
+            ...(unassignedCount > 0 ? [{ id: null, first_name: 'Unassigned', color_code: '#9ca3af' }] : [])
+          ]
         : []
+
+    // Pre-compute lane layouts (side-by-side overlap) per column so we can
+    // render appts inside each hour cell with the correct width + left offset.
+    // Day view: one layout per groomer column (keyed by staff id or 'unassigned').
+    // Week view: one layout per date (keyed by date string).
+    const dayLayoutsByColumn = {}
+    const weekLayoutsByDate = {}
+    if (isDayView) {
+        const dateStr = dateToString(currentDate)
+        for (let c = 0; c < dayColumns.length; c++) {
+            const col = dayColumns[c]
+            const colAppts = appointments.filter(function (a) {
+                return a.appointment_date === dateStr
+                    && (a.staff_id || null) === (col.id || null)
+            })
+            dayLayoutsByColumn[col.id || 'unassigned'] = computeLaneLayout(colAppts)
+        }
+    } else {
+        for (let d = 0; d < dates.length; d++) {
+            const dStr = dateToString(dates[d])
+            const dayAppts = appointments.filter(function (a) { return a.appointment_date === dStr })
+            weekLayoutsByDate[dStr] = computeLaneLayout(dayAppts)
+        }
+    }
 
     // Calculate red time indicator position
     const nowHour = today.getHours()
@@ -3598,7 +3707,7 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                         onDragOver={(e) => { if (draggedApptId) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } }}
                                         onDrop={(e) => { e.preventDefault(); if (onSlotDrop) onSlotDrop(currentDate, hour, col.id || null) }}
                                     >
-                                        {renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut, hour, onApptDragStart, onApptDragEnd, draggedApptId)}
+                                        {renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut, hour, onApptDragStart, onApptDragEnd, draggedApptId, dayLayoutsByColumn[col.id || 'unassigned'])}
                                         {renderBlockedTimes(slotBlocks, onBlockClick, hour)}
                                     </div>
                                 )
@@ -3641,6 +3750,12 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                         const startOffsetMin = startTotalMin - (hour * 60) // where inside the hour cell this appt starts
                                         const topPct = (startOffsetMin / 60) * 100
                                         const heightPct = (durationMin / 60) * 100
+                                        // Side-by-side overlap (week view) — split column width between overlapping appts.
+                                        const wLayout   = weekLayoutsByDate[dateStr]
+                                        const wLaneIdx  = (wLayout && wLayout.lanes       && wLayout.lanes[appt.id])      || 0
+                                        const wLaneCnt  = (wLayout && wLayout.totalLanes  && wLayout.totalLanes[appt.id]) || 1
+                                        const wWidthPct = 100 / Math.max(1, wLaneCnt)
+                                        const wLeftPct  = wWidthPct * wLaneIdx
                                         const groomerColor = appt.staff_members?.color_code || '#9ca3af'
                                         const groomerName = appt.staff_members ? appt.staff_members.first_name : 'Unassigned'
                                         const isRecurring = !!appt.recurring_series_id
@@ -3687,8 +3802,8 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                 style={{
                                                     position: 'absolute',
                                                     top: 'calc(' + topPct + '% + 1px)',
-                                                    left: '2px',
-                                                    right: '2px',
+                                                    left: 'calc(' + wLeftPct + '% + 2px)',
+                                                    width: 'calc(' + wWidthPct + '% - 4px)',
                                                     height: 'calc(' + heightPct + '% - 4px)',
                                                     minHeight: '18px',
                                                     zIndex: 5,
@@ -3813,7 +3928,7 @@ function renderBlockedTimes(slotBlocks, onBlockClick, hour) {
     })
 }
 
-function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut, hour, onApptDragStart, onApptDragEnd, draggedApptId) {
+function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkingIn, checkingOut, hour, onApptDragStart, onApptDragEnd, draggedApptId, layout) {
     return slotAppts.map((appt) => {
         // Task #72 fix — size blocks by actual minutes, not whole hours
         const [sh, smRaw] = appt.start_time.split(':').map(Number)
@@ -3826,6 +3941,13 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
         const startOffsetMin = startTotalMin - ((hour || sh) * 60)
         const topPct = (startOffsetMin / 60) * 100
         const heightPct = (durationMin / 60) * 100
+        // Side-by-side overlap: lane index + total lanes tell us how to
+        // split the column. Default to full width (single lane) when no
+        // layout info is passed.
+        const laneIdx   = (layout && layout.lanes       && layout.lanes[appt.id])      || 0
+        const laneCount = (layout && layout.totalLanes  && layout.totalLanes[appt.id]) || 1
+        const widthPct  = 100 / Math.max(1, laneCount)
+        const leftPct   = widthPct * laneIdx
         const groomerColor = appt.staff_members?.color_code || '#9ca3af'
         const groomerName = appt.staff_members ? appt.staff_members.first_name : 'Unassigned'
         const isRecurring = !!appt.recurring_series_id
@@ -3858,8 +3980,8 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                 style={{
                     position: 'absolute',
                     top: 'calc(' + topPct + '% + 1px)',
-                    left: '2px',
-                    right: '2px',
+                    left: 'calc(' + leftPct + '% + 2px)',
+                    width: 'calc(' + widthPct + '% - 4px)',
                     height: 'calc(' + heightPct + '% - 2px)',
                     minHeight: '18px',
                     zIndex: 5,
