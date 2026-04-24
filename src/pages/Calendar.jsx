@@ -3827,10 +3827,9 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                 style={{
                                                     position: 'absolute',
                                                     top: 'calc(' + topPct + '% + 1px)',
-                                                    // 8px left gap + 4px colored border = 12px effective left inset.
-                                                    // Match it on the right (12px total) so blocks look balanced.
+                                                    // Left 8px, right 24px — double the left visual per Nicole.
                                                     left: 'calc(' + wLeftPct + '% + 8px)',
-                                                    width: 'calc(' + wWidthPct + '% - 20px)',
+                                                    width: 'calc(' + wWidthPct + '% - 32px)',
                                                     height: 'calc(' + heightPct + '% - 4px)',
                                                     minHeight: '18px',
                                                     zIndex: 5,
@@ -4007,10 +4006,10 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                 style={{
                     position: 'absolute',
                     top: 'calc(' + topPct + '% + 1px)',
-                    // 8px left gap + 4px colored border = 12px effective left inset.
-                    // Match it on the right with 12px (16 + 4 extra shrink).
+                    // Left: 8px gap. Right: 24px (double the left visual) per
+                    // Nicole's eye — colored left border made it look uneven.
                     left: 'calc(' + leftPct + '% + 8px)',
-                    width: 'calc(' + widthPct + '% - 20px)',
+                    width: 'calc(' + widthPct + '% - 32px)',
                     height: 'calc(' + heightPct + '% - 2px)',
                     minHeight: '18px',
                     zIndex: 5,
