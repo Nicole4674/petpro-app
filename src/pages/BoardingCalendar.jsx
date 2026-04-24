@@ -281,12 +281,28 @@ export default function BoardingCalendar() {
   }
 
   function getFilteredClients() {
-    if (!clientSearch.trim()) return clients.slice(0, 10)
+    if (!clientSearch.trim()) return clients.slice(0, 10).map(c => ({ client: c, matchedPet: null }))
     const search = clientSearch.toLowerCase()
-    return clients.filter(c =>
-      (c.first_name + ' ' + c.last_name).toLowerCase().includes(search) ||
-      (c.phone || '').includes(search)
-    ).slice(0, 10)
+    const results = []
+    const seen = {}
+    // Match by client name OR phone
+    clients.forEach(c => {
+      const hit = (c.first_name + ' ' + c.last_name).toLowerCase().includes(search) ||
+                  (c.phone || '').includes(search)
+      if (hit) {
+        results.push({ client: c, matchedPet: null })
+        seen[c.id] = true
+      }
+    })
+    // Match by pet name — include owner with a badge
+    pets.forEach(p => {
+      if (!p.name) return
+      if (!p.name.toLowerCase().includes(search)) return
+      const owner = clients.find(c => c.id === p.client_id)
+      if (!owner) return
+      results.push({ client: owner, matchedPet: p })
+    })
+    return results.slice(0, 12)
   }
 
   function getPetsForClient(clientId) {
@@ -1999,12 +2015,12 @@ export default function BoardingCalendar() {
                 📍 {kennels.find(k => k.id === showNewReservation.kennelId)?.name || 'Unknown Kennel'}
               </div>
 
-              {/* Client Search */}
+              {/* Client Search — matches by client name/phone OR pet name */}
               <div className="boarding-field">
                 <label className="boarding-label">Client *</label>
                 <input
                   className="boarding-input"
-                  placeholder="Search by name or phone..."
+                  placeholder="Search by client name, phone, OR pet name..."
                   value={clientSearch}
                   onChange={e => {
                     setClientSearch(e.target.value)
@@ -2015,22 +2031,41 @@ export default function BoardingCalendar() {
                 />
                 {showClientDropdown && (
                   <div className="cal-dropdown">
-                    {getFilteredClients().map(client => (
-                      <div
-                        key={client.id}
-                        className="cal-dropdown-item"
-                        onClick={() => {
-                          setNewRes(prev => ({ ...prev, client_id: client.id, pet_ids: [] }))
-                          setClientSearch(client.first_name + ' ' + client.last_name)
-                          setShowClientDropdown(false)
-                        }}
-                      >
-                        <strong>{client.first_name} {client.last_name}</strong>
-                        {client.phone && <span className="cal-dropdown-sub"> — {client.phone}</span>}
-                      </div>
-                    ))}
+                    {getFilteredClients().map((result, idx) => {
+                      const client = result.client
+                      const pet = result.matchedPet
+                      return (
+                        <div
+                          key={(pet ? 'p-' + pet.id : 'c-' + client.id) + '-' + idx}
+                          className="cal-dropdown-item"
+                          onClick={() => {
+                            setNewRes(prev => ({
+                              ...prev,
+                              client_id: client.id,
+                              // If search matched a pet, pre-select that pet in the booking
+                              pet_ids: pet ? [pet.id] : [],
+                            }))
+                            setClientSearch(client.first_name + ' ' + client.last_name)
+                            setShowClientDropdown(false)
+                          }}
+                        >
+                          {pet ? (
+                            <>
+                              <strong>🐾 {pet.name}</strong>
+                              <span className="cal-dropdown-sub"> — {client.first_name} {client.last_name}</span>
+                              <span style={{ marginLeft: '8px', fontSize: '10px', color: '#7c3aed', fontWeight: '700' }}>+ PET PRE-ADDED</span>
+                            </>
+                          ) : (
+                            <>
+                              <strong>{client.first_name} {client.last_name}</strong>
+                              {client.phone && <span className="cal-dropdown-sub"> — {client.phone}</span>}
+                            </>
+                          )}
+                        </div>
+                      )
+                    })}
                     {getFilteredClients().length === 0 && (
-                      <div className="cal-dropdown-empty">No clients found</div>
+                      <div className="cal-dropdown-empty">No clients or pets found</div>
                     )}
                   </div>
                 )}

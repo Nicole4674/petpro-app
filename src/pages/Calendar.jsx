@@ -372,6 +372,7 @@ export default function Calendar() {
     // Expected  = everything ELSE on the calendar (scheduled, confirmed,
     //            unconfirmed, pending, checked_in) — money we should earn.
     // Excluded  = cancelled, no_show, rescheduled (won't bring money).
+    // Also returns Total Pets (unique pet count) and Finished Appts (for MoeGo-style panel).
     const getRevenue = () => {
         let filtered = appointments
         if (view === 'day') {
@@ -383,10 +384,26 @@ export default function Calendar() {
         const expected = filtered.filter((a) =>
             DONE_STATUSES.indexOf(a.status) < 0 && DEAD_STATUSES.indexOf(a.status) < 0
         )
+        const active = filtered.filter((a) => DEAD_STATUSES.indexOf(a.status) < 0)
         const totalCompleted = completed.reduce((sum, a) => sum + (parseFloat(a.final_price) || parseFloat(a.quoted_price) || 0), 0)
         const totalExpected = expected.reduce((sum, a) => sum + (parseFloat(a.quoted_price) || 0), 0)
-        const activeCount = filtered.filter((a) => DEAD_STATUSES.indexOf(a.status) < 0).length
-        return { completed: totalCompleted, expected: totalExpected, total: totalCompleted + totalExpected, count: activeCount }
+        // Total Pets: count pets across all non-dead appts (handles multi-pet bookings via appointment_pets)
+        const petIdSet = new Set()
+        active.forEach((a) => {
+            if (a.appointment_pets && a.appointment_pets.length > 0) {
+                a.appointment_pets.forEach((ap) => { if (ap.pet_id) petIdSet.add(ap.pet_id) })
+            } else if (a.pet_id) {
+                petIdSet.add(a.pet_id)
+            }
+        })
+        return {
+            completed: totalCompleted,
+            expected: totalExpected,
+            total: totalCompleted + totalExpected,
+            count: active.length,
+            finishedCount: completed.length,
+            totalPets: petIdSet.size,
+        }
     }
 
     const revenue = getRevenue()
@@ -1666,6 +1683,14 @@ export default function Calendar() {
                         <div className="revenue-row">
                             <span>Appointments</span>
                             <span>{revenue.count}</span>
+                        </div>
+                        <div className="revenue-row">
+                            <span>Finished appts</span>
+                            <span>{revenue.finishedCount}</span>
+                        </div>
+                        <div className="revenue-row">
+                            <span>Total pets</span>
+                            <span>{revenue.totalPets}</span>
                         </div>
                     </div>
                     <button
@@ -4242,18 +4267,35 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                             }
 
                             var q = clientSearch.trim().toLowerCase()
-                            var matches = q
-                                ? clients.filter(function (c) {
+                            // Build unified matches: search BOTH client names AND pet names.
+                            // Each entry: { client_id, client, pet (optional if matched via pet) }
+                            var matches = []
+                            if (q) {
+                                var seen = {}
+                                // Pass 1: client name matches
+                                clients.forEach(function (c) {
                                     var full = ((c.first_name || '') + ' ' + (c.last_name || '')).toLowerCase()
-                                    return full.indexOf(q) !== -1
-                                }).slice(0, 10)
-                                : []
+                                    if (full.indexOf(q) !== -1) {
+                                        matches.push({ key: 'c-' + c.id, client: c, pet: null })
+                                        seen[c.id] = true
+                                    }
+                                })
+                                // Pass 2: pet name matches (include client via pet.client_id)
+                                pets.forEach(function (p) {
+                                    if (!p.name) return
+                                    if (p.name.toLowerCase().indexOf(q) === -1) return
+                                    var owner = clients.find(function (c) { return c.id === p.client_id })
+                                    if (!owner) return
+                                    matches.push({ key: 'p-' + p.id, client: owner, pet: p })
+                                })
+                                matches = matches.slice(0, 12)
+                            }
 
                             return (
                                 <>
                                     <input
                                         type="text"
-                                        placeholder="🔍 Type client name to search..."
+                                        placeholder="🔍 Search by client OR pet name..."
                                         value={clientSearch}
                                         onChange={function (e) {
                                             setClientSearch(e.target.value)
@@ -4275,24 +4317,41 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                                             maxHeight: '260px', overflowY: 'auto', zIndex: 100,
                                             marginTop: '4px',
                                         }}>
-                                            {matches.map(function (c) {
+                                            {matches.map(function (m) {
+                                                var c = m.client
+                                                var p = m.pet
                                                 return (
                                                     <div
-                                                        key={c.id}
+                                                        key={m.key}
                                                         onMouseDown={function () {
                                                             setForm(function (f) { return { ...f, client_id: c.id } })
-                                                            setPetsInBooking([])
+                                                            // If matched via pet, auto-add that pet to the booking
+                                                            setPetsInBooking(p ? [{ pet_id: p.id }] : [])
                                                             setClientSearch('')
                                                             setShowClientResults(false)
                                                         }}
                                                         style={{
                                                             padding: '10px 14px', cursor: 'pointer',
                                                             borderBottom: '1px solid #f1f3f5', fontSize: '14px',
+                                                            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px',
                                                         }}
                                                         onMouseEnter={function (e) { e.currentTarget.style.background = '#f8f9fa' }}
                                                         onMouseLeave={function (e) { e.currentTarget.style.background = '#fff' }}
                                                     >
-                                                        {c.first_name} {c.last_name}
+                                                        <span>
+                                                            {p ? (
+                                                                <>
+                                                                    <strong>🐾 {p.name}</strong>
+                                                                    <span style={{ color: '#6c757d', marginLeft: '6px' }}>({c.first_name} {c.last_name})</span>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <strong>{c.first_name} {c.last_name}</strong>
+                                                                    <span style={{ color: '#6c757d', marginLeft: '6px' }}>(client)</span>
+                                                                </>
+                                                            )}
+                                                        </span>
+                                                        {p && <span style={{ fontSize: '10px', color: '#7c3aed', fontWeight: '700' }}>+ PET PRE-ADDED</span>}
                                                     </div>
                                                 )
                                             })}
@@ -4306,7 +4365,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                                             color: '#6c757d', fontSize: '13px', zIndex: 100,
                                             marginTop: '4px',
                                         }}>
-                                            No clients match "{clientSearch}"
+                                            No clients or pets match "{clientSearch}"
                                         </div>
                                     )}
                                 </>

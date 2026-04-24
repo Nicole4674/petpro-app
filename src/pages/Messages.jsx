@@ -443,10 +443,36 @@ export default function Messages() {
           key={m.id}
           message={m}
           isOwnMessage={m.sender_type === 'groomer'}
+          onDelete={handleDeleteMessage}
         />
       )
     })
     return out
+  }
+
+  // Delete a single message from the thread (removes the row from DB + UI)
+  async function handleDeleteMessage(messageId) {
+    var { error } = await supabase.from('messages').delete().eq('id', messageId)
+    if (error) {
+      alert('Could not delete: ' + error.message)
+      return
+    }
+    setMessages(function (prev) { return prev.filter(function (m) { return m.id !== messageId }) })
+  }
+
+  // Delete an entire thread (message history + thread row)
+  async function handleDeleteThread() {
+    if (!selectedThreadId) return
+    var threadName = (threads.find(function (t) { return t.id === selectedThreadId }) || {}).client_name || 'this thread'
+    if (!window.confirm('Delete the ENTIRE conversation with ' + threadName + '?\n\nAll messages will be permanently removed. This cannot be undone.')) return
+    // Delete all messages first, then the thread
+    var { error: msgErr } = await supabase.from('messages').delete().eq('thread_id', selectedThreadId)
+    if (msgErr) { alert('Could not delete messages: ' + msgErr.message); return }
+    var { error: threadErr } = await supabase.from('message_threads').delete().eq('id', selectedThreadId)
+    if (threadErr) { alert('Could not delete thread: ' + threadErr.message); return }
+    setThreads(function (prev) { return prev.filter(function (t) { return t.id !== selectedThreadId }) })
+    setMessages([])
+    setSelectedThreadId(null)
   }
 
   function previewText(m) {
@@ -700,32 +726,51 @@ export default function Messages() {
           </div>
         ) : (
           <>
-            <div style={threadHeaderStyle}>
-              {selectedThread && selectedThread.client_id ? (
-                <div
-                  onClick={function () { navigate('/clients/' + selectedThread.client_id) }}
-                  style={{
-                    fontWeight: 600,
-                    fontSize: '16px',
-                    color: '#667eea',
-                    cursor: 'pointer',
-                    textDecoration: 'underline',
-                    display: 'inline-block',
-                  }}
-                  title="View client profile"
-                >
-                  {selectedThread.client_name}
-                </div>
-              ) : (
-                <div style={{ fontWeight: 600, fontSize: '16px' }}>
-                  {selectedThread ? selectedThread.client_name : 'Chat'}
-                </div>
-              )}
-              {selectedThread && selectedThread.subject && (
-                <div style={{ fontSize: '13px', color: '#667eea', marginTop: '2px' }}>
-                  {selectedThread.subject}
-                </div>
-              )}
+            <div style={{ ...threadHeaderStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <div style={{ flex: 1 }}>
+                {selectedThread && selectedThread.client_id ? (
+                  <div
+                    onClick={function () { navigate('/clients/' + selectedThread.client_id) }}
+                    style={{
+                      fontWeight: 600,
+                      fontSize: '16px',
+                      color: '#667eea',
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                      display: 'inline-block',
+                    }}
+                    title="View client profile"
+                  >
+                    {selectedThread.client_name}
+                  </div>
+                ) : (
+                  <div style={{ fontWeight: 600, fontSize: '16px' }}>
+                    {selectedThread ? selectedThread.client_name : 'Chat'}
+                  </div>
+                )}
+                {selectedThread && selectedThread.subject && (
+                  <div style={{ fontSize: '13px', color: '#667eea', marginTop: '2px' }}>
+                    {selectedThread.subject}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={handleDeleteThread}
+                title="Delete entire conversation"
+                style={{
+                  padding: '6px 12px',
+                  background: '#fff',
+                  color: '#b91c1c',
+                  border: '1px solid #fecaca',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                🗑️ Delete chat
+              </button>
             </div>
             <div style={threadBodyStyle}>
               {messages.length === 0 ? (

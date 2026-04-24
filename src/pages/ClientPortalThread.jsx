@@ -447,6 +447,16 @@ export default function ClientPortalThread() {
     })
   }
 
+  // Clients can delete their own messages. RLS blocks deleting the groomer's.
+  async function handleDeleteOwnMessage(messageId) {
+    var { error } = await supabase.from('messages').delete().eq('id', messageId)
+    if (error) {
+      alert('Could not delete: ' + error.message)
+      return
+    }
+    setMessages(function (prev) { return prev.filter(function (m) { return m.id !== messageId }) })
+  }
+
   function renderMessagesWithSeparators() {
     var out = []
     var lastDay = null
@@ -469,6 +479,8 @@ export default function ClientPortalThread() {
           key={m.id}
           message={m}
           isOwnMessage={m.sender_type === 'client'}
+          // Client can only delete their OWN messages (not the groomer's)
+          onDelete={m.sender_type === 'client' ? handleDeleteOwnMessage : null}
         />
       )
     })

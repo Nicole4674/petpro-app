@@ -46,6 +46,8 @@ export default function ClientPortalDashboard() {
   var [editing, setEditing] = useState(false)
   var [saving, setSaving] = useState(false)
   var [editError, setEditError] = useState('')
+  var [editFirstName, setEditFirstName] = useState('')
+  var [editLastName, setEditLastName] = useState('')
   var [editPhone, setEditPhone] = useState('')
   var [editPrefContact, setEditPrefContact] = useState('text')
   var [editAddress, setEditAddress] = useState('')
@@ -296,6 +298,8 @@ export default function ClientPortalDashboard() {
 
   // Edit Contact Info handlers
   function handleStartEdit() {
+    setEditFirstName(client.first_name || '')
+    setEditLastName(client.last_name || '')
     setEditPhone(client.phone || '')
     setEditPrefContact(client.preferred_contact || 'text')
     setEditAddress(client.address || '')
@@ -312,6 +316,10 @@ export default function ClientPortalDashboard() {
     setEditError('')
 
     // Validation
+    if (!editFirstName.trim()) {
+      setEditError('First name is required.')
+      return
+    }
     if (!editPhone.trim()) {
       setEditError('Phone number is required.')
       return
@@ -322,6 +330,8 @@ export default function ClientPortalDashboard() {
       var { error: updateError } = await supabase
         .from('clients')
         .update({
+          first_name: editFirstName.trim(),
+          last_name: editLastName.trim() || null,
           phone: editPhone.trim(),
           preferred_contact: editPrefContact,
           address: editAddress.trim() || null,
@@ -831,6 +841,48 @@ export default function ClientPortalDashboard() {
                       {editError}
                     </div>
                   )}
+
+                  {/* First + Last Name */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        First Name
+                      </label>
+                      <input
+                        type="text"
+                        value={editFirstName}
+                        onChange={function (e) { setEditFirstName(e.target.value) }}
+                        placeholder="First name"
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '8px',
+                          fontSize: '16px',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        Last Name
+                      </label>
+                      <input
+                        type="text"
+                        value={editLastName}
+                        onChange={function (e) { setEditLastName(e.target.value) }}
+                        placeholder="Last name"
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '8px',
+                          fontSize: '16px',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                  </div>
 
                   {/* Phone */}
                   <div style={{ marginBottom: '12px' }}>

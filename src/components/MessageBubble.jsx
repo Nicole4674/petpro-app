@@ -1,7 +1,8 @@
 import { useState } from 'react'
 
-export default function MessageBubble({ message, isOwnMessage }) {
+export default function MessageBubble({ message, isOwnMessage, onDelete }) {
   var [imageExpanded, setImageExpanded] = useState(false)
+  var [hovered, setHovered] = useState(false)
 
   // Format timestamp as "2:34 PM" or "Yesterday 2:34 PM" or "Apr 18 2:34 PM"
   function formatTime(iso) {
@@ -65,23 +66,64 @@ export default function MessageBubble({ message, isOwnMessage }) {
     objectFit: 'cover',
   }
 
+  function handleDeleteClick() {
+    if (!onDelete) return
+    if (!window.confirm('Delete this message? This cannot be undone.')) return
+    onDelete(message.id)
+  }
+
   return (
-    <div style={rowStyle}>
-      <div style={bubbleStyle}>
-        {message.attachment_url && (
-          <img
-            src={message.attachment_url}
-            alt="attachment"
-            style={imgStyle}
-            onClick={function () { setImageExpanded(!imageExpanded) }}
-          />
+    <div
+      style={rowStyle}
+      onMouseEnter={function () { setHovered(true) }}
+      onMouseLeave={function () { setHovered(false) }}
+    >
+      <div style={{ position: 'relative', maxWidth: '75%' }}>
+        <div style={bubbleStyle}>
+          {message.attachment_url && (
+            <img
+              src={message.attachment_url}
+              alt="attachment"
+              style={imgStyle}
+              onClick={function () { setImageExpanded(!imageExpanded) }}
+            />
+          )}
+          {message.text && (
+            <div style={{ marginTop: message.attachment_url ? '8px' : '0', padding: message.attachment_url ? '0 4px' : '0' }}>
+              {message.text}
+            </div>
+          )}
+          <div style={timeStyle}>{formatTime(message.created_at)}</div>
+        </div>
+        {onDelete && (hovered || 'ontouchstart' in window) && (
+          <button
+            type="button"
+            onClick={handleDeleteClick}
+            title="Delete message"
+            style={{
+              position: 'absolute',
+              top: '-6px',
+              [isOwnMessage ? 'left' : 'right']: '-6px',
+              width: '22px',
+              height: '22px',
+              borderRadius: '50%',
+              border: 'none',
+              background: '#ef4444',
+              color: '#fff',
+              fontSize: '13px',
+              fontWeight: '700',
+              lineHeight: '1',
+              cursor: 'pointer',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+            }}
+          >
+            ×
+          </button>
         )}
-        {message.text && (
-          <div style={{ marginTop: message.attachment_url ? '8px' : '0', padding: message.attachment_url ? '0 4px' : '0' }}>
-            {message.text}
-          </div>
-        )}
-        <div style={timeStyle}>{formatTime(message.created_at)}</div>
       </div>
     </div>
   )
