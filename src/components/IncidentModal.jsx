@@ -97,33 +97,43 @@ export default function IncidentModal({ mode, petId, clientId, appointmentId, st
     setShopInfo(results[2].data)
   }
 
+  var [uploading, setUploading] = useState(false)
+
   async function handlePhotoUpload(e) {
     var files = e.target.files
     if (!files || files.length === 0) return
-    setSaving(true)
+    setError('')
+    setUploading(true)
     try {
       var { data: { user } } = await supabase.auth.getUser()
       var uploaded = []
+      var failed = []
       for (var i = 0; i < files.length; i++) {
         var f = files[i]
-        var path = user.id + '/incidents/' + Date.now() + '-' + f.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-        var { data, error: upErr } = await supabase.storage.from('incident-photos').upload(path, f, { upsert: false })
+        // Use the existing vax-certs bucket under an incidents/ folder.
+        // vax-certs is already public + already works for vaccine photos.
+        var path = 'incidents/' + user.id + '/' + Date.now() + '-' + i + '-' + f.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+        var { data, error: upErr } = await supabase.storage.from('vax-certs').upload(path, f, { upsert: false })
         if (upErr) {
-          // Fallback: try a public bucket if incident-photos doesn't exist yet
-          var fb = await supabase.storage.from('vax-certs').upload('incidents/' + path, f, { upsert: false })
-          if (fb.error) { console.error(fb.error); continue }
-          var { data: pub } = supabase.storage.from('vax-certs').getPublicUrl('incidents/' + path)
-          uploaded.push(pub.publicUrl)
-        } else {
-          var { data: pub2 } = supabase.storage.from('incident-photos').getPublicUrl(data.path)
-          uploaded.push(pub2.publicUrl)
+          console.error('[IncidentModal] upload error:', upErr)
+          failed.push(f.name + ': ' + upErr.message)
+          continue
         }
+        var { data: pub } = supabase.storage.from('vax-certs').getPublicUrl(data.path)
+        if (pub && pub.publicUrl) uploaded.push(pub.publicUrl)
       }
-      setForm(function (f) { return Object.assign({}, f, { photo_urls: (f.photo_urls || []).concat(uploaded) }) })
+      if (uploaded.length > 0) {
+        setForm(function (prev) { return Object.assign({}, prev, { photo_urls: (prev.photo_urls || []).concat(uploaded) }) })
+      }
+      if (failed.length > 0) {
+        setError('Some photos failed to upload:\n' + failed.join('\n'))
+      }
+      // Clear the file input so selecting the same file again re-triggers
+      e.target.value = ''
     } catch (err) {
       setError('Photo upload failed: ' + err.message)
     } finally {
-      setSaving(false)
+      setUploading(false)
     }
   }
 
@@ -497,7 +507,18 @@ export default function IncidentModal({ mode, petId, clientId, appointmentId, st
                 })}
               </div>
               {!isView && (
-                <input type="file" accept="image/*" multiple onChange={handlePhotoUpload} style={{ fontSize: '12px' }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handlePhotoUpload}
+                    disabled={uploading}
+                    style={{ fontSize: '12px' }}
+                  />
+                  {uploading && <span style={{ fontSize: '12px', color: '#7c3aed', fontWeight: '600' }}>⏳ Uploading...</span>}
+                  {!uploading && form.photo_urls.length > 0 && <span style={{ fontSize: '12px', color: '#16a34a', fontWeight: '600' }}>✅ {form.photo_urls.length} photo{form.photo_urls.length === 1 ? '' : 's'} ready</span>}
+                </div>
               )}
             </div>
           </div>
