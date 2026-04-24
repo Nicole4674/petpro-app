@@ -338,7 +338,7 @@ export default function Calendar() {
         const [apptResult, clientResult, petResult, serviceResult, staffResult, blockedResult] = await Promise.all([
             supabase
                 .from('appointments')
-                .select('*, clients(first_name, last_name), pets(name, breed), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed))')
+                .select('*, clients(id, first_name, last_name, phone), pets(name, breed), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed))')
                 .gte('appointment_date', startDate)
                 .lte('appointment_date', endDate)
                 .order('start_time'),
@@ -1843,8 +1843,23 @@ export default function Calendar() {
                 }
 
                 return (
-                    <div className="modal-overlay" onClick={closeMassText} style={{ zIndex: 9999 }}>
-                        <div className="modal-content" style={{ maxWidth: '560px', maxHeight: '85vh', overflowY: 'auto' }} onClick={function (e) { e.stopPropagation() }}>
+                    <div
+                        onClick={closeMassText}
+                        style={{
+                            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                            background: 'rgba(0,0,0,0.6)', zIndex: 9999,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
+                        }}
+                    >
+                        <div
+                            onClick={function (e) { e.stopPropagation() }}
+                            style={{
+                                background: '#fff', color: '#111827',
+                                borderRadius: '16px', padding: '24px',
+                                maxWidth: '560px', width: '100%', maxHeight: '85vh',
+                                overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+                            }}
+                        >
                             <h2 style={{ margin: '0 0 6px', fontSize: '20px' }}>📣 Mass Text</h2>
                             <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#6b7280' }}>
                                 Send one message to every client with an appointment on a specific day. For emergencies / day-of cancellations.
