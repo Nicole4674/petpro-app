@@ -6,7 +6,7 @@
 // - If yes → redirects to /portal (client dashboard)
 // - If no  → error (they might be a groomer using wrong page)
 // =======================================================
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
@@ -18,6 +18,29 @@ export default function ClientLogin() {
 
   var [email, setEmail] = useState('')
   var [password, setPassword] = useState('')
+
+  // Auto-redirect when a password reset link brings them here.
+  // Supabase's Site URL defaults to /portal/login, so admin-sent reset
+  // emails land here with a recovery token. We catch that event and
+  // forward them to /reset-password where the form lives.
+  useEffect(function () {
+    // Immediate check — URL hash contains the recovery token
+    if (window.location.hash && window.location.hash.indexOf('type=recovery') !== -1) {
+      navigate('/reset-password')
+      return
+    }
+    // Backup — listen for the auth event too (fires slightly after load)
+    var subscription = supabase.auth.onAuthStateChange(function (event) {
+      if (event === 'PASSWORD_RECOVERY') {
+        navigate('/reset-password')
+      }
+    })
+    return function () {
+      if (subscription && subscription.data && subscription.data.subscription) {
+        subscription.data.subscription.unsubscribe()
+      }
+    }
+  }, [])
 
   async function handleSubmit(e) {
     e.preventDefault()

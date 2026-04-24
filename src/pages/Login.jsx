@@ -1,12 +1,34 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 export default function Login() {
+  const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+
+  // Auto-redirect to /reset-password if we see a recovery token in the
+  // URL hash (the admin-sent Supabase reset email redirects here by
+  // default — Site URL is /portal/login — so we need to catch it on
+  // both login pages).
+  useEffect(() => {
+    if (window.location.hash && window.location.hash.indexOf('type=recovery') !== -1) {
+      navigate('/reset-password')
+      return
+    }
+    const subscription = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        navigate('/reset-password')
+      }
+    })
+    return () => {
+      if (subscription && subscription.data && subscription.data.subscription) {
+        subscription.data.subscription.unsubscribe()
+      }
+    }
+  }, [])
 
   const handleLogin = async (e) => {
     e.preventDefault()
