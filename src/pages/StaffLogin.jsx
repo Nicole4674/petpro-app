@@ -106,23 +106,28 @@ export default function StaffLogin() {
     }
     setSubmitting(true)
     try {
-      // Pre-check: email must match an existing (unlinked) staff row
-      var { data: staffRow } = await supabase
-        .from('staff_members')
-        .select('id, auth_user_id')
-        .eq('email', email.trim().toLowerCase())
-        .maybeSingle()
+      // Pre-check via SECURITY DEFINER RPC (bypasses RLS for unauth'd user).
+      // Returns: 'eligible' | 'already_linked' | 'not_staff'
+      var { data: status, error: checkErr } = await supabase.rpc('check_staff_email_eligibility', {
+        p_email: email.trim().toLowerCase(),
+      })
 
-      if (!staffRow) {
+      if (checkErr) {
+        setError('Could not verify email: ' + checkErr.message)
+        setSubmitting(false)
+        return
+      }
+      if (status === 'not_staff') {
         setError('This email is not set up as a staff account. Ask your shop owner to add you first.')
         setSubmitting(false)
         return
       }
-      if (staffRow.auth_user_id) {
+      if (status === 'already_linked') {
         setError('This account is already set up. Try logging in instead.')
         setSubmitting(false)
         return
       }
+      // status === 'eligible' — proceed
 
       // Create the auth user — trigger auto-links to staff_members by email
       var { error: signUpErr } = await supabase.auth.signUp({
