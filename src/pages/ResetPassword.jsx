@@ -51,6 +51,33 @@ export default function ResetPassword() {
 
   async function checkSession() {
     try {
+      // ── Path A: email template links directly to /reset-password with
+      //           ?token_hash=XXX&type=recovery in the query string.
+      //           Exchange it for a session right here.
+      var params = new URLSearchParams(window.location.search)
+      var tokenHash = params.get('token_hash')
+      var type = params.get('type')
+
+      if (tokenHash && type === 'recovery') {
+        var { error: verifyError } = await supabase.auth.verifyOtp({
+          token_hash: tokenHash,
+          type: 'recovery'
+        })
+        if (verifyError) {
+          console.error('[ResetPassword] verifyOtp error:', verifyError)
+          setError('This reset link is invalid or has expired. Please request a new one from the login page.')
+          setLoading(false)
+          return
+        }
+        setValidSession(true)
+        setLoading(false)
+        return
+      }
+
+      // ── Path B: legacy — Supabase redirected here with tokens in the
+      //           URL hash (e.g. #access_token=...&type=recovery). The
+      //           Supabase client library auto-creates a session from
+      //           that hash on page load.
       var { data: { session } } = await supabase.auth.getSession()
       if (session) {
         setValidSession(true)
