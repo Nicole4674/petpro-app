@@ -34,6 +34,65 @@ Work through one at a time. Check off as we finish each.
 
 - [x] **Client portal confirm-email redirect lands on groomer dashboard** — fixed. App.jsx `/` route was blindly sending any logged-in user to the groomer Dashboard. Added `RootRedirect` component that checks if the user has a `clients` row → routes to `/portal`. Groomers still go to Dashboard.
 
+## Build BEFORE launch (Nicole's tomorrow list)
+
+- [ ] **Incident Reports** — DB table `incidents` (pet_id, client_id, staff_id, type, severity, description, action_taken, client_notified, photos, follow_up_flag). New "🚨 Incidents" tab on PetDetail.jsx + ClientDetail.jsx. "+ Log Incident" button on appointment popup. Badge on pet profile "⚠️ X PAST INCIDENTS" so groomer sees aggression/medical history before handling. **Critical for animal businesses — liability + insurance + client communication record.** ~45 min.
+- [ ] **Tip handling** — track staff tips on payment completion. Add `tip_amount` field to payments. Staff can see total tips on their Staff Portal (/staff/me). Owner sees tip summary on payroll reports. ~30 min.
+
+## POST-LAUNCH features (ongoing build queue — mark "Coming Soon" in app)
+
+All of these get **"Coming Soon" badges** in the sidebar so users see active development + reduce churn from unmet needs.
+
+### Tier 1 — high impact, build first after launch
+
+- [ ] **Payment Processing (Stripe Connect)** — each shop connects their own Stripe account. Enable online payment links via SMS + in-person tap-to-pay. PetPro takes a small % per transaction (revenue stream). Label as "Coming Soon — Pro+" on lower tiers to drive upgrades. ~3-4 hours.
+- [ ] **Client signed waivers / e-signature** — store signed waivers per client (grooming, boarding, photo release, emergency authorization). Typed signature OK for v1. Legal protection for boarding + aggressive pets. ~30-45 min.
+- [ ] **Before/after grooming photos** — attach 2 photos per appointment. Show on appointment popup + pet profile + client portal. Social media marketing gold. ~30 min.
+- [ ] **"Coming Soon" sidebar badges + `/roadmap` page** — add SOON pills to all below items in the groomer sidebar. Build a dedicated `/roadmap` page listing Shipping Soon / In Development / Planned features. Add voting so clients can upvote what they want next (retention gold). ~45 min.
+
+### Tier 2 — retention + revenue
+
+- [ ] **Loyalty / Rewards Program** — visits-based rewards (e.g., 10 grooms = 1 free). Automatic tracking. Notify client when earned. Redeem at checkout.
+- [ ] **Gift Cards** — sell/redeem prepaid gift cards. Digital codes texted to recipient. Integrated with Stripe if payments live.
+- [ ] **Referral Program** — unique referral links per client. "Your referral gets 20% off, you get $10 credit." Auto-apply on signup.
+- [ ] **Online Reviews / Testimonials** — prompt happy clients to leave reviews. Display rotating testimonial widget on Plans.jsx.
+- [ ] **Vaccine expiry auto-alerts** — text client 30 days before vax expires. Lives alongside existing vaccine tab. Skip unless clients ask for it.
+
+### Tier 3 — analytics + scale
+
+- [ ] **Advanced Analytics / Reports** — dashboards for revenue trends, service popularity, client retention, staff productivity, pet breed distribution, etc. Export to CSV/PDF.
+- [ ] **Multi-Location Dashboard** — for shops with 2+ locations. Aggregate view across shops + per-location drill-down. Premium tier feature.
+- [ ] **Mobile Apps (iOS/Android native)** — PWA works fine today; native apps for richer push notifications, biometric login, App Store presence.
+- [ ] **Role-based sidebar gating for staff** — hide owner-only menus (Payroll, Shop Settings, Plans) from limited staff roles. RLS already blocks data access; this just cleans the UI.
+- [ ] **Phase 6 Step 4: Enhance FlaggedBookings page** — better filters, bulk approve/reject, trend view of which rules fire most.
+
+### Tier 4 — polish + founder deal sunset
+
+- [ ] **Founder deal sunset** (after 100 signups) — remove banner, flip `founder: true` flags in TIERS[0] and TIERS[1], flip comparison table `✓*` back to `—` on AI rows, remove yellow footnote.
+- [ ] **Tier gating #92-94** — gate client portal behind Pro+ ($129+), AI features behind Pro+ ($199+), Growing features behind $399+. Only activate AFTER founder window closes.
+
+## User-Facing Documentation
+
+- [ ] **PetPro User Manual / Help Guide** — simple visual guide Nicole can link from the app or share with new signups. Options:
+  - **Easiest:** Google Doc or Notion page with screenshots + captions. Publish link, share with clients. No code needed. Update anytime.
+  - **Medium:** Build `/help` page inside PetPro with sections (Getting Started, Calendar, Clients, Boarding, Staff, AI Features). Each section: screenshot + 2-3 sentence explanation + "Try it now →" button. Add "📖 Help" link to main sidebar.
+  - **Later:** Record short Loom videos (2-3 min per feature), embed in /help page.
+  - **Scope for first version:** start with Google Doc while you finish launch, upgrade to in-app /help page post-launch.
+
+## Post-Launch (after 100 signups)
+
+- [ ] Founder deal sunset (remove banner, flip `founder: true` flags, add tier gating for #92-94)
+- [ ] Phase 6 Step 4: Enhance FlaggedBookings page
+- [ ] Role-based sidebar gating for staff (hide owner menus from limited staff)
+- [ ] Tier gating (#92 client portal behind Pro+, #93 AI behind Pro+, #94 Growing-tier features behind $399+)
+- [ ] Vaccine expiry auto-alerts (would be nice but you said you have vax in client profile; skip unless clients ask)
+
+## Quick Launch Reminder
+
+Staff invite link: `https://app.trypetpro.com/staff/login` — click "🔗 Copy Staff Invite Link" button on Staff List page. Send this + their email to every staff member you add. They click "Set up your account" first time to set password.
+
+---
+
 ## Notes
 
 - Add more items here tomorrow as they come up.
