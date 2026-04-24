@@ -583,6 +583,13 @@ export default function StaffDetail() {
     e.preventDefault()
     setSaving(true)
 
+    // Validate PIN: must be exactly 4 digits if set
+    if (editData.pin_code && !/^\d{4}$/.test(editData.pin_code)) {
+      alert('PIN must be exactly 4 digits (0-9).')
+      setSaving(false)
+      return
+    }
+
     var updates = {
       first_name: editData.first_name,
       last_name: editData.last_name,
@@ -592,6 +599,7 @@ export default function StaffDetail() {
       color_code: editData.color_code,
       hire_date: editData.hire_date || null,
       internal_notes: editData.internal_notes || null,
+      pin_code: editData.pin_code || null,
       updated_at: new Date().toISOString()
     }
 
@@ -1075,6 +1083,28 @@ export default function StaffDetail() {
                   <div className="sl-form-group">
                     <label className="sl-label">Hire Date</label>
                     <input type="date" value={editData.hire_date || ''} onChange={function(e) { setEditData(Object.assign({}, editData, { hire_date: e.target.value })) }} className="sl-input" />
+                  </div>
+                  <div className="sl-form-group">
+                    <label className="sl-label">
+                      Kiosk PIN
+                      <span style={{ fontSize: '11px', color: '#9ca3af', fontWeight: '400', marginLeft: '6px' }}>
+                        (4 digits — for clock-in kiosk)
+                      </span>
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={4}
+                      pattern="[0-9]{4}"
+                      placeholder="e.g. 1234"
+                      value={editData.pin_code || ''}
+                      onChange={function(e) {
+                        const digitsOnly = e.target.value.replace(/[^0-9]/g, '')
+                        setEditData(Object.assign({}, editData, { pin_code: digitsOnly }))
+                      }}
+                      className="sl-input"
+                      style={{ fontFamily: 'monospace', letterSpacing: '4px', fontSize: '18px' }}
+                    />
                   </div>
                 </div>
                 <div className="sd-inline-note">

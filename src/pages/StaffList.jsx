@@ -193,9 +193,25 @@ export default function StaffList() {
           <h1 className="sl-title">👥 Staff & Team</h1>
           <p className="sl-subtitle">Manage your team, roles, and permissions</p>
         </div>
-        <button className="sl-add-btn" onClick={function() { setShowAddForm(true) }}>
-          ✨ Add Staff Member
-        </button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <a
+            href="/kiosk"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open lobby kiosk in a new tab — leave it open on your lobby tablet for staff to clock in"
+            style={{
+              padding: '10px 18px', background: '#fff', color: '#7c3aed',
+              border: '1px solid #7c3aed', borderRadius: '10px',
+              fontWeight: '700', fontSize: '14px', textDecoration: 'none',
+              display: 'inline-flex', alignItems: 'center', gap: '6px',
+            }}
+          >
+            🖥️ Open Lobby Kiosk
+          </a>
+          <button className="sl-add-btn" onClick={function() { setShowAddForm(true) }}>
+            ✨ Add Staff Member
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}

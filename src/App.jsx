@@ -41,6 +41,7 @@ import Contact from './pages/Contact'
 import ClientSignup from './pages/ClientSignup'
 import ClientLogin from './pages/ClientLogin'
 import EmailConfirmed from './pages/EmailConfirmed'
+import Kiosk from './pages/Kiosk'
 
 // ─────────────────────────────────────────────────────────────────
 // RootRedirect — smart routing at "/" based on user type.
@@ -85,7 +86,7 @@ function AppLayout({ children }) {
 
     // Don't show sidebar on login/signup or public legal pages
     var isAuthPage = location.pathname === '/login' || location.pathname === '/signup'
-    var isPublicPage = location.pathname === '/privacy' || location.pathname === '/terms' || location.pathname === '/portal/signup' || location.pathname === '/portal/login' || location.pathname === '/portal/confirmed' || location.pathname === '/plans'
+    var isPublicPage = location.pathname === '/privacy' || location.pathname === '/terms' || location.pathname === '/portal/signup' || location.pathname === '/portal/login' || location.pathname === '/portal/confirmed' || location.pathname === '/plans' || location.pathname === '/kiosk'
     var isPortalPage = location.pathname.indexOf('/portal') === 0
     if (isAuthPage || isPublicPage) {
         return <>{children}</>
@@ -164,6 +165,8 @@ function App() {
                     <Route path="/boarding/kennels" element={session ? <Kennels /> : <Navigate to="/login" />} />
                     <Route path="/boarding/calendar" element={session ? <BoardingCalendar /> : <Navigate to="/login" />} />
                     <Route path="/staff" element={session ? <StaffList /> : <Navigate to="/login" />} />
+                    {/* Lobby Kiosk — leave open on a tablet; staff type PIN to clock in/out */}
+                    <Route path="/kiosk" element={session ? <Kiosk /> : <Navigate to="/login" />} />
                     <Route path="/staff/:id" element={session ? <StaffDetail /> : <Navigate to="/login" />} />
                     <Route path="/waitlist" element={session ? <Waitlist /> : <Navigate to="/login" />} />
                     <Route path="/staff/schedule" element={session ? <StaffSchedule /> : <Navigate to="/login" />} />
