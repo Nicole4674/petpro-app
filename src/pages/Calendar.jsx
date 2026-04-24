@@ -3604,6 +3604,9 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
     // Week view: one layout per date (keyed by date string).
     const dayLayoutsByColumn = {}
     const weekLayoutsByDate = {}
+    // Also track how many appts each column has today — drives the
+    // MoeGo-style auto-sizing (empty column = narrow strip, busy = wider).
+    const apptCountByColumn = {}
     if (isDayView) {
         const dateStr = dateToString(currentDate)
         for (let c = 0; c < dayColumns.length; c++) {
@@ -3613,6 +3616,10 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                     && (a.staff_id || null) === (col.id || null)
             })
             dayLayoutsByColumn[col.id || 'unassigned'] = computeLaneLayout(colAppts)
+            // Only count non-cancelled/rescheduled for sizing decisions
+            apptCountByColumn[col.id || 'unassigned'] = colAppts.filter(function (a) {
+                return a.status !== 'cancelled' && a.status !== 'rescheduled'
+            }).length
         }
     } else {
         for (let d = 0; d < dates.length; d++) {
@@ -3620,6 +3627,18 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
             const dayAppts = appointments.filter(function (a) { return a.appointment_date === dStr })
             weekLayoutsByDate[dStr] = computeLaneLayout(dayAppts)
         }
+    }
+
+    // Auto-size columns: empty groomers shrink to a narrow strip so busy
+    // groomers get the remaining space. Matches MoeGo's behavior.
+    // Week view: keep equal widths (one column = one day, all equal).
+    function getColumnFlexStyle(colId) {
+        if (!isDayView) return {}
+        const count = apptCountByColumn[colId || 'unassigned'] || 0
+        if (count === 0) {
+            return { flex: '0 0 90px', minWidth: '90px', maxWidth: '90px' }
+        }
+        return { flex: '1 1 0', minWidth: '180px' }
     }
 
     // Calculate red time indicator position
@@ -3648,6 +3667,7 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                         <div
                             key={col.id || 'unassigned'}
                             className="time-col-header"
+                            style={getColumnFlexStyle(col.id)}
                         >
                             <span
                                 className="groomer-col-swatch"
@@ -3702,7 +3722,7 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                     <div
                                         key={col.id || 'unassigned'}
                                         className={'time-cell' + (draggedApptId ? ' time-cell-drop-target' : '')}
-                                        style={{ position: 'relative' }}
+                                        style={{ position: 'relative', ...getColumnFlexStyle(col.id) }}
                                         onClick={() => onSlotClick(currentDate, hour, col.id)}
                                         onDragOver={(e) => { if (draggedApptId) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } }}
                                         onDrop={(e) => { e.preventDefault(); if (onSlotDrop) onSlotDrop(currentDate, hour, col.id || null) }}
