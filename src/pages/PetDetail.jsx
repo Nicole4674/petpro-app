@@ -1,15 +1,33 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import IncidentModal from '../components/IncidentModal'
 
 var TABS = [
   { key: 'overview', label: '🐾 Overview' },
+  { key: 'incidents', label: '🚨 Incidents' },
   { key: 'grooming', label: '✂️ Grooming History' },
   { key: 'boarding', label: '🏠 Boarding History' },
   { key: 'vaccinations', label: '💉 Vaccinations' },
   { key: 'notes', label: '📝 Notes' },
   { key: 'payments', label: '💳 Payments' }
 ]
+
+var INCIDENT_TYPE_LABELS = {
+  bite: '🦷 Bite',
+  injury: '🩹 Injury',
+  medical: '🏥 Medical',
+  behavior: '⚠️ Behavior',
+  escape: '🏃 Escape',
+  property_damage: '💥 Property Damage',
+  other: '📋 Other',
+}
+
+var SEVERITY_STYLE = {
+  minor:    { color: '#f59e0b', bg: '#fffbeb', border: '#fde68a' },
+  moderate: { color: '#ea580c', bg: '#fff7ed', border: '#fdba74' },
+  serious:  { color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
+}
 
 // Vaccine type definitions (dogs + cats). Order matters for dropdown.
 var VACCINE_TYPES = [
@@ -48,6 +66,9 @@ export default function PetDetail() {
   var [vaccinations, setVaccinations] = useState([])
   var [notes, setNotes] = useState([])
   var [payments, setPayments] = useState([])
+  var [incidents, setIncidents] = useState([])
+  var [incidentModal, setIncidentModal] = useState(null) // { mode, incident? } | null
+  var [staffOptions, setStaffOptions] = useState([])
   var [loadingTab, setLoadingTab] = useState(false)
 
   // Notes form
@@ -88,6 +109,7 @@ export default function PetDetail() {
     if (activeTab === 'vaccinations') fetchVaccinations()
     if (activeTab === 'notes') fetchNotes()
     if (activeTab === 'payments') fetchPayments()
+    if (activeTab === 'incidents') fetchIncidents()
   }, [activeTab, id, pet])
 
   async function fetchPet() {
@@ -105,6 +127,10 @@ export default function PetDetail() {
 
     setPet(petData)
     setEditForm(petData)
+
+    // Also fetch incident count for the header badge (cheap query, always fresh)
+    supabase.from('incidents').select('id', { count: 'exact', head: true }).eq('pet_id', id)
+      .then(function (res) { if (res.count != null) setIncidents(Array(res.count).fill({ id: '_placeholder' })) })
 
     // Fetch the owner
     var { data: clientData } = await supabase
@@ -182,6 +208,36 @@ export default function PetDetail() {
 
     setPayments(data || [])
     setLoadingTab(false)
+  }
+
+  async function fetchIncidents() {
+    setLoadingTab(true)
+    // Fetch incidents for this pet, newest first, with staff name joined
+    var { data } = await supabase
+      .from('incidents')
+      .select('*, staff_members(first_name, last_name)')
+      .eq('pet_id', id)
+      .order('incident_date', { ascending: false })
+      .order('created_at', { ascending: false })
+    setIncidents(data || [])
+    // Also load staff list for modal dropdown (only fetch once)
+    if (staffOptions.length === 0) {
+      var { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        var { data: staffList } = await supabase
+          .from('staff_members')
+          .select('id, first_name, last_name')
+          .eq('groomer_id', user.id)
+          .eq('status', 'active')
+          .order('first_name')
+        setStaffOptions(staffList || [])
+      }
+    }
+    setLoadingTab(false)
+  }
+
+  function handleIncidentSaved() {
+    fetchIncidents()
   }
 
   async function handleSaveEdit(e) {
@@ -639,6 +695,21 @@ export default function PetDetail() {
             <h1 className="pd-pet-name">{pet.name}</h1>
             <p className="pd-pet-breed">{pet.breed || 'Unknown breed'}</p>
             <div className="pd-pet-tags">
+              {incidents.length > 0 && (
+                <span
+                  onClick={function () { setActiveTab('incidents') }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '4px',
+                    padding: '3px 10px', borderRadius: '999px',
+                    background: '#fef2f2', color: '#991b1b',
+                    border: '1px solid #fecaca', fontSize: '11px', fontWeight: '700',
+                    cursor: 'pointer', letterSpacing: '0.02em',
+                  }}
+                  title="Click to view incident history"
+                >
+                  🚨 {incidents.length} INCIDENT{incidents.length === 1 ? '' : 'S'}
+                </span>
+              )}
               {pet.weight && <span className="pd-tag">⚖️ {pet.weight} lbs</span>}
               {pet.age && <span className="pd-tag">🎂 {pet.age}</span>}
               {pet.sex && <span className="pd-tag">{pet.sex === 'Male' ? '♂️' : '♀️'} {pet.sex}</span>}
@@ -1017,6 +1088,90 @@ export default function PetDetail() {
                   })}
                 </div>
               )
+            )}
+          </div>
+        )}
+
+        {/* ===== INCIDENTS TAB ===== */}
+        {activeTab === 'incidents' && (
+          <div>
+            <div style={{ padding: '16px 18px', background: '#fef2f2', borderRadius: '12px', border: '1px solid #fecaca', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+              <div>
+                <div style={{ fontWeight: '700', color: '#991b1b', fontSize: '15px' }}>🚨 Incident History</div>
+                <div style={{ fontSize: '13px', color: '#7f1d1d', marginTop: '2px' }}>
+                  {incidents.length === 0
+                    ? 'No incidents recorded for ' + (pet && pet.name ? pet.name : 'this pet') + '.'
+                    : incidents.length + ' incident' + (incidents.length === 1 ? '' : 's') + ' on record.'}
+                </div>
+              </div>
+              <button
+                onClick={function () { setIncidentModal({ mode: 'new' }) }}
+                style={{ padding: '10px 18px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: '700', fontSize: '14px', cursor: 'pointer' }}
+              >
+                🚨 Log Incident
+              </button>
+            </div>
+
+            {loadingTab ? (
+              <div className="pd-tab-loading">Loading incidents...</div>
+            ) : incidents.length === 0 ? (
+              <div style={{ padding: '30px', textAlign: 'center', color: '#6b7280', background: '#f9fafb', borderRadius: '12px' }}>
+                <div style={{ fontSize: '40px', marginBottom: '8px' }}>✅</div>
+                <div style={{ fontWeight: '600' }}>No incidents recorded.</div>
+                <div style={{ fontSize: '13px', marginTop: '4px' }}>Log any bites, injuries, medical events, or behavior concerns here.</div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {incidents.map(function (inc) {
+                  var sev = SEVERITY_STYLE[inc.severity] || SEVERITY_STYLE.minor
+                  var staffName = inc.staff_members ? (inc.staff_members.first_name + ' ' + (inc.staff_members.last_name || '')).trim() : null
+                  return (
+                    <div
+                      key={inc.id}
+                      style={{
+                        background: '#fff', borderRadius: '12px',
+                        borderLeft: '4px solid ' + sev.color,
+                        border: '1px solid #e5e7eb', borderLeftWidth: '4px',
+                        padding: '14px 16px',
+                        cursor: 'pointer',
+                      }}
+                      onClick={function () { setIncidentModal({ mode: 'view', incident: inc }) }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: '220px' }}>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '6px' }}>
+                            <span style={{ fontWeight: '700', fontSize: '15px' }}>{INCIDENT_TYPE_LABELS[inc.incident_type] || inc.incident_type}</span>
+                            <span style={{
+                              padding: '2px 10px', fontSize: '11px', fontWeight: '700',
+                              background: sev.bg, color: sev.color, border: '1px solid ' + sev.border,
+                              borderRadius: '999px', textTransform: 'uppercase', letterSpacing: '0.03em',
+                            }}>{inc.severity}</span>
+                            {inc.follow_up_needed && (
+                              <span style={{
+                                padding: '2px 10px', fontSize: '11px', fontWeight: '700',
+                                background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a',
+                                borderRadius: '999px',
+                              }}>⚠️ FOLLOW-UP</span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '13px', color: '#374151', marginBottom: '4px', lineHeight: '1.5' }}>
+                            {inc.description && inc.description.length > 200 ? inc.description.slice(0, 200) + '…' : inc.description}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                            📅 {new Date(inc.incident_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            {inc.incident_time && ' · ' + inc.incident_time}
+                            {staffName && ' · handled by ' + staffName}
+                            {inc.client_notified && ' · ✅ client notified'}
+                          </div>
+                        </div>
+                        {inc.photo_urls && inc.photo_urls.length > 0 && (
+                          <img src={inc.photo_urls[0]} alt="incident" style={{ width: '64px', height: '64px', objectFit: 'cover', borderRadius: '8px', flexShrink: 0 }} />
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             )}
           </div>
         )}
@@ -1455,6 +1610,19 @@ export default function PetDetail() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Incident Modal (log / view / edit) */}
+      {incidentModal && pet && (
+        <IncidentModal
+          mode={incidentModal.mode}
+          incident={incidentModal.incident}
+          petId={id}
+          clientId={pet.client_id}
+          staffOptions={staffOptions}
+          onClose={function () { setIncidentModal(null) }}
+          onSaved={handleIncidentSaved}
+        />
       )}
     </div>
   )
