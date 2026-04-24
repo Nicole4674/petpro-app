@@ -529,6 +529,12 @@ export default function Sidebar({ onToggle }) {
               >
                 🏪 Shop Settings
               </div>
+              <div
+                className={'sidebar-subitem' + (isActive('/account') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/account') }}
+              >
+                💳 Account &amp; Billing
+              </div>
             </div>
           )}
         </div>
