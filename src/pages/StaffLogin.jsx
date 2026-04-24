@@ -60,7 +60,8 @@ export default function StaffLogin() {
         .maybeSingle()
 
       if (staffErr) {
-        setError('Something went wrong. Please try again.')
+        console.error('[StaffLogin] staff_members query error:', staffErr)
+        setError('DB error: ' + staffErr.message + ' (code: ' + (staffErr.code || 'n/a') + ')')
         await supabase.auth.signOut()
         setSubmitting(false)
         return
