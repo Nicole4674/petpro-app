@@ -3629,16 +3629,21 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
         }
     }
 
-    // Auto-size columns: empty groomers shrink to a narrow strip so busy
-    // groomers get the remaining space. Matches MoeGo's behavior.
+    // Auto-size columns: empty groomers shrink to a narrow strip. Busy
+    // groomers get a reasonable normal width (not "take everything left")
+    // so overlapping half-width appts don't balloon into giant tiles.
+    // If the busy column(s) don't fill the screen, the rest is white
+    // space on the right — same behavior MoeGo shows.
     // Week view: keep equal widths (one column = one day, all equal).
     function getColumnFlexStyle(colId) {
         if (!isDayView) return {}
         const count = apptCountByColumn[colId || 'unassigned'] || 0
         if (count === 0) {
+            // Narrow strip — name + swatch only, no appts to show
             return { flex: '0 0 90px', minWidth: '90px', maxWidth: '90px' }
         }
-        return { flex: '1 1 0', minWidth: '180px' }
+        // Busy column: grows to ~380px max so half-width appts stay readable
+        return { flex: '1 1 280px', minWidth: '220px', maxWidth: '380px' }
     }
 
     // Calculate red time indicator position
