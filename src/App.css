@@ -1423,13 +1423,16 @@
 /* Appointment Blocks */
 .appt-block {
     border-radius: 6px;
-    padding: 4px 8px;
+    padding: 3px 7px;
     color: white;
     font-size: 12px;
     overflow: hidden;
     cursor: pointer;
     position: relative;
-    margin-bottom: 2px;
+    /* margin-bottom removed — absolute-positioned blocks shouldn't push space */
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
 }
 
 .appt-time {

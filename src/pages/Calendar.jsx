@@ -3643,11 +3643,11 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                 onDragEnd={() => { if (onApptDragEnd) onApptDragEnd() }}
                                                 style={{
                                                     position: 'absolute',
-                                                    top: 'calc(' + topPct + '% + 2px)',
+                                                    top: 'calc(' + topPct + '% + 1px)',
                                                     left: '2px',
                                                     right: '2px',
-                                                    height: 'calc(' + heightPct + '% - 4px)',
-                                                    minHeight: '26px',
+                                                    height: 'calc(' + heightPct + '% - 2px)',
+                                                    minHeight: '18px',
                                                     zIndex: 5,
                                                     backgroundColor: blockBg,
                                                     borderLeft: '4px solid ' + blockBorder,
@@ -3745,11 +3745,11 @@ function renderBlockedTimes(slotBlocks, onBlockClick, hour) {
                 className="appt-block appt-blocked"
                 style={{
                     position: 'absolute',
-                    top: 'calc(' + topPct + '% + 2px)',
+                    top: 'calc(' + topPct + '% + 1px)',
                     left: '2px',
                     right: '2px',
-                    height: 'calc(' + heightPct + '% - 4px)',
-                    minHeight: '26px',
+                    height: 'calc(' + heightPct + '% - 2px)',
+                    minHeight: '18px',
                     zIndex: 4,
                     backgroundColor: '#9ca3af',
                     borderLeft: '4px solid #6b7280',
@@ -3814,11 +3814,11 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                 onDragEnd={() => { if (onApptDragEnd) onApptDragEnd() }}
                 style={{
                     position: 'absolute',
-                    top: 'calc(' + topPct + '% + 2px)',
+                    top: 'calc(' + topPct + '% + 1px)',
                     left: '2px',
                     right: '2px',
-                    height: 'calc(' + heightPct + '% - 4px)',
-                    minHeight: '26px',
+                    height: 'calc(' + heightPct + '% - 2px)',
+                    minHeight: '18px',
                     zIndex: 5,
                     backgroundColor: groomerColor,
                     borderLeft: '4px solid ' + groomerColor,
