@@ -88,8 +88,39 @@ export default function ClientLogin() {
     }
   }
 
-  function handleForgotPassword() {
-    alert('Forgot password is coming soon!\n\nFor now, please text your groomer to reset it.')
+  // Sends a password reset email via Supabase.
+  // User needs to type their email in the field above first — we reuse it
+  // so they don't have to type it twice.
+  async function handleForgotPassword() {
+    var emailToReset = email.trim().toLowerCase()
+    if (!emailToReset) {
+      setError('Please type your email in the field above first, then click "Forgot password?".')
+      return
+    }
+
+    setError('')
+    setSubmitting(true)
+    try {
+      var { error: resetError } = await supabase.auth.resetPasswordForEmail(emailToReset, {
+        redirectTo: window.location.origin + '/reset-password'
+      })
+
+      if (resetError) {
+        setError('Could not send reset email: ' + resetError.message)
+      } else {
+        alert(
+          '📧 Reset email sent!\n\n' +
+          'We sent a password reset link to ' + emailToReset + '.\n\n' +
+          'Click the link in that email to set a new password. ' +
+          'Check your spam folder if you don\'t see it in a few minutes.'
+        )
+      }
+    } catch (err) {
+      console.error('Password reset error:', err)
+      setError('Something went wrong sending the reset email. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (

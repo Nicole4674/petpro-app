@@ -20,8 +20,11 @@ export default function ClientSignup() {
   var [error, setError] = useState('')
   var [shopSettings, setShopSettings] = useState(null)
 
-  // Form fields
-  var [fullName, setFullName] = useState('')
+  // Form fields — firstName + lastName are kept SEPARATE so last_name is
+  // guaranteed non-empty on signup. They're combined as "First Last" when
+  // passed to the DB trigger, which still splits on the first space.
+  var [firstName, setFirstName] = useState('')
+  var [lastName, setLastName] = useState('')
   var [email, setEmail] = useState('')
   var [phone, setPhone] = useState('')
   var [password, setPassword] = useState('')
@@ -65,8 +68,12 @@ export default function ClientSignup() {
     setError('')
 
     // Validation
-    if (!fullName.trim()) {
-      setError('Please enter your full name.')
+    if (!firstName.trim()) {
+      setError('Please enter your first name.')
+      return
+    }
+    if (!lastName.trim()) {
+      setError('Please enter your last name.')
       return
     }
     if (!email.trim() || !email.includes('@')) {
@@ -88,12 +95,13 @@ export default function ClientSignup() {
 
     setSubmitting(true)
     try {
+      var fullNameCombined = firstName.trim() + ' ' + lastName.trim()
       var { error: signUpError } = await supabase.auth.signUp({
         email: email.trim().toLowerCase(),
         password: password,
         options: {
           data: {
-            full_name: fullName.trim(),
+            full_name: fullNameCombined,
             phone: phone.trim(),
             groomer_id: groomerId,
             role: 'client',
@@ -102,11 +110,17 @@ export default function ClientSignup() {
       })
 
       if (signUpError) {
-        if (signUpError.message.toLowerCase().includes('already registered') ||
-            signUpError.message.toLowerCase().includes('already exists')) {
+        var msg = signUpError.message.toLowerCase()
+        if (msg.includes('already registered') || msg.includes('already exists')) {
           setError('This email is already registered. Try logging in instead.')
-        } else if (signUpError.message.toLowerCase().includes('password')) {
-          setError('Password issue: ' + signUpError.message)
+        } else if (msg.includes('leaked') || msg.includes('pwned') || msg.includes('breach')) {
+          // Supabase's HaveIBeenPwned check — password was found in a data breach
+          setError('That password has been found in a data breach — please pick a different one. Try 3 random words you\'ll remember, like "blue-taco-river42".')
+        } else if (msg.includes('weak')) {
+          setError('That password is too weak. Try something longer with a mix of letters, numbers, and a symbol.')
+        } else if (msg.includes('password')) {
+          // Fallback — show Supabase's exact message for any other password rule
+          setError(signUpError.message)
         } else {
           setError('Sign up failed: ' + signUpError.message)
         }
@@ -124,7 +138,7 @@ export default function ClientSignup() {
           notifyUser({
             userId: groomerId,
             title: '🎉 New client signed up',
-            body: fullName.trim() + ' joined — ' + email.trim().toLowerCase(),
+            body: fullNameCombined + ' joined — ' + email.trim().toLowerCase(),
             url: '/clients',
             tag: 'signup-' + Date.now(),
           })
@@ -233,10 +247,40 @@ export default function ClientSignup() {
             </div>
           )}
 
-          <FormField label="Full Name" value={fullName} onChange={setFullName} placeholder="Jane Smith" />
+          {/* First + Last name side by side. BOTH required — the SQL trigger
+              needs last_name to do the name-match fallback (Smart Client
+              Signup Match v3). */}
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 160px' }}>
+              <FormField label="First Name" value={firstName} onChange={setFirstName} placeholder="Jane" />
+            </div>
+            <div style={{ flex: '1 1 160px' }}>
+              <FormField label="Last Name" value={lastName} onChange={setLastName} placeholder="Smith" />
+            </div>
+          </div>
           <FormField label="Email" value={email} onChange={setEmail} placeholder="you@example.com" type="email" />
           <FormField label="Phone" value={phone} onChange={setPhone} placeholder="(555) 123-4567" type="tel" />
-          <FormField label="Password" value={password} onChange={setPassword} placeholder="At least 8 characters" type="password" />
+          <FormField label="Password" value={password} onChange={setPassword} placeholder="Create a strong password" type="password" />
+
+          {/* Password requirements helper — prevents the "I tried 5 passwords
+              and nothing worked" problem. Shows rules BEFORE they try. */}
+          <div style={{
+            marginTop: '-8px',
+            marginBottom: '14px',
+            padding: '10px 12px',
+            background: '#f8fafc',
+            border: '1px solid #e2e8f0',
+            borderRadius: '6px',
+            fontSize: '12px',
+            color: '#475569',
+            lineHeight: '1.6'
+          }}>
+            <div style={{ fontWeight: 600, color: '#334155', marginBottom: '2px' }}>Password must:</div>
+            <div>• Be at least 8 characters</div>
+            <div>• Include a letter and a number</div>
+            <div>• Not be a common password (like "password123")</div>
+          </div>
+
           <FormField label="Confirm Password" value={confirmPassword} onChange={setConfirmPassword} placeholder="Re-enter your password" type="password" />
 
           <button

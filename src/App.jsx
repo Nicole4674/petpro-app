@@ -35,6 +35,7 @@ import BookingRules from './pages/BookingRules'
 import Messages from './pages/Messages'
 import ShopSettings from './pages/ShopSettings'
 import Account from './pages/Account'
+import ResetPassword from './pages/ResetPassword'
 import Balances from './pages/Balances'
 import Privacy from './pages/Privacy'
 import Terms from './pages/Terms'
@@ -152,6 +153,7 @@ function App() {
                     <Route path="/signup" element={!session ? <Signup /> : <Navigate to="/" />} />
                     <Route path="/privacy" element={<Privacy />} />
                     <Route path="/terms" element={<Terms />} />
+                    <Route path="/reset-password" element={<ResetPassword />} />
                     <Route path="/plans" element={<Plans />} />
                     <Route path="/portal/signup" element={<ClientSignup />} />
                     <Route path="/portal/login" element={<ClientLogin />} />
