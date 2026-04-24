@@ -13,8 +13,10 @@
 // Stripe Portal: we use Stripe's no-code "Login link" which authenticates
 // the customer by email (magic link). No edge function needed.
 //
-// ❗ WHEN GOING LIVE: replace STRIPE_PORTAL_URL below with the live-mode
-//    login link from dashboard.stripe.com/settings/billing/portal
+// NOTE: The STRIPE_PORTAL_URL below is the LIVE-mode login link, set up
+//       ahead of launch so it doesn't need to change on go-live day.
+//       Customers in Test mode will see a "no subscriptions found" message
+//       when they try to log in — that's expected during testing.
 // ====================================================================
 
 import { useState, useEffect } from 'react'
@@ -23,8 +25,8 @@ import { supabase } from '../lib/supabase'
 import Sidebar from '../components/Sidebar'
 import AIUsageWidget from '../components/AIUsageWidget'
 
-// ── Stripe Customer Portal login link (TEST mode) ──────────────────
-// Update this to the LIVE login link before going live.
+// ── Stripe Customer Portal login link (LIVE mode) ──────────────────
+// Already configured for production — no change needed on launch day.
 var STRIPE_PORTAL_URL = 'https://billing.stripe.com/p/login/9B614pdfv1yGcsn6hB7ok00'
 
 // ── Tier display data ──────────────────────────────────────────────
