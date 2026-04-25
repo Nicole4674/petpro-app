@@ -4159,20 +4159,27 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                     // Left 8px, right 24px — double the left visual per Nicole.
                                                     left: 'calc(' + wLeftPct + '% + 8px)',
                                                     width: 'calc(' + wWidthPct + '% - 32px)',
-                                                    height: 'calc(' + heightPct + '% - 4px)',
+                                                    // Bigger bottom gap (8px) so back-to-back blocks don't merge visually
+                                                    height: 'calc(' + heightPct + '% - 8px)',
                                                     minHeight: '18px',
                                                     zIndex: 5,
                                                     backgroundColor: blockBg,
                                                     borderLeft: '4px solid ' + blockBorder,
+                                                    borderRadius: '6px',
                                                     cursor: isDraggable ? 'grab' : 'pointer',
                                                     opacity: isBeingDragged ? 0.4 : (isCancelled ? 0.6 : 1),
                                                     textDecoration: isCancelled ? 'line-through' : 'none',
-                                                    boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
+                                                    // 1px white "outline" + subtle drop shadow — gives each block its own
+                                                    // crisp edge so adjacent same-color blocks read as separate cards.
+                                                    boxShadow: '0 0 0 1px rgba(255,255,255,0.7), 0 1px 3px rgba(0,0,0,0.12)',
                                                 }}
                                                 onClick={(e) => onApptClick(appt, e)}
                                                 title={'Groomer: ' + groomerName + ' · Status: ' + apptStatus + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '') + (isDraggable ? ' · Drag to reschedule' : '')}
                                             >
-                                                <span className="appt-time">{formatTime(appt.start_time)}</span>
+                                                <span className="appt-time">
+                                                    {formatTime(appt.start_time)}
+                                                    {appt.end_time ? ' – ' + formatTime(appt.end_time) : ''}
+                                                </span>
                                                 <span className="appt-pet">{(appt.appointment_pets && appt.appointment_pets.length > 0) ? appt.appointment_pets.map(function(ap){ return ap.pets?.name }).filter(Boolean).join(', ') : appt.pets?.name}</span>
                                                 <span className="appt-client">{appt.clients?.first_name} {appt.clients?.last_name}</span>
                                                 {wServiceLine && (
@@ -4373,19 +4380,26 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                     // Nicole's eye — colored left border made it look uneven.
                     left: 'calc(' + leftPct + '% + 8px)',
                     width: 'calc(' + widthPct + '% - 32px)',
-                    height: 'calc(' + heightPct + '% - 2px)',
+                    // Bigger bottom gap (6px) so back-to-back blocks don't merge visually
+                    height: 'calc(' + heightPct + '% - 6px)',
                     minHeight: '18px',
                     zIndex: 5,
                     backgroundColor: groomerColor,
                     borderLeft: '4px solid ' + groomerColor,
+                    borderRadius: '6px',
                     cursor: isDraggable ? 'grab' : 'pointer',
                     opacity: isBeingDragged ? 0.4 : 1,
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
+                    // 1px white "outline" + drop shadow → adjacent same-color blocks
+                    // read as separate cards instead of one purple wall.
+                    boxShadow: '0 0 0 1px rgba(255,255,255,0.7), 0 1px 3px rgba(0,0,0,0.12)',
                 }}
                 onClick={(e) => onApptClick(appt, e)}
                 title={'Groomer: ' + groomerName + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '') + (isFlaggedPending ? ' · ⏳ Needs approval' : '') + (isDraggable ? ' · Drag to reschedule' : '')}
             >
-                <span className="appt-time">{formatTime(appt.start_time)}</span>
+                <span className="appt-time">
+                    {formatTime(appt.start_time)}
+                    {appt.end_time ? ' – ' + formatTime(appt.end_time) : ''}
+                </span>
                 <span className="appt-pet">{(appt.appointment_pets && appt.appointment_pets.length > 0) ? appt.appointment_pets.map(function(ap){ return ap.pets?.name }).filter(Boolean).join(', ') : appt.pets?.name}</span>
                 <span className="appt-client">{appt.clients?.first_name} {appt.clients?.last_name}</span>
                 {serviceLine && (
