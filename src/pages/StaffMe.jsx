@@ -35,13 +35,17 @@ export default function StaffMe() {
   var [staff, setStaff] = useState(null)
   var [shifts, setShifts] = useState([])
   var [hours, setHours] = useState({ totalMinutes: 0, entries: [] })
-  // Tips this week for THIS staff member — sum of payments.tip_amount
-  // for appointments where staff_id matches them, within the week range.
+  // Tips for THIS staff — sum of payments.tip_amount for their appointments.
+  // tipsPeriod = 'day' | 'week' | 'month' — toggle so groomers can see their
+  // tips at different time scales (today / this week / this month).
+  var [tipsPeriod, setTipsPeriod] = useState('week')
   var [tipsThisWeek, setTipsThisWeek] = useState({ total: 0, count: 0 })
   var [weekStart, setWeekStart] = useState(getWeekStart(new Date()))
 
   useEffect(function () { loadDashboard() }, [])
   useEffect(function () { if (staff) loadScheduleAndHours(staff) }, [weekStart, staff])
+  // Re-fetch tips when the period toggle changes (Day/Week/Month)
+  useEffect(function () { if (staff) loadTipsForPeriod(staff, tipsPeriod) }, [tipsPeriod, staff])
 
   function getWeekStart(d) {
     var x = new Date(d); x.setDate(x.getDate() - x.getDay()); x.setHours(0, 0, 0, 0); return x
@@ -96,16 +100,34 @@ export default function StaffMe() {
       }
     })
     setHours({ totalMinutes: total, entries: clockData || [] })
+    // Tips load is in its own function so the period toggle can re-call it
+    loadTipsForPeriod(s, tipsPeriod)
+  }
 
-    // Tips this week — payments.tip_amount where the linked appointment's
-    // staff_id matches this staff member. Done as a join through Supabase.
+  // Load tip totals for the selected period (day / week / month).
+  // Sums payments.tip_amount across appointments where staff_id matches.
+  async function loadTipsForPeriod(s, period) {
+    if (!s) return
+    var now = new Date()
+    var rangeStart, rangeEnd
+    if (period === 'day') {
+      rangeStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+      rangeEnd   = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0)
+    } else if (period === 'month') {
+      rangeStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
+      rangeEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0)
+    } else {
+      // week (default) — Sun 00:00 of the week navigated to
+      rangeStart = new Date(weekStart)
+      rangeEnd = new Date(weekStart); rangeEnd.setDate(rangeStart.getDate() + 7)
+    }
     try {
       var { data: tipPayments } = await supabase
         .from('payments')
         .select('tip_amount, created_at, appointments!inner(staff_id)')
         .eq('appointments.staff_id', s.id)
-        .gte('created_at', weekStart.toISOString())
-        .lte('created_at', new Date(weekEnd.getTime() + 86400000).toISOString())
+        .gte('created_at', rangeStart.toISOString())
+        .lt('created_at', rangeEnd.toISOString())
 
       var tipTotal = 0
       var tipCount = 0
@@ -217,11 +239,38 @@ export default function StaffMe() {
 
           {/* Tips */}
           <div style={{ background: '#fff', borderRadius: '14px', padding: '18px 22px', border: '1px solid #e5e7eb' }}>
-            <div style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: '600', marginBottom: '2px' }}>Tips This Week</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap', gap: '6px' }}>
+              <div style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: '600' }}>
+                Tips {tipsPeriod === 'day' ? 'Today' : tipsPeriod === 'month' ? 'This Month' : 'This Week'}
+              </div>
+              {/* Day / Week / Month toggle */}
+              <div style={{ display: 'inline-flex', background: '#f3f4f6', borderRadius: '6px', padding: '2px', gap: '2px' }}>
+                {['day', 'week', 'month'].map(function (p) {
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={function () { setTipsPeriod(p) }}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        textTransform: 'capitalize',
+                        background: tipsPeriod === p ? '#7c3aed' : 'transparent',
+                        color: tipsPeriod === p ? '#fff' : '#4b5563',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                      }}
+                    >{p}</button>
+                  )
+                })}
+              </div>
+            </div>
             <div style={{ fontSize: '30px', fontWeight: '800', color: '#7c3aed', lineHeight: '1' }}>${tipsThisWeek.total.toFixed(2)}</div>
             <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
               {tipsThisWeek.count === 0
-                ? 'No tips yet this week'
+                ? 'No tips yet'
                 : tipsThisWeek.count + ' tipped appointment' + (tipsThisWeek.count === 1 ? '' : 's')}
             </div>
           </div>
