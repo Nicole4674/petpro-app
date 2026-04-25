@@ -208,6 +208,12 @@ export default function Calendar() {
     const [savingAddon, setSavingAddon] = useState(false)
     // In-popup "change groomer" editor — toggles dropdown + holds pending staff_id (tier 1/2 customizability)
     const [editingGroomer, setEditingGroomer] = useState(false)
+    // Inline time edit on the appointment popup — for "groom went longer than expected"
+    // or "I picked the wrong slot when I booked it" scenarios. Same-day only.
+    const [editingTime, setEditingTime] = useState(false)
+    const [pendingStartTime, setPendingStartTime] = useState('')
+    const [pendingEndTime, setPendingEndTime] = useState('')
+    const [savingTime, setSavingTime] = useState(false)
     const [pendingStaffId, setPendingStaffId] = useState('')
     const [apptNotes, setApptNotes] = useState([]) // paper trail of notes for current appointment
     const [showAddNotePopup, setShowAddNotePopup] = useState(false)
@@ -269,6 +275,10 @@ export default function Calendar() {
         // Reset inline message composer each time the popup opens a different appt
         setNewMessageText('')
         setSendMessageStatus(null)
+        // Reset inline time edit so it starts collapsed on every open
+        setEditingTime(false)
+        setPendingStartTime('')
+        setPendingEndTime('')
     }, [selectedAppt?.id])
 
     // Handle "Book Again", "Reschedule", and "View" URL params from client profile
@@ -1125,6 +1135,82 @@ export default function Calendar() {
             fetchData()
         } catch (err) {
             alert('Error changing groomer: ' + (err.message || err))
+        }
+    }
+
+    // Update start/end time on an already-booked appointment without doing a
+    // full reschedule. Common case: groom ran longer than expected, or the
+    // groomer picked a slightly wrong slot during booking. Same-day only —
+    // for date changes, use the Reschedule modal.
+    const handleChangeTime = async () => {
+        if (!selectedAppt) return
+
+        var newStart = (pendingStartTime || '').trim()
+        var newEnd = (pendingEndTime || '').trim()
+
+        if (!newStart || !newEnd) {
+            alert('Both start and end times are required.')
+            return
+        }
+        if (newStart >= newEnd) {
+            alert('End time must be after start time.')
+            return
+        }
+
+        // No actual change → just close
+        if (newStart === selectedAppt.start_time && newEnd === selectedAppt.end_time) {
+            setEditingTime(false)
+            return
+        }
+
+        // Conflict check: same groomer, same day, time-overlap with another appt
+        if (selectedAppt.staff_id) {
+            var newStartParts = newStart.split(':').map(Number)
+            var newEndParts = newEnd.split(':').map(Number)
+            var newStartMin = newStartParts[0] * 60 + (newStartParts[1] || 0)
+            var newEndMin = newEndParts[0] * 60 + (newEndParts[1] || 0)
+
+            var conflicts = (appointments || []).filter(function (a) {
+                if (a.id === selectedAppt.id) return false
+                if (a.appointment_date !== selectedAppt.appointment_date) return false
+                if (a.staff_id !== selectedAppt.staff_id) return false
+                if (['cancelled', 'no_show', 'rescheduled'].indexOf(a.status) >= 0) return false
+                var aStart = (a.start_time || '').split(':').map(Number)
+                var aEnd = (a.end_time || '').split(':').map(Number)
+                if (aStart.length < 2 || aEnd.length < 2) return false
+                var aStartMin = aStart[0] * 60 + (aStart[1] || 0)
+                var aEndMin = aEnd[0] * 60 + (aEnd[1] || 0)
+                return newStartMin < aEndMin && newEndMin > aStartMin
+            })
+
+            if (conflicts.length > 0) {
+                var conflictLines = conflicts.slice(0, 3).map(function (c) {
+                    var nm = c.clients ? ((c.clients.first_name || '') + ' ' + (c.clients.last_name || '')).trim() : 'Appointment'
+                    return '• ' + (nm || 'Appointment') + ' (' + (c.start_time || '?') + '–' + (c.end_time || '?') + ')'
+                }).join('\n')
+                var extra = conflicts.length > 3 ? '\n• +' + (conflicts.length - 3) + ' more…' : ''
+                var msg = 'Heads up — this overlaps with another booking on this groomer:\n\n' + conflictLines + extra + '\n\nUpdate anyway?'
+                if (!window.confirm(msg)) return
+            }
+        }
+
+        setSavingTime(true)
+        try {
+            var { error: updErr } = await supabase
+                .from('appointments')
+                .update({ start_time: newStart, end_time: newEnd })
+                .eq('id', selectedAppt.id)
+            if (updErr) throw updErr
+
+            setEditingTime(false)
+            setPendingStartTime('')
+            setPendingEndTime('')
+            await handleApptClick(selectedAppt, { stopPropagation: function () {} })
+            fetchData()
+        } catch (err) {
+            alert('Error updating time: ' + (err.message || err))
+        } finally {
+            setSavingTime(false)
         }
     }
 
@@ -2334,7 +2420,71 @@ export default function Calendar() {
                                 </div>
                                 <div className="appt-detail-sched-item">
                                     <span className="appt-detail-sched-label">🕐 Time</span>
-                                    <span className="appt-detail-sched-value">{formatTime(selectedAppt.start_time)} — {formatTime(selectedAppt.end_time)}</span>
+                                    {!editingTime ? (
+                                        <span
+                                            className="appt-detail-sched-value"
+                                            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                                        >
+                                            {formatTime(selectedAppt.start_time)} — {formatTime(selectedAppt.end_time)}
+                                            <button
+                                                onClick={function () {
+                                                    setPendingStartTime(selectedAppt.start_time || '')
+                                                    setPendingEndTime(selectedAppt.end_time || '')
+                                                    setEditingTime(true)
+                                                }}
+                                                style={{ background: 'transparent', border: '1px solid #d1d5db', color: '#6d28d9', padding: '2px 8px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 600 }}
+                                                title="Adjust this appointment's start or end time"
+                                            >
+                                                ✏️ Edit
+                                            </button>
+                                        </span>
+                                    ) : (
+                                        <div style={{ padding: '10px', border: '1px solid #e5e7eb', borderRadius: '8px', background: '#fafafa', minWidth: '240px' }}>
+                                            <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                                                <label style={{ flex: 1, fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>
+                                                    Start
+                                                    <input
+                                                        type="time"
+                                                        value={pendingStartTime}
+                                                        onChange={function (e) { setPendingStartTime(e.target.value) }}
+                                                        style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', background: '#fff', marginTop: '2px' }}
+                                                    />
+                                                </label>
+                                                <label style={{ flex: 1, fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>
+                                                    End
+                                                    <input
+                                                        type="time"
+                                                        value={pendingEndTime}
+                                                        onChange={function (e) { setPendingEndTime(e.target.value) }}
+                                                        style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', background: '#fff', marginTop: '2px' }}
+                                                    />
+                                                </label>
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                <button
+                                                    onClick={handleChangeTime}
+                                                    disabled={savingTime}
+                                                    style={{ flex: 1, padding: '7px 12px', background: '#10b981', color: 'white', border: 'none', borderRadius: '6px', cursor: savingTime ? 'wait' : 'pointer', fontWeight: 600, fontSize: '12px', opacity: savingTime ? 0.7 : 1 }}
+                                                >
+                                                    {savingTime ? 'Saving...' : '✓ Save'}
+                                                </button>
+                                                <button
+                                                    onClick={function () {
+                                                        setEditingTime(false)
+                                                        setPendingStartTime('')
+                                                        setPendingEndTime('')
+                                                    }}
+                                                    disabled={savingTime}
+                                                    style={{ flex: 1, padding: '7px 12px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '12px' }}
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                            <div style={{ marginTop: '6px', fontSize: '10px', color: '#6b7280', fontStyle: 'italic' }}>
+                                                Same-day only. For date changes, use Reschedule.
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="appt-detail-sched-item">
                                     <span className="appt-detail-sched-label">💰 Price</span>
