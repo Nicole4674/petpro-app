@@ -6,6 +6,7 @@ import { notifyUser } from '../lib/push'
 import { BehaviorTagsRow } from '../components/BehaviorTags'
 import { resolveHighPriorityTags } from '../lib/behaviorTags'
 import { printDailySheet } from '../lib/printDailySheet'
+import ReportCardModal from '../components/ReportCardModal'
 
 const HOURS = []
 for (let h = 7; h <= 18; h++) {
@@ -195,6 +196,10 @@ export default function Calendar() {
     // Multi-pet: in-popup "change service" editor — tracks which appointment_pet is being edited + the pending new service_id
     const [editingServiceApptPetId, setEditingServiceApptPetId] = useState(null)
     const [pendingServiceId, setPendingServiceId] = useState('')
+    // Report card modal state — { petId, clientId, petName, petBreed, appointmentId, existing? }
+    const [reportCardModal, setReportCardModal] = useState(null)
+    // Map of { appointmentPetKey: existingReportCard } so the popup can show "View" instead of "Create"
+    const [existingReportCards, setExistingReportCards] = useState({})
     // Add-on services state — when groomer wants to stack a 2nd/3rd service
     // on a pet (dematting fee, dremel, handling fee, etc.). One pet can have
     // unlimited add-ons stored in appointment_pet_addons.
@@ -776,6 +781,15 @@ export default function Calendar() {
                 .eq('appointment_id', appt.id)
                 .order('created_at', { ascending: true })
             setApptPayments(paymentsData || [])
+
+            // Fetch existing report cards for this appointment (one per pet)
+            const { data: reportCardsData } = await supabase
+                .from('report_cards')
+                .select('*')
+                .eq('appointment_id', appt.id)
+            const cardsByPet = {}
+            ;(reportCardsData || []).forEach(rc => { cardsByPet[rc.pet_id] = rc })
+            setExistingReportCards(cardsByPet)
 
             // Reset the add-note popup state
             setShowAddNotePopup(false)
@@ -2170,6 +2184,28 @@ export default function Calendar() {
                 )
             })()}
 
+            {/* Report Card modal (per-pet) */}
+            {reportCardModal && (
+                <ReportCardModal
+                    mode={reportCardModal.mode}
+                    serviceType={reportCardModal.serviceType}
+                    petId={reportCardModal.petId}
+                    clientId={reportCardModal.clientId}
+                    petName={reportCardModal.petName}
+                    petBreed={reportCardModal.petBreed}
+                    appointmentId={reportCardModal.appointmentId}
+                    boardingReservationId={reportCardModal.boardingReservationId}
+                    reportCard={reportCardModal.reportCard}
+                    onClose={() => setReportCardModal(null)}
+                    onSaved={async () => {
+                        // Refresh the popup so the button flips to "View Report Card"
+                        if (selectedAppt) {
+                            await handleApptClick(selectedAppt, { stopPropagation: function () {} })
+                        }
+                    }}
+                />
+            )}
+
             {/* Drag-to-reschedule Confirm Modal (Item #6) */}
             {dragConfirm && (
                 <DragDropConfirmModal
@@ -2810,6 +2846,48 @@ export default function Calendar() {
                                                         {ap.pets.grooming_notes}
                                                     </div>
                                                 )}
+
+                                                {/* Report Card — only enabled after checkout, but visible always so groomer knows it's coming */}
+                                                {(function () {
+                                                    var existingCard = existingReportCards[ap.pet_id]
+                                                    var canCreate = !!selectedAppt.checked_out_at
+                                                    return (
+                                                        <div style={{ marginTop: '10px' }}>
+                                                            {existingCard ? (
+                                                                <button
+                                                                    onClick={() => setReportCardModal({
+                                                                        mode: 'view',
+                                                                        serviceType: 'grooming',
+                                                                        petId: ap.pet_id,
+                                                                        clientId: selectedAppt.client_id,
+                                                                        petName: ap.pets?.name,
+                                                                        petBreed: ap.pets?.breed,
+                                                                        appointmentId: selectedAppt.id,
+                                                                        reportCard: existingCard,
+                                                                    })}
+                                                                    style={{ background: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd', borderRadius: '8px', padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '13px', width: '100%' }}
+                                                                >📋 View Report Card</button>
+                                                            ) : canCreate ? (
+                                                                <button
+                                                                    onClick={() => setReportCardModal({
+                                                                        mode: 'new',
+                                                                        serviceType: 'grooming',
+                                                                        petId: ap.pet_id,
+                                                                        clientId: selectedAppt.client_id,
+                                                                        petName: ap.pets?.name,
+                                                                        petBreed: ap.pets?.breed,
+                                                                        appointmentId: selectedAppt.id,
+                                                                    })}
+                                                                    style={{ background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '13px', width: '100%' }}
+                                                                >📋 Create Report Card</button>
+                                                            ) : (
+                                                                <div style={{ fontSize: '11px', color: '#9ca3af', fontStyle: 'italic', textAlign: 'center' }}>
+                                                                    📋 Report card available after checkout
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )
+                                                })()}
                                             </div>
                                         )
                                     })}

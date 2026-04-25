@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { BehaviorTagsRow } from '../components/BehaviorTags'
 import { printDailySheet } from '../lib/printDailySheet'
+import ReportCardModal from '../components/ReportCardModal'
 import '../boarding-styles.css'
 
 export default function BoardingCalendar() {
@@ -19,6 +20,10 @@ export default function BoardingCalendar() {
   const [clients, setClients] = useState([])
   const [pets, setPets] = useState([])
   const [selectedReservation, setSelectedReservation] = useState(null) // for kennel card popup
+  // Report card modal state — { mode, petId, clientId, petName, petBreed, boardingReservationId, reportCard? }
+  const [reportCardModal, setReportCardModal] = useState(null)
+  // Map { petId: existingReportCard } for the currently selected reservation
+  const [resReportCards, setResReportCards] = useState({})
   const [kennelCardLoading, setKennelCardLoading] = useState(false)
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false) // click-to-change status pill
   const [shopSettings, setShopSettings] = useState(null) // Task #42 — for printed forms
@@ -446,6 +451,15 @@ export default function BoardingCalendar() {
         medication_logs: medLogs || [],
         vaccinations: vaccinations
       })
+
+      // Load existing report cards for this reservation (one per pet possible)
+      const { data: reportCardsData } = await supabase
+        .from('report_cards')
+        .select('*')
+        .eq('boarding_reservation_id', reservation.id)
+      const cardsByPet = {}
+      ;(reportCardsData || []).forEach(rc => { cardsByPet[rc.pet_id] = rc })
+      setResReportCards(cardsByPet)
     } catch (err) {
       console.error('Error loading kennel card:', err)
     } finally {
@@ -1238,6 +1252,26 @@ export default function BoardingCalendar() {
       </div>
 
       {/* Kennel Card Popup */}
+      {/* Report Card modal — created from kennel card */}
+      {reportCardModal && (
+        <ReportCardModal
+          mode={reportCardModal.mode}
+          serviceType={reportCardModal.serviceType}
+          petId={reportCardModal.petId}
+          clientId={reportCardModal.clientId}
+          petName={reportCardModal.petName}
+          petBreed={reportCardModal.petBreed}
+          appointmentId={reportCardModal.appointmentId}
+          boardingReservationId={reportCardModal.boardingReservationId}
+          reportCard={reportCardModal.reportCard}
+          onClose={() => setReportCardModal(null)}
+          onSaved={async () => {
+            // Refresh kennel card so the button flips to "View Report Card"
+            if (selectedReservation) await openKennelCard(selectedReservation)
+          }}
+        />
+      )}
+
       {selectedReservation && (
         <div className="cal-modal-overlay" onClick={() => setSelectedReservation(null)}>
           <div className="kc-modal" onClick={e => e.stopPropagation()}>
@@ -1431,6 +1465,48 @@ export default function BoardingCalendar() {
                         )}
                       </div>
                     </div>
+
+                    {/* Report Card — visible always; only fully usable after check-out */}
+                    {(function () {
+                      var existing = resReportCards[pet.id]
+                      var canCreate = selectedReservation.status === 'checked_out'
+                      return (
+                        <div style={{ marginTop: '10px' }}>
+                          {existing ? (
+                            <button
+                              onClick={() => setReportCardModal({
+                                mode: 'view',
+                                serviceType: 'boarding',
+                                petId: pet.id,
+                                clientId: selectedReservation.client_id,
+                                petName: pet.name,
+                                petBreed: pet.breed,
+                                boardingReservationId: selectedReservation.id,
+                                reportCard: existing,
+                              })}
+                              style={{ background: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd', borderRadius: '8px', padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '13px', width: '100%' }}
+                            >📋 View Report Card</button>
+                          ) : canCreate ? (
+                            <button
+                              onClick={() => setReportCardModal({
+                                mode: 'new',
+                                serviceType: 'boarding',
+                                petId: pet.id,
+                                clientId: selectedReservation.client_id,
+                                petName: pet.name,
+                                petBreed: pet.breed,
+                                boardingReservationId: selectedReservation.id,
+                              })}
+                              style={{ background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '13px', width: '100%' }}
+                            >📋 Create Report Card</button>
+                          ) : (
+                            <div style={{ fontSize: '11px', color: '#9ca3af', fontStyle: 'italic', textAlign: 'center' }}>
+                              📋 Report card available after check-out
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })()}
 
                     {/* Health Alerts */}
                     {(pet.allergies || pet.medications) && (
