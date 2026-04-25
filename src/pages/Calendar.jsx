@@ -192,6 +192,12 @@ export default function Calendar() {
     // Multi-pet: in-popup "change service" editor — tracks which appointment_pet is being edited + the pending new service_id
     const [editingServiceApptPetId, setEditingServiceApptPetId] = useState(null)
     const [pendingServiceId, setPendingServiceId] = useState('')
+    // Add-on services state — when groomer wants to stack a 2nd/3rd service
+    // on a pet (dematting fee, dremel, handling fee, etc.). One pet can have
+    // unlimited add-ons stored in appointment_pet_addons.
+    const [addingAddonForApId, setAddingAddonForApId] = useState(null)
+    const [pendingAddonServiceId, setPendingAddonServiceId] = useState('')
+    const [savingAddon, setSavingAddon] = useState(false)
     // In-popup "change groomer" editor — toggles dropdown + holds pending staff_id (tier 1/2 customizability)
     const [editingGroomer, setEditingGroomer] = useState(false)
     const [pendingStaffId, setPendingStaffId] = useState('')
@@ -677,7 +683,13 @@ export default function Calendar() {
                         service_notes,
                         groomer_notes,
                         pets:pet_id ( id, name, breed, weight, age, sex, allergies, medications, vaccination_status, vaccination_expiry, is_spayed_neutered, is_senior, grooming_notes ),
-                        services:service_id ( id, service_name, price, time_block_minutes )
+                        services:service_id ( id, service_name, price, time_block_minutes ),
+                        appointment_pet_addons (
+                            id,
+                            service_id,
+                            quoted_price,
+                            services:service_id ( id, service_name, price, time_block_minutes )
+                        )
                     )
                 `)
                 .eq('id', appt.id)
@@ -934,6 +946,100 @@ export default function Calendar() {
             fetchData()
         } catch (err) {
             alert('Error changing service: ' + (err.message || err))
+        }
+    }
+
+    // ─── ADD-ON SERVICES ───────────────────────────────────────────
+    // Stack a 2nd/3rd/Nth service on a single pet (dematting, dremel,
+    // handling fee, etc.). Lives in appointment_pet_addons table.
+    // Each add-on is its own row with own service_id + quoted_price.
+    //
+    // Total appointment price = sum(primary services) + sum(addons).
+    // We refresh appointments.quoted_price on the appointment row so
+    // the payment flow + balance calcs see the correct total.
+
+    async function recalcAndSaveApptTotal(apptId) {
+        // Re-fetch all appointment_pets + their addons for this appt,
+        // sum everything, save back to appointments.quoted_price.
+        var { data: aps } = await supabase
+            .from('appointment_pets')
+            .select('quoted_price, appointment_pet_addons(quoted_price)')
+            .eq('appointment_id', apptId)
+        var total = 0
+        ;(aps || []).forEach(function (ap) {
+            total += parseFloat(ap.quoted_price || 0)
+            ;(ap.appointment_pet_addons || []).forEach(function (addon) {
+                total += parseFloat(addon.quoted_price || 0)
+            })
+        })
+        await supabase.from('appointments').update({ quoted_price: total }).eq('id', apptId)
+        return total
+    }
+
+    async function handleAddAddon(apId) {
+        if (!pendingAddonServiceId || !selectedAppt) return
+        var service = (services || []).find(function (s) { return s.id === pendingAddonServiceId })
+        if (!service) return
+
+        setSavingAddon(true)
+        try {
+            // Insert the add-on row
+            var { error: insErr } = await supabase
+                .from('appointment_pet_addons')
+                .insert({
+                    appointment_pet_id: apId,
+                    service_id: pendingAddonServiceId,
+                    quoted_price: parseFloat(service.price || 0),
+                    groomer_id: selectedAppt.groomer_id,
+                })
+            if (insErr) throw insErr
+
+            // Recompute appointment total (primary + all addons)
+            await recalcAndSaveApptTotal(selectedAppt.id)
+
+            // Auto-extend the appointment end_time by the add-on's duration
+            // (MoeGo-style — adding a 15 min dremel makes the calendar block grow).
+            var addonMinutes = parseInt(service.time_block_minutes || 0)
+            if (addonMinutes > 0 && selectedAppt.end_time) {
+                var endParts = selectedAppt.end_time.split(':').map(Number)
+                var totalEndMin = (endParts[0] || 0) * 60 + (endParts[1] || 0) + addonMinutes
+                var newEndH = Math.floor(totalEndMin / 60)
+                var newEndM = totalEndMin % 60
+                var newEndTime = String(newEndH).padStart(2, '0') + ':' + String(newEndM).padStart(2, '0') + ':00'
+                await supabase
+                    .from('appointments')
+                    .update({ end_time: newEndTime })
+                    .eq('id', selectedAppt.id)
+            }
+
+            // Reset form + refresh popup + calendar
+            setAddingAddonForApId(null)
+            setPendingAddonServiceId('')
+            await handleApptClick(selectedAppt, { stopPropagation: function () {} })
+            fetchData()
+        } catch (err) {
+            alert('Could not add service: ' + (err.message || err))
+        } finally {
+            setSavingAddon(false)
+        }
+    }
+
+    async function handleRemoveAddon(addonId, serviceName) {
+        if (!selectedAppt) return
+        var label = serviceName || 'this add-on'
+        if (!window.confirm('Remove "' + label + '" from this appointment?')) return
+        try {
+            var { error: delErr } = await supabase
+                .from('appointment_pet_addons')
+                .delete()
+                .eq('id', addonId)
+            if (delErr) throw delErr
+
+            await recalcAndSaveApptTotal(selectedAppt.id)
+            await handleApptClick(selectedAppt, { stopPropagation: function () {} })
+            fetchData()
+        } catch (err) {
+            alert('Could not remove service: ' + (err.message || err))
         }
     }
 
@@ -2543,6 +2649,109 @@ export default function Calendar() {
                                                             style={{ background: '#fff', border: '1px solid #c4b5fd', color: '#6d28d9', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, flexShrink: 0 }}
                                                         >+ Pick service</button>
                                                     </div>
+                                                )}
+
+                                                {/* ── ADD-ON SERVICES — extras like dematting fee, dremel, handling ── */}
+                                                {(ap.appointment_pet_addons || []).length > 0 && (
+                                                    <div style={{ marginBottom: '6px' }}>
+                                                        {(ap.appointment_pet_addons || []).map(function (addon) {
+                                                            return (
+                                                                <div
+                                                                    key={addon.id}
+                                                                    className="appt-detail-service-card"
+                                                                    style={{
+                                                                        marginBottom: '6px',
+                                                                        display: 'flex',
+                                                                        justifyContent: 'space-between',
+                                                                        alignItems: 'center',
+                                                                        gap: '8px',
+                                                                        background: '#faf5ff',
+                                                                        borderLeft: '3px solid #c4b5fd',
+                                                                    }}
+                                                                >
+                                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                                        <div className="appt-detail-service-name" style={{ fontSize: '13px' }}>
+                                                                            ➕ {addon.services?.service_name || 'Service'}
+                                                                        </div>
+                                                                        <div className="appt-detail-service-meta" style={{ fontSize: '12px' }}>
+                                                                            ${parseFloat(addon.quoted_price || 0).toFixed(2)}
+                                                                            {addon.services?.time_block_minutes ? ' · ' + addon.services.time_block_minutes + ' mins' : ''}
+                                                                        </div>
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={function () { handleRemoveAddon(addon.id, addon.services?.service_name) }}
+                                                                        title="Remove this add-on"
+                                                                        style={{
+                                                                            background: '#fee2e2',
+                                                                            border: '1px solid #fecaca',
+                                                                            color: '#dc2626',
+                                                                            borderRadius: '6px',
+                                                                            padding: '2px 8px',
+                                                                            cursor: 'pointer',
+                                                                            fontSize: '14px',
+                                                                            fontWeight: 700,
+                                                                            flexShrink: 0,
+                                                                            lineHeight: '1.2',
+                                                                        }}
+                                                                    >×</button>
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                )}
+
+                                                {/* + Add Service / add-on button (or inline picker if user clicked it) */}
+                                                {addingAddonForApId === ap.id ? (
+                                                    <div style={{
+                                                        marginBottom: '8px',
+                                                        padding: '10px',
+                                                        background: '#faf5ff',
+                                                        border: '1px dashed #c4b5fd',
+                                                        borderRadius: '8px',
+                                                    }}>
+                                                        <select
+                                                            value={pendingAddonServiceId}
+                                                            onChange={function (e) { setPendingAddonServiceId(e.target.value) }}
+                                                            style={{ width: '100%', padding: '8px', fontSize: '14px', borderRadius: '6px', border: '1px solid #d1d5db', marginBottom: '8px', background: '#fff' }}
+                                                        >
+                                                            <option value="">— Pick a service —</option>
+                                                            {(services || []).map(function (s) {
+                                                                return (
+                                                                    <option key={s.id} value={s.id}>
+                                                                        {s.service_name} — ${parseFloat(s.price || 0).toFixed(2)}{s.time_block_minutes ? ' · ' + s.time_block_minutes + ' min' : ''}
+                                                                    </option>
+                                                                )
+                                                            })}
+                                                        </select>
+                                                        <div style={{ display: 'flex', gap: '6px' }}>
+                                                            <button
+                                                                onClick={function () { handleAddAddon(ap.id) }}
+                                                                disabled={!pendingAddonServiceId || savingAddon}
+                                                                style={{ flex: 1, padding: '8px 12px', background: pendingAddonServiceId && !savingAddon ? '#10b981' : '#d1d5db', color: 'white', border: 'none', borderRadius: '6px', cursor: pendingAddonServiceId && !savingAddon ? 'pointer' : 'not-allowed', fontWeight: 600, fontSize: '13px' }}
+                                                            >{savingAddon ? 'Adding…' : '✓ Add service'}</button>
+                                                            <button
+                                                                onClick={function () { setAddingAddonForApId(null); setPendingAddonServiceId('') }}
+                                                                disabled={savingAddon}
+                                                                style={{ flex: 1, padding: '8px 12px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}
+                                                            >Cancel</button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        onClick={function () { setAddingAddonForApId(ap.id); setPendingAddonServiceId('') }}
+                                                        style={{
+                                                            width: '100%',
+                                                            padding: '6px 10px',
+                                                            marginBottom: '8px',
+                                                            background: 'transparent',
+                                                            border: '1px dashed #c4b5fd',
+                                                            color: '#6d28d9',
+                                                            borderRadius: '6px',
+                                                            cursor: 'pointer',
+                                                            fontWeight: 600,
+                                                            fontSize: '12px',
+                                                        }}
+                                                    >+ Add another service</button>
                                                 )}
 
                                                 {/* Per-pet Health Alerts */}
