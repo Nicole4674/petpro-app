@@ -33,7 +33,9 @@ export default function BoardingCalendar() {
     start_time: '08:00',
     end_time: '12:00',
     notes: '',
-    status: 'unconfirmed',
+    // Owner is creating this directly → default to confirmed.
+    // Client portal requests should set 'unconfirmed' / 'pending' explicitly.
+    status: 'confirmed',
     // Feeding & Care
     feeding_schedule: '',
     special_diet: '',
@@ -277,7 +279,7 @@ export default function BoardingCalendar() {
       start_time: '08:00',
       end_time: '12:00',
       notes: '',
-      status: 'unconfirmed'
+      status: 'confirmed'
     })
     setClientSearch('')
   }
