@@ -206,6 +206,11 @@ export default function Calendar() {
     const [addingAddonForApId, setAddingAddonForApId] = useState(null)
     const [pendingAddonServiceId, setPendingAddonServiceId] = useState('')
     const [savingAddon, setSavingAddon] = useState(false)
+    // Recurring add-on propagation — when true, the new add-on (e.g. nail
+    // dremel) gets copied onto every future appointment in the same recurring
+    // series for the same pet. Only meaningful when the current appt has a
+    // recurring_series_id.
+    const [applyAddonToSeries, setApplyAddonToSeries] = useState(false)
     // In-popup "change groomer" editor — toggles dropdown + holds pending staff_id (tier 1/2 customizability)
     const [editingGroomer, setEditingGroomer] = useState(false)
     // Inline time edit on the appointment popup — for "groom went longer than expected"
@@ -1010,7 +1015,7 @@ export default function Calendar() {
 
         setSavingAddon(true)
         try {
-            // Insert the add-on row
+            // 1. Insert the add-on row on the current appointment_pet
             var { error: insErr } = await supabase
                 .from('appointment_pet_addons')
                 .insert({
@@ -1021,11 +1026,11 @@ export default function Calendar() {
                 })
             if (insErr) throw insErr
 
-            // Recompute appointment total (primary + all addons)
+            // 2. Recompute appointment total (primary + all addons)
             await recalcAndSaveApptTotal(selectedAppt.id)
 
-            // Auto-extend the appointment end_time by the add-on's duration
-            // (MoeGo-style — adding a 15 min dremel makes the calendar block grow).
+            // 3. Auto-extend the appointment end_time by the add-on's duration
+            //    (MoeGo-style — adding a 15 min dremel makes the calendar block grow).
             var addonMinutes = parseInt(service.time_block_minutes || 0)
             if (addonMinutes > 0 && selectedAppt.end_time) {
                 var endParts = selectedAppt.end_time.split(':').map(Number)
@@ -1039,11 +1044,92 @@ export default function Calendar() {
                     .eq('id', selectedAppt.id)
             }
 
-            // Reset form + refresh popup + calendar
+            // 4. RECURRING PROPAGATION — apply this add-on to every future
+            //    appointment in the same series for the same pet.
+            //    Common case: client confirms a recurring booking, then texts
+            //    later to add nail dremel. Owner shouldn't have to repeat this
+            //    on all 10 future appointments.
+            var seriesPropagated = 0
+            if (applyAddonToSeries && selectedAppt.recurring_series_id) {
+                try {
+                    // Need pet_id to find matching appointment_pets in siblings
+                    var currentAp = (selectedAppt.appointment_pets || []).find(function (a) { return a.id === apId })
+                    var petId = currentAp && currentAp.pet_id
+                    if (petId) {
+                        var todayStr = new Date().toISOString().slice(0, 10)
+                        // Future siblings (excluding the current appointment)
+                        var { data: siblingAppts } = await supabase
+                            .from('appointments')
+                            .select('id, end_time')
+                            .eq('recurring_series_id', selectedAppt.recurring_series_id)
+                            .neq('id', selectedAppt.id)
+                            .gte('appointment_date', todayStr)
+                            .not('status', 'in', '(cancelled,no_show,rescheduled,completed)')
+
+                        var siblingIds = (siblingAppts || []).map(function (a) { return a.id })
+                        if (siblingIds.length > 0) {
+                            // Find matching appointment_pet rows on those siblings (same pet)
+                            var { data: siblingAps } = await supabase
+                                .from('appointment_pets')
+                                .select('id, appointment_id')
+                                .in('appointment_id', siblingIds)
+                                .eq('pet_id', petId)
+
+                            // Insert addon rows for each sibling appointment_pet
+                            for (var i = 0; i < (siblingAps || []).length; i++) {
+                                var sap = siblingAps[i]
+                                var { error: sibInsErr } = await supabase
+                                    .from('appointment_pet_addons')
+                                    .insert({
+                                        appointment_pet_id: sap.id,
+                                        service_id: pendingAddonServiceId,
+                                        quoted_price: parseFloat(service.price || 0),
+                                        groomer_id: selectedAppt.groomer_id,
+                                    })
+                                if (sibInsErr) {
+                                    console.warn('[recurring addon] insert failed for ap', sap.id, sibInsErr)
+                                    continue
+                                }
+
+                                // Recompute total for this sibling appointment
+                                await recalcAndSaveApptTotal(sap.appointment_id)
+
+                                // Extend end_time on this sibling appointment too
+                                if (addonMinutes > 0) {
+                                    var sibling = (siblingAppts || []).find(function (a) { return a.id === sap.appointment_id })
+                                    if (sibling && sibling.end_time) {
+                                        var sEndParts = sibling.end_time.split(':').map(Number)
+                                        var sTotalMin = (sEndParts[0] || 0) * 60 + (sEndParts[1] || 0) + addonMinutes
+                                        var sH = Math.floor(sTotalMin / 60)
+                                        var sM = sTotalMin % 60
+                                        var sNewEnd = String(sH).padStart(2, '0') + ':' + String(sM).padStart(2, '0') + ':00'
+                                        await supabase
+                                            .from('appointments')
+                                            .update({ end_time: sNewEnd })
+                                            .eq('id', sap.appointment_id)
+                                    }
+                                }
+
+                                seriesPropagated++
+                            }
+                        }
+                    }
+                } catch (propErr) {
+                    console.warn('[recurring addon] propagation error', propErr)
+                    alert('Add-on saved on this appointment but couldn\'t copy to the rest of the series: ' + (propErr.message || propErr))
+                }
+            }
+
+            // 5. Reset form + refresh popup + calendar
             setAddingAddonForApId(null)
             setPendingAddonServiceId('')
+            setApplyAddonToSeries(false)
             await handleApptClick(selectedAppt, { stopPropagation: function () {} })
             fetchData()
+
+            if (seriesPropagated > 0) {
+                alert('✓ Added "' + service.service_name + '" to this appointment + ' + seriesPropagated + ' future recurring appointment' + (seriesPropagated === 1 ? '' : 's') + '.')
+            }
         } catch (err) {
             alert('Could not add service: ' + (err.message || err))
         } finally {
@@ -2994,6 +3080,36 @@ export default function Calendar() {
                                                                 )
                                                             })}
                                                         </select>
+
+                                                        {/* Recurring propagation — only for recurring appointments */}
+                                                        {selectedAppt && selectedAppt.recurring_series_id && (
+                                                            <label style={{
+                                                                display: 'flex',
+                                                                alignItems: 'flex-start',
+                                                                gap: '8px',
+                                                                padding: '8px 10px',
+                                                                marginBottom: '8px',
+                                                                background: '#fff',
+                                                                border: '1px solid #c4b5fd',
+                                                                borderRadius: '6px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '12px',
+                                                                color: '#5b21b6',
+                                                                lineHeight: 1.4,
+                                                            }}>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={applyAddonToSeries}
+                                                                    onChange={function (e) { setApplyAddonToSeries(e.target.checked) }}
+                                                                    style={{ marginTop: '2px', accentColor: '#7c3aed' }}
+                                                                />
+                                                                <span>
+                                                                    🔄 <strong>Apply to all future appointments</strong> in this recurring series for {ap.pets?.name || 'this pet'}
+                                                                    {selectedAppt.recurring_upcoming_count ? ' (' + selectedAppt.recurring_upcoming_count + ' upcoming)' : ''}
+                                                                </span>
+                                                            </label>
+                                                        )}
+
                                                         <div style={{ display: 'flex', gap: '6px' }}>
                                                             <button
                                                                 onClick={function () { handleAddAddon(ap.id) }}
@@ -3001,7 +3117,7 @@ export default function Calendar() {
                                                                 style={{ flex: 1, padding: '8px 12px', background: pendingAddonServiceId && !savingAddon ? '#10b981' : '#d1d5db', color: 'white', border: 'none', borderRadius: '6px', cursor: pendingAddonServiceId && !savingAddon ? 'pointer' : 'not-allowed', fontWeight: 600, fontSize: '13px' }}
                                                             >{savingAddon ? 'Adding…' : '✓ Add service'}</button>
                                                             <button
-                                                                onClick={function () { setAddingAddonForApId(null); setPendingAddonServiceId('') }}
+                                                                onClick={function () { setAddingAddonForApId(null); setPendingAddonServiceId(''); setApplyAddonToSeries(false) }}
                                                                 disabled={savingAddon}
                                                                 style={{ flex: 1, padding: '8px 12px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}
                                                             >Cancel</button>
@@ -3009,7 +3125,7 @@ export default function Calendar() {
                                                     </div>
                                                 ) : (
                                                     <button
-                                                        onClick={function () { setAddingAddonForApId(ap.id); setPendingAddonServiceId('') }}
+                                                        onClick={function () { setAddingAddonForApId(ap.id); setPendingAddonServiceId(''); setApplyAddonToSeries(false) }}
                                                         style={{
                                                             width: '100%',
                                                             padding: '6px 10px',
