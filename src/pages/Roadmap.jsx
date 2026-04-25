@@ -57,9 +57,9 @@ const ROADMAP_ITEMS = [
 ]
 
 const TIER_META = {
-  'in-dev': { title: '🛠️ In Development', subtitle: 'Actively being built — ships next', accent: '#7c3aed' },
-  'planned': { title: '📋 Planned', subtitle: 'Coming after the In Development queue', accent: '#0891b2' },
-  'horizon': { title: '💭 On the Horizon', subtitle: 'Bigger builds — next quarter and beyond', accent: '#94a3b8' },
+  'in-dev': { title: '🛠️ In Development', subtitle: 'Actively being built — first to ship this year', accent: '#7c3aed' },
+  'planned': { title: '📋 Planned', subtitle: 'Queued up after the In Development list', accent: '#0891b2' },
+  'horizon': { title: '💭 On the Horizon', subtitle: 'Bigger builds — landing later in the year', accent: '#94a3b8' },
 }
 
 export default function Roadmap() {
@@ -86,7 +86,7 @@ export default function Roadmap() {
             What's Coming to PetPro
           </h1>
           <p style={{ margin: '10px 0 0', fontSize: '15px', opacity: 0.92, lineHeight: '1.55', maxWidth: '600px' }}>
-            We ship new features every week. Here's what's in the pipeline — your subscription gets all of these as they land, no extra cost.
+            Here's what we're building this year. Your subscription gets every one of these as they release — no extra fees, no upgrade pressure.
           </p>
           <p style={{ margin: '14px 0 0', fontSize: '13px', opacity: 0.85 }}>
             Have a feature you want? Email{' '}
