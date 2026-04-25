@@ -1135,8 +1135,13 @@ export default function BoardingCalendar() {
                       const isEnd = res && isEndDate(res, day)
 
                       if (res) {
-                        // Phase 6 — booking-rule flag pending (AI held it for groomer approval)
+                        // Phase 6 — booking-rule flag pending (AI held it for groomer approval).
+                        // Once the dog is actually checked in / out / cancelled, the pre-arrival
+                        // AI warning is considered resolved — hide it so the tile isn't cluttered.
                         const isFlaggedPending = res.flag_status === 'pending'
+                          && res.status !== 'checked_in'
+                          && res.status !== 'checked_out'
+                          && res.status !== 'cancelled'
                         return (
                           <div
                             key={formatDate(day)}
