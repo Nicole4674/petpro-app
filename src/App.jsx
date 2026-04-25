@@ -35,6 +35,7 @@ import BookingRules from './pages/BookingRules'
 import Messages from './pages/Messages'
 import ShopSettings from './pages/ShopSettings'
 import Account from './pages/Account'
+import Roadmap from './pages/Roadmap'
 import ResetPassword from './pages/ResetPassword'
 import Balances from './pages/Balances'
 import Privacy from './pages/Privacy'
@@ -197,6 +198,7 @@ function App() {
                     <Route path="/ai/booking-rules" element={session ? <BookingRules /> : <Navigate to="/login" />} />
                     <Route path="/settings/shop" element={session ? <ShopSettings /> : <Navigate to="/login" />} />
                     <Route path="/account" element={session ? <Account /> : <Navigate to="/login" />} />
+                    <Route path="/roadmap" element={session ? <Roadmap /> : <Navigate to="/login" />} />
                     <Route path="/balances" element={session ? <Balances /> : <Navigate to="/login" />} />
                     <Route path="/messages" element={session ? <Messages /> : <Navigate to="/login" />} />
                 </Routes>

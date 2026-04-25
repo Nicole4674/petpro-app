@@ -535,6 +535,12 @@ export default function Sidebar({ onToggle }) {
               >
                 💳 Account &amp; Billing
               </div>
+              <div
+                className={'sidebar-subitem' + (isActive('/roadmap') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/roadmap') }}
+              >
+                🚀 Coming Soon
+              </div>
             </div>
           )}
         </div>
