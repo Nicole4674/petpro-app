@@ -229,23 +229,25 @@ export default function BoardingCalendar() {
 
   function getStatusColor(status) {
     switch (status) {
-      case 'confirmed': return '#7c3aed'
-      case 'checked_in': return '#16a34a'
-      case 'pending': return '#f59e0b'
+      case 'confirmed':   return '#7c3aed'
+      case 'checked_in':  return '#16a34a'
+      case 'pending':     return '#f59e0b'
+      case 'unconfirmed': return '#92400e'
       case 'checked_out': return '#94a3b8'
-      case 'cancelled': return '#dc2626'
-      default: return '#7c3aed'
+      case 'cancelled':   return '#dc2626'
+      default:            return '#7c3aed'
     }
   }
 
   function getStatusLabel(status) {
     switch (status) {
-      case 'confirmed': return 'Confirmed'
-      case 'checked_in': return 'Checked In'
-      case 'pending': return 'Pending'
+      case 'confirmed':   return 'Confirmed'
+      case 'checked_in':  return 'Checked In'
+      case 'pending':     return 'Pending'
+      case 'unconfirmed': return 'Unconfirmed'
       case 'checked_out': return 'Checked Out'
-      case 'cancelled': return 'Cancelled'
-      default: return status
+      case 'cancelled':   return 'Cancelled'
+      default:            return status
     }
   }
 
@@ -1249,7 +1251,7 @@ export default function BoardingCalendar() {
                         overflow: 'hidden',
                       }}
                     >
-                      {['pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled'].map((s, idx, arr) => {
+                      {['unconfirmed', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled'].map((s, idx, arr) => {
                         const isSelected = selectedReservation.status === s
                         return (
                           <div
@@ -1289,6 +1291,74 @@ export default function BoardingCalendar() {
               </div>
               <button className="cal-modal-close" onClick={() => setSelectedReservation(null)}>✕</button>
             </div>
+
+            {/* PROMINENT QUICK ACTION BAR — Check In / Check Out always visible at top */}
+            {selectedReservation.status !== 'cancelled' && selectedReservation.status !== 'checked_out' && (
+              <div style={{
+                padding: '14px 20px',
+                background: '#f8fafc',
+                borderBottom: '1px solid #e5e7eb',
+                display: 'flex',
+                gap: '10px',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+              }}>
+                {/* Check In — works from ANY pre-arrival state (unconfirmed/pending/confirmed) */}
+                {selectedReservation.status !== 'checked_in' && (
+                  <button
+                    onClick={() => updateReservationStatus(selectedReservation.id, 'checked_in')}
+                    style={{
+                      flex: '1 1 auto',
+                      padding: '14px 18px',
+                      background: '#16a34a',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '10px',
+                      fontWeight: 800,
+                      fontSize: '15px',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 8px rgba(22,163,74,0.25)',
+                      minWidth: '180px',
+                    }}
+                  >✅ Check In</button>
+                )}
+                {/* Check Out — only when checked_in */}
+                {selectedReservation.status === 'checked_in' && (
+                  <button
+                    onClick={() => updateReservationStatus(selectedReservation.id, 'checked_out')}
+                    style={{
+                      flex: '1 1 auto',
+                      padding: '14px 18px',
+                      background: '#7c3aed',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '10px',
+                      fontWeight: 800,
+                      fontSize: '15px',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 8px rgba(124,58,237,0.25)',
+                      minWidth: '180px',
+                    }}
+                  >🏁 Check Out</button>
+                )}
+                {/* Confirm — secondary action when still unconfirmed/pending */}
+                {(selectedReservation.status === 'unconfirmed' || selectedReservation.status === 'pending') && (
+                  <button
+                    onClick={() => updateReservationStatus(selectedReservation.id, 'confirmed')}
+                    style={{
+                      padding: '14px 18px',
+                      background: '#fff',
+                      color: '#7c3aed',
+                      border: '1px solid #c4b5fd',
+                      borderRadius: '10px',
+                      fontWeight: 700,
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                    }}
+                  >✔️ Just Confirm (no check-in yet)</button>
+                )}
+              </div>
+            )}
 
             <div className="kc-body">
               {/* Kennel & Stay Info Bar */}
