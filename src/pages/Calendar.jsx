@@ -4479,9 +4479,15 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
         service_notes: '',
         status: 'unconfirmed',
     })
-    // Multi-pet: array of { pet_id, pet_name, service_id, service_name, quoted_price, time_block_minutes }
+    // Multi-pet: array of { pet_id, pet_name, service_id, service_name, quoted_price,
+    //                       time_block_minutes, addons: [{ service_id, service_name,
+    //                       quoted_price, time_block_minutes }] }
+    // Addons = extra services stacked on a single pet (dematting, dremel, handling, etc.)
     const [petsInBooking, setPetsInBooking] = useState([])
     const [showAddPetModal, setShowAddPetModal] = useState(false)
+    // Inline "add another service" state — which pet we're adding to + the picked service
+    const [addingAddonForPetIdx, setAddingAddonForPetIdx] = useState(null)
+    const [pendingAddonId, setPendingAddonId] = useState('')
 
     // Client search (replaces the old dropdown)
     const [clientSearch, setClientSearch] = useState('')
@@ -4528,11 +4534,15 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
         }
     }, [preFillPetId, preFillServiceId, pets, services])
 
-    // Auto-calc end_time based on total time of all pets combined
+    // Auto-calc end_time based on total time of all pets + their addons combined
     useEffect(() => {
         if (petsInBooking.length > 0 && form.start_time) {
             var totalMinutes = petsInBooking.reduce(function (sum, p) {
-                return sum + (p.time_block_minutes || 60)
+                var primary = p.time_block_minutes || 60
+                var addonMins = (p.addons || []).reduce(function (s, a) {
+                    return s + (parseInt(a.time_block_minutes) || 0)
+                }, 0)
+                return sum + primary + addonMins
             }, 0)
             setForm(function (prev) {
                 return { ...prev, end_time: calculateEndTime(prev.start_time, totalMinutes) }
@@ -4540,10 +4550,48 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
         }
     }, [petsInBooking, form.start_time])
 
-    // Total price = sum of all pets' quoted prices
+    // Total price = sum of all pets' primary prices + all addons across all pets
     var totalPrice = petsInBooking.reduce(function (sum, p) {
-        return sum + (parseFloat(p.quoted_price) || 0)
+        var primary = parseFloat(p.quoted_price) || 0
+        var addonSum = (p.addons || []).reduce(function (s, a) {
+            return s + (parseFloat(a.quoted_price) || 0)
+        }, 0)
+        return sum + primary + addonSum
     }, 0)
+
+    // Add an add-on service to a specific pet in the booking
+    var addAddonToPet = function (petIdx) {
+        if (!pendingAddonId) return
+        var service = services.find(function (s) { return s.id === pendingAddonId })
+        if (!service) return
+        setPetsInBooking(function (prev) {
+            return prev.map(function (p, i) {
+                if (i !== petIdx) return p
+                var existing = p.addons || []
+                return Object.assign({}, p, {
+                    addons: existing.concat([{
+                        service_id: service.id,
+                        service_name: service.service_name,
+                        quoted_price: parseFloat(service.price || 0),
+                        time_block_minutes: parseInt(service.time_block_minutes || 0),
+                    }])
+                })
+            })
+        })
+        setAddingAddonForPetIdx(null)
+        setPendingAddonId('')
+    }
+
+    var removeAddonFromPet = function (petIdx, addonIdx) {
+        setPetsInBooking(function (prev) {
+            return prev.map(function (p, i) {
+                if (i !== petIdx) return p
+                return Object.assign({}, p, {
+                    addons: (p.addons || []).filter(function (_, j) { return j !== addonIdx })
+                })
+            })
+        })
+    }
 
     const calculateEndTime = (startTime, minutes) => {
         if (!startTime || !minutes) return ''
@@ -4675,7 +4723,8 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
         }
         // ═══════════ End block conflict check ═══════════
 
-        // Helper: insert one row per pet into appointment_pets for a given appointment_id
+        // Helper: insert one row per pet into appointment_pets, then insert add-on
+        // services into appointment_pet_addons keyed by the new appointment_pet ids.
         async function insertAppointmentPets(appointmentId) {
             var rows = petsInBooking.map(function (p) {
                 return {
@@ -4686,8 +4735,33 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                     groomer_id: user.id,
                 }
             })
-            var { error: petsErr } = await supabase.from('appointment_pets').insert(rows)
+            var { data: insertedPets, error: petsErr } = await supabase
+                .from('appointment_pets')
+                .insert(rows)
+                .select('id, pet_id')
             if (petsErr) throw new Error('Failed to save pets on appointment: ' + petsErr.message)
+
+            // Build addon rows keyed by the newly-inserted appointment_pet.id.
+            // Postgres returns inserted rows in input order, so index alignment is reliable.
+            var addonRows = []
+            petsInBooking.forEach(function (p, idx) {
+                var insertedAp = (insertedPets || [])[idx]
+                if (!insertedAp) return
+                ;(p.addons || []).forEach(function (addon) {
+                    addonRows.push({
+                        appointment_pet_id: insertedAp.id,
+                        service_id: addon.service_id,
+                        quoted_price: parseFloat(addon.quoted_price || 0),
+                        groomer_id: user.id,
+                    })
+                })
+            })
+            if (addonRows.length > 0) {
+                var { error: addonErr } = await supabase
+                    .from('appointment_pet_addons')
+                    .insert(addonRows)
+                if (addonErr) throw new Error('Failed to save add-on services: ' + addonErr.message)
+            }
         }
 
         // ═══════════ Task #19 — Recurring series path ═══════════
@@ -4779,6 +4853,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                 if (bulkErr) throw new Error('Failed to create appointments: ' + bulkErr.message)
 
                 // 6. For each inserted appointment, insert appointment_pets rows
+                //    AND any add-on services attached to those pets.
                 if (insertedAppts && insertedAppts.length > 0) {
                     var allPetRows = []
                     insertedAppts.forEach(function (appt) {
@@ -4792,8 +4867,34 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                             })
                         })
                     })
-                    var { error: petsErr } = await supabase.from('appointment_pets').insert(allPetRows)
+                    var { data: insertedPetRows, error: petsErr } = await supabase
+                        .from('appointment_pets')
+                        .insert(allPetRows)
+                        .select('id, appointment_id, pet_id')
                     if (petsErr) throw new Error('Failed to save pets on recurring appointments: ' + petsErr.message)
+
+                    // Build all add-on rows. Each appointment got the same pet list, in
+                    // the same order, so we can match by index within each appointment.
+                    var allAddonRows = []
+                    var petsPerAppt = petsInBooking.length
+                    ;(insertedPetRows || []).forEach(function (insertedAp, globalIdx) {
+                        var sourcePet = petsInBooking[globalIdx % petsPerAppt]
+                        if (!sourcePet || !sourcePet.addons || sourcePet.addons.length === 0) return
+                        sourcePet.addons.forEach(function (addon) {
+                            allAddonRows.push({
+                                appointment_pet_id: insertedAp.id,
+                                service_id: addon.service_id,
+                                quoted_price: parseFloat(addon.quoted_price || 0),
+                                groomer_id: user.id,
+                            })
+                        })
+                    })
+                    if (allAddonRows.length > 0) {
+                        var { error: addonErr } = await supabase
+                            .from('appointment_pet_addons')
+                            .insert(allAddonRows)
+                        if (addonErr) throw new Error('Failed to save add-on services on recurring appointments: ' + addonErr.message)
+                    }
                 }
 
                 // 7. Build summary for user
@@ -5111,39 +5212,109 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                             </p>
                         )}
                         {petsInBooking.length > 0 && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
                                 {petsInBooking.map(function (p, i) {
                                     return (
                                         <div key={i} style={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
                                             padding: '10px 12px',
                                             background: '#f6f6f8',
                                             borderRadius: '8px',
                                             border: '1px solid #e5e5ea',
                                         }}>
-                                            <div style={{ flex: 1 }}>
+                                            {/* Pet header + remove × */}
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                                                 <div style={{ fontWeight: 600, fontSize: '14px' }}>{p.pet_name}</div>
-                                                <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
-                                                    {p.service_name || 'No service'} · ${parseFloat(p.quoted_price || 0).toFixed(2)} · {p.time_block_minutes || 60} min
-                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={function () { removePetFromBooking(i) }}
+                                                    style={{ background: 'transparent', border: 'none', color: '#c0392b', cursor: 'pointer', fontSize: '18px', padding: '0 4px' }}
+                                                    title="Remove pet"
+                                                >×</button>
                                             </div>
-                                            <button
-                                                type="button"
-                                                onClick={function () { removePetFromBooking(i) }}
-                                                style={{
-                                                    background: 'transparent',
-                                                    border: 'none',
-                                                    color: '#c0392b',
-                                                    cursor: 'pointer',
-                                                    fontSize: '18px',
-                                                    padding: '0 4px',
-                                                }}
-                                                title="Remove pet"
-                                            >
-                                                ×
-                                            </button>
+
+                                            {/* Primary service */}
+                                            <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>
+                                                ✂️ {p.service_name || 'No service'} · ${parseFloat(p.quoted_price || 0).toFixed(2)} · {p.time_block_minutes || 60} min
+                                            </div>
+
+                                            {/* Add-on services for this pet */}
+                                            {(p.addons || []).map(function (addon, ai) {
+                                                return (
+                                                    <div key={ai} style={{
+                                                        display: 'flex',
+                                                        justifyContent: 'space-between',
+                                                        alignItems: 'center',
+                                                        background: '#faf5ff',
+                                                        border: '1px solid #ddd6fe',
+                                                        borderLeft: '3px solid #c4b5fd',
+                                                        padding: '4px 8px',
+                                                        borderRadius: '6px',
+                                                        marginTop: '3px',
+                                                        fontSize: '12px',
+                                                    }}>
+                                                        <span style={{ flex: 1 }}>
+                                                            ➕ {addon.service_name} · ${parseFloat(addon.quoted_price || 0).toFixed(2)}
+                                                            {addon.time_block_minutes ? ' · ' + addon.time_block_minutes + ' min' : ''}
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={function () { removeAddonFromPet(i, ai) }}
+                                                            style={{ background: 'transparent', border: 'none', color: '#c0392b', cursor: 'pointer', fontSize: '14px', padding: '0 4px' }}
+                                                            title="Remove add-on"
+                                                        >×</button>
+                                                    </div>
+                                                )
+                                            })}
+
+                                            {/* + Add another service for THIS pet */}
+                                            {addingAddonForPetIdx === i ? (
+                                                <div style={{ marginTop: '6px', padding: '8px', background: '#faf5ff', border: '1px dashed #c4b5fd', borderRadius: '6px' }}>
+                                                    <select
+                                                        value={pendingAddonId}
+                                                        onChange={function (e) { setPendingAddonId(e.target.value) }}
+                                                        style={{ width: '100%', padding: '6px', fontSize: '13px', borderRadius: '6px', border: '1px solid #d1d5db', marginBottom: '6px' }}
+                                                    >
+                                                        <option value="">— Pick a service —</option>
+                                                        {services.map(function (s) {
+                                                            return (
+                                                                <option key={s.id} value={s.id}>
+                                                                    {s.service_name} — ${parseFloat(s.price || 0).toFixed(2)}{s.time_block_minutes ? ' · ' + s.time_block_minutes + ' min' : ''}
+                                                                </option>
+                                                            )
+                                                        })}
+                                                    </select>
+                                                    <div style={{ display: 'flex', gap: '6px' }}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={function () { addAddonToPet(i) }}
+                                                            disabled={!pendingAddonId}
+                                                            style={{ flex: 1, padding: '6px 10px', background: pendingAddonId ? '#10b981' : '#d1d5db', color: 'white', border: 'none', borderRadius: '6px', cursor: pendingAddonId ? 'pointer' : 'not-allowed', fontWeight: 600, fontSize: '12px' }}
+                                                        >✓ Add</button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={function () { setAddingAddonForPetIdx(null); setPendingAddonId('') }}
+                                                            style={{ flex: 1, padding: '6px 10px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
+                                                        >Cancel</button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={function () { setAddingAddonForPetIdx(i); setPendingAddonId('') }}
+                                                    style={{
+                                                        marginTop: '6px',
+                                                        width: '100%',
+                                                        padding: '5px 8px',
+                                                        background: 'transparent',
+                                                        border: '1px dashed #c4b5fd',
+                                                        color: '#6d28d9',
+                                                        borderRadius: '6px',
+                                                        cursor: 'pointer',
+                                                        fontWeight: 600,
+                                                        fontSize: '11px',
+                                                    }}
+                                                >+ Add another service</button>
+                                            )}
                                         </div>
                                     )
                                 })}
