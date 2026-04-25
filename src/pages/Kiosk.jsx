@@ -124,15 +124,27 @@ export default function Kiosk() {
     setSubmitting(true)
 
     if (activeEntry) {
+      // If they're still on break when they hit Clock Out, end the break
+      // first so the elapsed break time gets folded into break_minutes.
+      var finalBreakMinutes = activeEntry.break_minutes || 0
+      if (activeEntry.on_break && activeEntry.break_start) {
+        var bs = new Date(activeEntry.break_start)
+        var bMins = Math.max(0, Math.round((new Date() - bs) / 60000))
+        finalBreakMinutes = finalBreakMinutes + bMins
+      }
+
       // CLOCK OUT — close the open entry
       const out = new Date()
       const start = new Date(activeEntry.clock_in)
-      const totalMin = Math.max(0, Math.round((out - start) / 60000 - (activeEntry.break_minutes || 0)))
+      const totalMin = Math.max(0, Math.round((out - start) / 60000 - finalBreakMinutes))
       const { error: upErr } = await supabase
         .from('time_clock')
         .update({
           clock_out: out.toISOString(),
           total_minutes: totalMin,
+          break_minutes: finalBreakMinutes,
+          on_break: false,
+          break_start: null,
         })
         .eq('id', activeEntry.id)
       if (upErr) {
@@ -145,6 +157,7 @@ export default function Kiosk() {
         staffName: matchedStaff.first_name + (matchedStaff.last_name ? ' ' + matchedStaff.last_name.charAt(0) + '.' : ''),
         time: formatTime(out),
         totalMin: totalMin,
+        breakMin: finalBreakMinutes,
       })
     } else {
       // CLOCK IN — create a new entry
@@ -167,6 +180,65 @@ export default function Kiosk() {
       })
     }
     setSubmitting(false)
+  }
+
+  // Toggle break — Start Break (sets break_start + on_break=true)
+  // OR End Break (rolls elapsed break minutes into break_minutes, clears state)
+  async function handleBreakAction() {
+    if (!matchedStaff || !activeEntry) return
+    setSubmitting(true)
+    try {
+      if (activeEntry.on_break) {
+        // ── END BREAK — fold elapsed mins into break_minutes
+        var bs = activeEntry.break_start ? new Date(activeEntry.break_start) : new Date()
+        var elapsedBreak = Math.max(0, Math.round((new Date() - bs) / 60000))
+        var newBreakTotal = (activeEntry.break_minutes || 0) + elapsedBreak
+
+        var { error: endErr } = await supabase
+          .from('time_clock')
+          .update({
+            on_break: false,
+            break_start: null,
+            break_minutes: newBreakTotal,
+          })
+          .eq('id', activeEntry.id)
+        if (endErr) {
+          setError('End break failed: ' + endErr.message)
+          setSubmitting(false)
+          return
+        }
+        setSuccess({
+          action: 'Break ended',
+          staffName: matchedStaff.first_name + (matchedStaff.last_name ? ' ' + matchedStaff.last_name.charAt(0) + '.' : ''),
+          time: formatTime(new Date()),
+          breakMin: elapsedBreak,
+        })
+      } else {
+        // ── START BREAK — set break_start + on_break=true
+        var nowIso = new Date().toISOString()
+        var { error: startErr } = await supabase
+          .from('time_clock')
+          .update({
+            on_break: true,
+            break_start: nowIso,
+          })
+          .eq('id', activeEntry.id)
+        if (startErr) {
+          setError('Start break failed: ' + startErr.message)
+          setSubmitting(false)
+          return
+        }
+        setSuccess({
+          action: 'Break started',
+          staffName: matchedStaff.first_name + (matchedStaff.last_name ? ' ' + matchedStaff.last_name.charAt(0) + '.' : ''),
+          time: formatTime(new Date()),
+        })
+      }
+    } catch (err) {
+      setError('Break action failed: ' + (err.message || err))
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   function handleClose() {
@@ -269,30 +341,97 @@ export default function Kiosk() {
             </button>
           </div>
         ) : matchedStaff ? (
-          // ═══ CONFIRM CLOCK IN/OUT ═══
+          // ═══ CONFIRM CLOCK IN/OUT/BREAK ═══
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '42px', marginBottom: '8px' }}>🐾</div>
             <div style={{ fontSize: '22px', fontWeight: '700', marginBottom: '6px' }}>
               Hi, {matchedStaff.first_name}!
             </div>
             <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '24px' }}>
-              {activeEntry
-                ? 'You clocked in at ' + formatTime(new Date(activeEntry.clock_in))
-                : 'Ready to start your shift?'}
+              {!activeEntry && 'Ready to start your shift?'}
+              {activeEntry && !activeEntry.on_break && (
+                <>
+                  Clocked in at {formatTime(new Date(activeEntry.clock_in))}
+                  {activeEntry.break_minutes > 0 && (
+                    <span style={{ display: 'block', fontSize: '12px', marginTop: '2px' }}>
+                      ({activeEntry.break_minutes} min on break so far)
+                    </span>
+                  )}
+                </>
+              )}
+              {activeEntry && activeEntry.on_break && (
+                <span style={{ color: '#ea580c', fontWeight: 700 }}>
+                  ☕ On break since {activeEntry.break_start ? formatTime(new Date(activeEntry.break_start)) : 'just now'}
+                </span>
+              )}
             </div>
-            <button
-              onClick={handleClockAction}
-              disabled={submitting}
-              style={{
-                width: '100%', padding: '18px', marginBottom: '10px',
-                background: activeEntry ? '#dc2626' : '#16a34a',
-                color: '#fff', border: 'none', borderRadius: '12px',
-                fontSize: '20px', fontWeight: '800', cursor: submitting ? 'wait' : 'pointer',
-                opacity: submitting ? 0.6 : 1,
-              }}
-            >
-              {submitting ? '...' : (activeEntry ? '🛑 Clock Out' : '▶️ Clock In')}
-            </button>
+
+            {/* CLOCK IN — no active entry yet */}
+            {!activeEntry && (
+              <button
+                onClick={handleClockAction}
+                disabled={submitting}
+                style={{
+                  width: '100%', padding: '18px', marginBottom: '10px',
+                  background: '#16a34a',
+                  color: '#fff', border: 'none', borderRadius: '12px',
+                  fontSize: '20px', fontWeight: '800', cursor: submitting ? 'wait' : 'pointer',
+                  opacity: submitting ? 0.6 : 1,
+                }}
+              >
+                {submitting ? '...' : '▶️ Clock In'}
+              </button>
+            )}
+
+            {/* ON BREAK — only show END BREAK (can't clock out while on break) */}
+            {activeEntry && activeEntry.on_break && (
+              <button
+                onClick={handleBreakAction}
+                disabled={submitting}
+                style={{
+                  width: '100%', padding: '18px', marginBottom: '10px',
+                  background: '#ea580c',
+                  color: '#fff', border: 'none', borderRadius: '12px',
+                  fontSize: '20px', fontWeight: '800', cursor: submitting ? 'wait' : 'pointer',
+                  opacity: submitting ? 0.6 : 1,
+                }}
+              >
+                {submitting ? '...' : '✅ End Break'}
+              </button>
+            )}
+
+            {/* CLOCKED IN, NOT ON BREAK — show Start Break + Clock Out side by side */}
+            {activeEntry && !activeEntry.on_break && (
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                <button
+                  onClick={handleBreakAction}
+                  disabled={submitting}
+                  style={{
+                    flex: 1, padding: '18px',
+                    background: '#f59e0b',
+                    color: '#fff', border: 'none', borderRadius: '12px',
+                    fontSize: '17px', fontWeight: '800', cursor: submitting ? 'wait' : 'pointer',
+                    opacity: submitting ? 0.6 : 1,
+                  }}
+                >
+                  {submitting ? '...' : '☕ Start Break'}
+                </button>
+                <button
+                  onClick={handleClockAction}
+                  disabled={submitting}
+                  style={{
+                    flex: 1, padding: '18px',
+                    background: '#dc2626',
+                    color: '#fff', border: 'none', borderRadius: '12px',
+                    fontSize: '17px', fontWeight: '800', cursor: submitting ? 'wait' : 'pointer',
+                    opacity: submitting ? 0.6 : 1,
+                  }}
+                >
+                  {submitting ? '...' : '🛑 Clock Out'}
+                </button>
+              </div>
+            )}
+
             <button
               onClick={handleClose}
               style={{

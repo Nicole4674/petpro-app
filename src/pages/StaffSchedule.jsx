@@ -390,13 +390,19 @@ export default function StaffSchedule() {
             <div className="ss-grid-header">
               <div className="ss-grid-employee-header">
                 <span>Employee</span>
-                <span className="ss-total-hours" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
-                  <span style={{ fontSize: '11px', color: '#e0e7ff' }}>{totalWeekHours.toFixed(1)} hrs scheduled</span>
-                  <span style={{
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    color: getClockedColor(totalClockedHours, totalWeekHours)
-                  }}>
+                <span className="ss-total-hours" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px', textShadow: '0 1px 2px rgba(0,0,0,0.25)' }}>
+                  <span style={{ fontSize: '11px', color: '#fff', fontWeight: 600 }}>
+                    {totalWeekHours.toFixed(1)} hrs scheduled
+                  </span>
+                  <span style={{ fontSize: '12px', color: '#fff', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{
+                      display: 'inline-block',
+                      width: '10px',
+                      height: '10px',
+                      borderRadius: '50%',
+                      background: getClockedColor(totalClockedHours, totalWeekHours),
+                      boxShadow: '0 0 0 1.5px #fff'
+                    }} />
                     {totalClockedHours.toFixed(1)} hrs clocked
                   </span>
                 </span>
