@@ -35,6 +35,9 @@ export default function StaffMe() {
   var [staff, setStaff] = useState(null)
   var [shifts, setShifts] = useState([])
   var [hours, setHours] = useState({ totalMinutes: 0, entries: [] })
+  // Tips this week for THIS staff member — sum of payments.tip_amount
+  // for appointments where staff_id matches them, within the week range.
+  var [tipsThisWeek, setTipsThisWeek] = useState({ total: 0, count: 0 })
   var [weekStart, setWeekStart] = useState(getWeekStart(new Date()))
 
   useEffect(function () { loadDashboard() }, [])
@@ -93,6 +96,31 @@ export default function StaffMe() {
       }
     })
     setHours({ totalMinutes: total, entries: clockData || [] })
+
+    // Tips this week — payments.tip_amount where the linked appointment's
+    // staff_id matches this staff member. Done as a join through Supabase.
+    try {
+      var { data: tipPayments } = await supabase
+        .from('payments')
+        .select('tip_amount, created_at, appointments!inner(staff_id)')
+        .eq('appointments.staff_id', s.id)
+        .gte('created_at', weekStart.toISOString())
+        .lte('created_at', new Date(weekEnd.getTime() + 86400000).toISOString())
+
+      var tipTotal = 0
+      var tipCount = 0
+      ;(tipPayments || []).forEach(function (p) {
+        var amt = parseFloat(p.tip_amount) || 0
+        if (amt > 0) {
+          tipTotal += amt
+          tipCount += 1
+        }
+      })
+      setTipsThisWeek({ total: tipTotal, count: tipCount })
+    } catch (err) {
+      console.warn('[StaffMe] tips fetch error:', err)
+      setTipsThisWeek({ total: 0, count: 0 })
+    }
   }
 
   async function handleLogout() {
@@ -176,17 +204,26 @@ export default function StaffMe() {
           </div>
         </div>
 
-        {/* Hours This Week card */}
-        <div style={{ background: '#fff', borderRadius: '14px', padding: '18px 22px', border: '1px solid #e5e7eb', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-          <div>
-            <div style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: '600', marginBottom: '2px' }}>This Week</div>
+        {/* This Week — Hours + Tips side by side */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+          {/* Hours */}
+          <div style={{ background: '#fff', borderRadius: '14px', padding: '18px 22px', border: '1px solid #e5e7eb' }}>
+            <div style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: '600', marginBottom: '2px' }}>Hours This Week</div>
             <div style={{ fontSize: '30px', fontWeight: '800', color: '#16a34a', lineHeight: '1' }}>{totalHours}h {totalMins}m</div>
             <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
-              {hours.entries.length} clock-in{hours.entries.length === 1 ? '' : 's'}
+              {hours.entries.length} clock-in{hours.entries.length === 1 ? '' : 's'} · clock in at the lobby kiosk
             </div>
           </div>
-          <div style={{ fontSize: '13px', color: '#6b7280', fontStyle: 'italic' }}>
-            ⏱️ Clock in at the shop lobby kiosk
+
+          {/* Tips */}
+          <div style={{ background: '#fff', borderRadius: '14px', padding: '18px 22px', border: '1px solid #e5e7eb' }}>
+            <div style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: '600', marginBottom: '2px' }}>Tips This Week</div>
+            <div style={{ fontSize: '30px', fontWeight: '800', color: '#7c3aed', lineHeight: '1' }}>${tipsThisWeek.total.toFixed(2)}</div>
+            <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+              {tipsThisWeek.count === 0
+                ? 'No tips yet this week'
+                : tipsThisWeek.count + ' tipped appointment' + (tipsThisWeek.count === 1 ? '' : 's')}
+            </div>
           </div>
         </div>
 

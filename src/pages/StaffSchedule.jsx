@@ -12,6 +12,9 @@ export default function StaffSchedule() {
   // Populated from the time_clock table so managers can compare scheduled
   // vs actual hours per employee (catches overtime + no-shows).
   var [clockMinsByStaff, setClockMinsByStaff] = useState({})
+  // tipsByStaff = { staffId: { total: dollars, count: tippedAppts } }
+  // Sum of payments.tip_amount through appointments.staff_id in the week range
+  var [tipsByStaff, setTipsByStaff] = useState({})
   var [loading, setLoading] = useState(true)
   var [showAddShift, setShowAddShift] = useState(false)
   var [editingShift, setEditingShift] = useState(null)
@@ -106,6 +109,11 @@ export default function StaffSchedule() {
     return mins / 60
   }
 
+  // Tips earned this week from payments table (joined through appointments.staff_id)
+  function getStaffTips(staffId) {
+    return tipsByStaff[staffId] || { total: 0, count: 0 }
+  }
+
   // Traffic-light color based on clocked vs scheduled:
   //   gray   — nothing scheduled and nothing clocked
   //   green  — clocked < scheduled (on track, still have hours left)
@@ -174,6 +182,30 @@ export default function StaffSchedule() {
       minsByStaff[e.staff_id] = (minsByStaff[e.staff_id] || 0) + mins
     })
     setClockMinsByStaff(minsByStaff)
+
+    // Tips per staff for the week — pull payments + join appointment.staff_id
+    try {
+      var { data: tipPayments } = await supabase
+        .from('payments')
+        .select('tip_amount, created_at, appointments!inner(staff_id)')
+        .eq('groomer_id', user.id)
+        .gte('created_at', weekStart.toISOString())
+        .lte('created_at', weekEndPlusOne.toISOString())
+      var tipsMap = {}
+      ;(tipPayments || []).forEach(function (p) {
+        var sid = p.appointments && p.appointments.staff_id
+        if (!sid) return
+        var amt = parseFloat(p.tip_amount) || 0
+        if (amt <= 0) return
+        if (!tipsMap[sid]) tipsMap[sid] = { total: 0, count: 0 }
+        tipsMap[sid].total += amt
+        tipsMap[sid].count += 1
+      })
+      setTipsByStaff(tipsMap)
+    } catch (err) {
+      console.warn('[StaffSchedule] tips fetch error:', err)
+      setTipsByStaff({})
+    }
 
     setLoading(false)
   }
@@ -333,9 +365,11 @@ export default function StaffSchedule() {
   // Total hours for the whole week across all staff
   var totalWeekHours = 0
   var totalClockedHours = 0
+  var totalWeekTips = 0
   staff.forEach(function(s) {
     totalWeekHours    += getStaffWeekHours(s.id)
     totalClockedHours += getStaffClockedHours(s.id)
+    totalWeekTips     += getStaffTips(s.id).total
   })
 
   if (loading) return <div className="ss-loading">Loading schedule...</div>
@@ -405,6 +439,11 @@ export default function StaffSchedule() {
                     }} />
                     {totalClockedHours.toFixed(1)} hrs clocked
                   </span>
+                  {totalWeekTips > 0 && (
+                    <span style={{ fontSize: '11px', color: '#fff', fontWeight: 700 }}>
+                      💵 ${totalWeekTips.toFixed(2)} tips
+                    </span>
+                  )}
                 </span>
               </div>
               {weekDays.map(function(day) {
@@ -423,6 +462,7 @@ export default function StaffSchedule() {
               var clockedHrs = getStaffClockedHours(member.id)
               var clockedColor = getClockedColor(clockedHrs, weekHrs)
               var isOvertime = (clockedHrs - weekHrs) > 0.5
+              var tipInfo = getStaffTips(member.id)
               return (
                 <div key={member.id} className="ss-grid-row">
                   {/* Employee Info Cell */}
@@ -445,6 +485,19 @@ export default function StaffSchedule() {
                         {isOvertime && '🚨 '}
                         {clockedHrs.toFixed(1)} hrs clocked
                       </div>
+                      {tipInfo.total > 0 && (
+                        <div style={{
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          color: '#7c3aed',
+                          marginTop: '2px'
+                        }}>
+                          💵 ${tipInfo.total.toFixed(2)} tips
+                          <span style={{ fontWeight: 400, color: '#9ca3af', marginLeft: '4px', fontSize: '11px' }}>
+                            ({tipInfo.count})
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
