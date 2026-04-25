@@ -36,6 +36,7 @@ const NEXT_VISIT_OPTIONS = [
 export default function ReportCardModal({
   mode, serviceType, petId, clientId, petName, petBreed, petPhoto,
   appointmentId, boardingReservationId, reportCard, onClose, onSaved,
+  clientView, // when true: hide Edit button (clients can view + print only)
 }) {
   const initial = reportCard || {}
   const [servicesPerformed, setServicesPerformed] = useState(initial.services_performed || '')
@@ -406,10 +407,12 @@ export default function ReportCardModal({
                 style={{ padding: '10px 18px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: '10px', fontWeight: 600, cursor: 'pointer', fontSize: '14px' }}>
                 Close
               </button>
-              <button onClick={() => setEditing(true)}
-                style={{ padding: '10px 18px', background: '#fff', color: '#7c3aed', border: '1px solid #c4b5fd', borderRadius: '10px', fontWeight: 600, cursor: 'pointer', fontSize: '14px' }}>
-                ✏️ Edit
-              </button>
+              {!clientView && (
+                <button onClick={() => setEditing(true)}
+                  style={{ padding: '10px 18px', background: '#fff', color: '#7c3aed', border: '1px solid #c4b5fd', borderRadius: '10px', fontWeight: 600, cursor: 'pointer', fontSize: '14px' }}>
+                  ✏️ Edit
+                </button>
+              )}
               <button onClick={handlePrint}
                 style={{ padding: '10px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', fontSize: '14px' }}>
                 🖨️ Print

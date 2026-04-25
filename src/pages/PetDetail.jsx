@@ -3,16 +3,26 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import IncidentModal from '../components/IncidentModal'
 import { BehaviorTagsRow, BehaviorTagsEditor } from '../components/BehaviorTags'
+import ReportCardModal from '../components/ReportCardModal'
 
 var TABS = [
   { key: 'overview', label: '🐾 Overview' },
   { key: 'incidents', label: '🚨 Incidents' },
   { key: 'grooming', label: '✂️ Grooming History' },
   { key: 'boarding', label: '🏠 Boarding History' },
+  { key: 'reports', label: '📋 Report Cards' },
   { key: 'vaccinations', label: '💉 Vaccinations' },
   { key: 'notes', label: '📝 Notes' },
   { key: 'payments', label: '💳 Payments' }
 ]
+
+var BEHAVIOR_DISPLAY = {
+  great:     { emoji: '🌟', label: 'Great',     color: '#16a34a', bg: '#dcfce7' },
+  good:      { emoji: '👍', label: 'Good',      color: '#65a30d', bg: '#ecfccb' },
+  okay:      { emoji: '😐', label: 'Okay',      color: '#ca8a04', bg: '#fef9c3' },
+  anxious:   { emoji: '😰', label: 'Anxious',   color: '#ea580c', bg: '#ffedd5' },
+  difficult: { emoji: '⚠️', label: 'Difficult', color: '#dc2626', bg: '#fee2e2' },
+}
 
 var INCIDENT_TYPE_LABELS = {
   bite: '🦷 Bite',
@@ -63,6 +73,8 @@ export default function PetDetail() {
 
   // Tab data
   var [groomingHistory, setGroomingHistory] = useState([])
+  var [reportCards, setReportCards] = useState([])
+  var [viewingReportCard, setViewingReportCard] = useState(null)
   var [boardingHistory, setBoardingHistory] = useState([])
   var [vaccinations, setVaccinations] = useState([])
   var [notes, setNotes] = useState([])
@@ -111,7 +123,17 @@ export default function PetDetail() {
     if (activeTab === 'notes') fetchNotes()
     if (activeTab === 'payments') fetchPayments()
     if (activeTab === 'incidents') fetchIncidents()
+    if (activeTab === 'reports') fetchReportCards()
   }, [activeTab, id, pet])
+
+  async function fetchReportCards() {
+    var { data } = await supabase
+      .from('report_cards')
+      .select('*')
+      .eq('pet_id', id)
+      .order('created_at', { ascending: false })
+    setReportCards(data || [])
+  }
 
   async function fetchPet() {
     var { data: petData, error: petError } = await supabase
@@ -1099,6 +1121,91 @@ export default function PetDetail() {
               )
             )}
           </div>
+        )}
+
+        {/* Report Cards tab — full history, click to view + print */}
+        {activeTab === 'reports' && (
+          <div className="pd-tab-content">
+            {reportCards.length === 0 ? (
+              <div className="pd-empty-state">
+                <h3>No report cards yet</h3>
+                <p>Report cards are created from a grooming or boarding appointment popup once it's checked out.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {reportCards.map(function (rc) {
+                  var rating = BEHAVIOR_DISPLAY[rc.behavior_rating]
+                  var when = rc.created_at ? new Date(rc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''
+                  return (
+                    <div
+                      key={rc.id}
+                      onClick={function () { setViewingReportCard(rc) }}
+                      style={{
+                        cursor: 'pointer',
+                        background: '#fff',
+                        border: '1px solid #e5e7eb',
+                        borderLeft: '4px solid #7c3aed',
+                        borderRadius: '10px',
+                        padding: '14px 16px',
+                        transition: 'box-shadow 0.15s',
+                      }}
+                      onMouseEnter={function (e) { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)' }}
+                      onMouseLeave={function (e) { e.currentTarget.style.boxShadow = 'none' }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: '14px', color: '#111827', marginBottom: '2px' }}>
+                            📋 {rc.service_type === 'grooming' ? 'Grooming' : 'Boarding'} Report — {when}
+                          </div>
+                          {rc.services_performed && (
+                            <div style={{ fontSize: '13px', color: '#4b5563', marginBottom: '4px' }}>
+                              ✂️ {rc.services_performed}
+                            </div>
+                          )}
+                          {rc.groomer_name && (
+                            <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                              By {rc.groomer_name}{rc.next_visit_weeks ? ' · See you in ' + rc.next_visit_weeks + ' weeks' : ''}
+                            </div>
+                          )}
+                        </div>
+                        {rating && (
+                          <span style={{
+                            display: 'inline-block',
+                            padding: '4px 12px',
+                            borderRadius: '999px',
+                            background: rating.bg,
+                            color: rating.color,
+                            fontWeight: 700,
+                            fontSize: '12px',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {rating.emoji} {rating.label}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Report Card view modal — opens when a row is clicked */}
+        {viewingReportCard && (
+          <ReportCardModal
+            mode="view"
+            serviceType={viewingReportCard.service_type}
+            petId={viewingReportCard.pet_id}
+            clientId={viewingReportCard.client_id}
+            petName={pet && pet.name}
+            petBreed={pet && pet.breed}
+            appointmentId={viewingReportCard.appointment_id}
+            boardingReservationId={viewingReportCard.boarding_reservation_id}
+            reportCard={viewingReportCard}
+            onClose={function () { setViewingReportCard(null) }}
+            onSaved={function () { fetchReportCards() }}
+          />
         )}
 
         {/* ===== INCIDENTS TAB ===== */}

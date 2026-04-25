@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { getBreedDefaults } from '../lib/breedDefaults'
 import EnableNotifications from '../components/EnableNotifications'
+import ReportCardModal from '../components/ReportCardModal'
 
 const TABS = [
   { key: 'overview', label: '🐾 Overview' },
@@ -102,6 +103,9 @@ export default function ClientPortalDashboard() {
   var [pastBoarding, setPastBoarding] = useState([])
   var [vaccinations, setVaccinations] = useState([])
   var [clientPayments, setClientPayments] = useState([])
+  // Report cards for all this client's pets — newest first
+  var [reportCards, setReportCards] = useState([])
+  var [viewingReportCard, setViewingReportCard] = useState(null)
 
   useEffect(function () {
     loadPortalData()
@@ -240,6 +244,15 @@ export default function ClientPortalDashboard() {
         .order('created_at', { ascending: false })
 
       setClientPayments(payData || [])
+
+      // 11. Report cards (groomer/boarding "pickup card" — pet's day recap)
+      // RLS allows clients to read their own via "Clients view own report cards" policy
+      var { data: cardData } = await supabase
+        .from('report_cards')
+        .select('id, pet_id, service_type, services_performed, behavior_rating, behavior_notes, recommendations, next_visit_weeks, photo_urls, groomer_name, appointment_id, boarding_reservation_id, created_at')
+        .eq('client_id', clientData.id)
+        .order('created_at', { ascending: false })
+      setReportCards(cardData || [])
     } catch (err) {
       console.error('Error loading portal:', err)
       setError('Could not load your profile. Please try again.')
@@ -1253,6 +1266,82 @@ export default function ClientPortalDashboard() {
               )}
             </div>
 
+            {/* ─── Recent Report Cards (groomer/boarding pickup recap) ─── */}
+            {reportCards.length > 0 && (
+              <div className="cp-card">
+                <h3 className="cp-card-title">📋 Recent Report Cards</h3>
+                <p style={{ margin: '0 0 12px', fontSize: '13px', color: '#6b7280' }}>
+                  How your pets did at their visit. Tap any card to view or print it.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {reportCards.slice(0, 8).map(function (rc) {
+                    var pet = pets.find(function (p) { return p.id === rc.pet_id })
+                    var petName = (pet && pet.name) || 'Pet'
+                    var dateStr = new Date(rc.created_at).toLocaleDateString('en-US', {
+                      month: 'short', day: 'numeric', year: 'numeric'
+                    })
+                    var ratingMap = {
+                      great:     { label: '⭐ Great Day',  bg: '#dcfce7', fg: '#166534' },
+                      good:      { label: '😊 Good',       bg: '#dbeafe', fg: '#1e40af' },
+                      okay:      { label: '😐 Okay',       bg: '#fef3c7', fg: '#92400e' },
+                      anxious:   { label: '😰 Anxious',    bg: '#fed7aa', fg: '#9a3412' },
+                      difficult: { label: '⚠️ Difficult',  bg: '#fee2e2', fg: '#991b1b' },
+                    }
+                    var pill = ratingMap[rc.behavior_rating] || null
+                    return (
+                      <div
+                        key={rc.id}
+                        onClick={function () { setViewingReportCard(rc) }}
+                        style={{
+                          padding: '12px 14px',
+                          background: '#faf5ff',
+                          border: '1px solid #e9d5ff',
+                          borderRadius: '10px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          gap: '12px',
+                          alignItems: 'center',
+                          flexWrap: 'wrap'
+                        }}
+                      >
+                        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+                          <div style={{ fontWeight: '700', color: '#111827', fontSize: '14px' }}>
+                            🐾 {petName} · {rc.service_type === 'boarding' ? '🏠 Boarding' : '✂️ Grooming'}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+                            {dateStr}
+                            {rc.groomer_name ? ' · with ' + rc.groomer_name : ''}
+                            {rc.next_visit_weeks ? ' · next visit: ' + rc.next_visit_weeks + ' wks' : ''}
+                          </div>
+                          {rc.services_performed && (
+                            <div style={{ fontSize: '12px', color: '#374151', marginTop: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {rc.services_performed}
+                            </div>
+                          )}
+                        </div>
+                        {pill && (
+                          <span style={{
+                            padding: '4px 10px',
+                            background: pill.bg,
+                            color: pill.fg,
+                            borderRadius: '999px',
+                            fontSize: '12px',
+                            fontWeight: '700',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {pill.label}
+                          </span>
+                        )}
+                        <span style={{ color: '#7c3aed', fontWeight: '600', fontSize: '13px' }}>
+                          View →
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
           </div>
         )}
 
@@ -2217,6 +2306,30 @@ export default function ClientPortalDashboard() {
           </div>
         </div>
       )}
+
+      {/* ═══════════════════════════════════════════════════
+          REPORT CARD VIEWER (read-only + print for clients)
+          ═══════════════════════════════════════════════════ */}
+      {viewingReportCard && (() => {
+        var pet = pets.find(function (p) { return p.id === viewingReportCard.pet_id })
+        return (
+          <ReportCardModal
+            mode="view"
+            clientView={true}
+            serviceType={viewingReportCard.service_type}
+            petId={viewingReportCard.pet_id}
+            clientId={client && client.id}
+            petName={(pet && pet.name) || 'Pet'}
+            petBreed={(pet && pet.breed) || ''}
+            petPhoto={(pet && pet.photo_url) || null}
+            appointmentId={viewingReportCard.appointment_id}
+            boardingReservationId={viewingReportCard.boarding_reservation_id}
+            reportCard={viewingReportCard}
+            onClose={function () { setViewingReportCard(null) }}
+            onSaved={function () { setViewingReportCard(null) }}
+          />
+        )
+      })()}
     </div>
   )
 }
