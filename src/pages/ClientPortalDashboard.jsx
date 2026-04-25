@@ -12,6 +12,8 @@ import { supabase } from '../lib/supabase'
 import { getBreedDefaults } from '../lib/breedDefaults'
 import EnableNotifications from '../components/EnableNotifications'
 import ReportCardModal from '../components/ReportCardModal'
+import BreedPicker from '../components/BreedPicker'
+import { DOG_BREEDS, CAT_BREEDS } from '../lib/breeds'
 
 const TABS = [
   { key: 'overview', label: '🐾 Overview' },
@@ -69,6 +71,7 @@ export default function ClientPortalDashboard() {
   var [addPetError, setAddPetError] = useState('')
   var [newPetName, setNewPetName] = useState('')
   var [newPetBreed, setNewPetBreed] = useState('')
+  var [newPetSpecies, setNewPetSpecies] = useState('dog') // dog or cat — drives breed picker filter
   var [newPetWeight, setNewPetWeight] = useState('')
   var [newPetAge, setNewPetAge] = useState('')
   var [newPetNotes, setNewPetNotes] = useState('')
@@ -452,6 +455,7 @@ export default function ClientPortalDashboard() {
   function handleOpenAddPet() {
     setNewPetName('')
     setNewPetBreed('')
+    setNewPetSpecies('dog')
     setNewPetWeight('')
     setNewPetAge('')
     setNewPetNotes('')
@@ -499,6 +503,7 @@ export default function ClientPortalDashboard() {
 
       var petInsert = {
         name: newPetName.trim(),
+        species: newPetSpecies,
         breed: newPetBreed.trim(),
         weight: parseFloat(newPetWeight),
         age: parseFloat(newPetAge),
@@ -1907,13 +1912,63 @@ export default function ClientPortalDashboard() {
                 placeholder="e.g. Bella"
                 required
               />
-              <PetField
-                label="Breed"
-                value={newPetBreed}
-                onChange={setNewPetBreed}
-                placeholder="e.g. Goldendoodle"
-                required
-              />
+
+              {/* Species toggle — drives the breed picker list below */}
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Species <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={function () { setNewPetSpecies('dog'); setNewPetBreed('') }}
+                    style={{
+                      flex: 1,
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid ' + (newPetSpecies === 'dog' ? '#7c3aed' : '#d1d5db'),
+                      background: newPetSpecies === 'dog' ? '#7c3aed' : '#fff',
+                      color: newPetSpecies === 'dog' ? '#fff' : '#374151',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                    }}
+                  >
+                    🐶 Dog
+                  </button>
+                  <button
+                    type="button"
+                    onClick={function () { setNewPetSpecies('cat'); setNewPetBreed('') }}
+                    style={{
+                      flex: 1,
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid ' + (newPetSpecies === 'cat' ? '#7c3aed' : '#d1d5db'),
+                      background: newPetSpecies === 'cat' ? '#7c3aed' : '#fff',
+                      color: newPetSpecies === 'cat' ? '#fff' : '#374151',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                    }}
+                  >
+                    🐱 Cat
+                  </button>
+                </div>
+              </div>
+
+              {/* Breed — type-to-filter dropdown, "+ Use as custom" at the bottom for unusual breeds */}
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Breed <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <BreedPicker
+                  value={newPetBreed}
+                  onChange={setNewPetBreed}
+                  breeds={newPetSpecies === 'cat' ? CAT_BREEDS : DOG_BREEDS}
+                  placeholder={newPetSpecies === 'cat' ? 'Search or type a cat breed...' : 'Search or type a dog breed...'}
+                  required
+                />
+              </div>
               <PetField
                 label="Weight (lbs)"
                 value={newPetWeight}
