@@ -5,6 +5,7 @@ import { checkBookingSafety } from '../lib/claude'
 import { notifyUser } from '../lib/push'
 import { BehaviorTagsRow } from '../components/BehaviorTags'
 import { resolveHighPriorityTags } from '../lib/behaviorTags'
+import { printDailySheet } from '../lib/printDailySheet'
 
 const HOURS = []
 for (let h = 7; h <= 18; h++) {
@@ -1701,6 +1702,18 @@ export default function Calendar() {
                     <span className="calendar-date-label">{getHeaderText()}</span>
                 </div>
                 <div className="calendar-header-right">
+                    <button
+                        onClick={() => printDailySheet(dateToString(currentDate))}
+                        title="Print today's grooming + boarding schedule for the front desk"
+                        style={{
+                            padding: '8px 14px', background: '#fff',
+                            color: '#7c3aed', border: '1px solid #c4b5fd',
+                            borderRadius: '8px', fontWeight: '600', fontSize: '13px',
+                            cursor: 'pointer', marginRight: '10px',
+                        }}
+                    >
+                        🖨️ Print Today
+                    </button>
                     <button
                         onClick={() => { setShowMassText(true); setMassTextDate(dateToString(currentDate)) }}
                         title="Mass text every client with an appointment on a given day (for emergencies / day-of cancellations)"

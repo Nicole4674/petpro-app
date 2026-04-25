@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { BehaviorTagsRow } from '../components/BehaviorTags'
+import { printDailySheet } from '../lib/printDailySheet'
 import '../boarding-styles.css'
 
 export default function BoardingCalendar() {
@@ -1054,6 +1055,20 @@ export default function BoardingCalendar() {
             <button className={'cal-filter-btn' + (showFilters === 'occupied' ? ' cal-filter-active' : '')}
               onClick={() => setShowFilters('occupied')}>Occupied</button>
           </div>
+          {/* Print today's combined daily sheet (grooming + check-ins/outs) */}
+          <button
+            className="cal-filter-btn"
+            style={{ marginLeft: '12px', background: '#fff', color: '#7c3aed', borderColor: '#c4b5fd', fontWeight: '600' }}
+            onClick={() => {
+              var todayStr = new Date().getFullYear() + '-' +
+                String(new Date().getMonth() + 1).padStart(2, '0') + '-' +
+                String(new Date().getDate()).padStart(2, '0')
+              printDailySheet(todayStr)
+            }}
+            title="Print today's grooming + boarding schedule for the front desk"
+          >
+            🖨️ Print Today
+          </button>
           {/* Task #42 — Top-bar Print Blank Form button */}
           <button
             className="cal-filter-btn"
