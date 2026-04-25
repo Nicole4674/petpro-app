@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import IncidentModal from '../components/IncidentModal'
+import { BehaviorTagsRow, BehaviorTagsEditor } from '../components/BehaviorTags'
 
 var TABS = [
   { key: 'overview', label: '🐾 Overview' },
@@ -272,7 +273,8 @@ export default function PetDetail() {
         vaccination_expiry: editForm.vaccination_expiry,
         vet_name: editForm.vet_name,
         vet_phone: editForm.vet_phone,
-        microchip_id: editForm.microchip_id
+        microchip_id: editForm.microchip_id,
+        behavior_tags: editForm.behavior_tags || []
       })
       .eq('id', id)
 
@@ -738,6 +740,13 @@ export default function PetDetail() {
           <button className="pd-edit-btn" onClick={function() { setEditing(true) }}>✏️ Edit Pet</button>
         </div>
       </div>
+
+      {/* Behavior tags banner — shown right at top so staff sees warnings first */}
+      {pet.behavior_tags && pet.behavior_tags.length > 0 && (
+        <div style={{ marginBottom: '12px' }}>
+          <BehaviorTagsRow tags={pet.behavior_tags} />
+        </div>
+      )}
 
       {/* Health Alerts Banner */}
       {(pet.allergies || pet.medications || pet.special_handling) && (
@@ -1315,6 +1324,18 @@ export default function PetDetail() {
                 <label className="sl-label">Special Handling Instructions</label>
                 <textarea className="sl-input" value={editForm.special_handling || ''} rows="2" placeholder="e.g. Muzzle required, needs two groomers, sensitive ears..."
                   onChange={function(e) { setEditForm(Object.assign({}, editForm, { special_handling: e.target.value })) }}
+                />
+              </div>
+
+              {/* Behavior tags — quick-pick warning pills shown on calendar/popup/kennel card */}
+              <div className="sl-form-group">
+                <label className="sl-label">Behavior Tags</label>
+                <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#6b7280' }}>
+                  Click to toggle. Red/orange tags show as warnings on the calendar so staff sees them before handling.
+                </p>
+                <BehaviorTagsEditor
+                  value={editForm.behavior_tags}
+                  onChange={function (newTags) { setEditForm(Object.assign({}, editForm, { behavior_tags: newTags })) }}
                 />
               </div>
 

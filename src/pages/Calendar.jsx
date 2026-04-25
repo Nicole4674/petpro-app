@@ -3,6 +3,8 @@ import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { checkBookingSafety } from '../lib/claude'
 import { notifyUser } from '../lib/push'
+import { BehaviorTagsRow } from '../components/BehaviorTags'
+import { resolveHighPriorityTags } from '../lib/behaviorTags'
 
 const HOURS = []
 for (let h = 7; h <= 18; h++) {
@@ -344,7 +346,7 @@ export default function Calendar() {
         const [apptResult, clientResult, petResult, serviceResult, staffResult, blockedResult] = await Promise.all([
             supabase
                 .from('appointments')
-                .select('*, clients(id, first_name, last_name, phone), pets(name, breed), services:service_id(id, service_name), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed), services:service_id(id, service_name), appointment_pet_addons(id, service_id, services:service_id(id, service_name)))')
+                .select('*, clients(id, first_name, last_name, phone), pets(name, breed, behavior_tags), services:service_id(id, service_name), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed, behavior_tags), services:service_id(id, service_name), appointment_pet_addons(id, service_id, services:service_id(id, service_name)))')
                 .gte('appointment_date', startDate)
                 .lte('appointment_date', endDate)
                 .order('start_time'),
@@ -671,7 +673,7 @@ export default function Calendar() {
                 .select(`
                     *,
                     clients:client_id ( id, first_name, last_name, phone, email, address, preferred_contact, notes ),
-                    pets:pet_id ( id, name, breed, weight, age, sex, allergies, medications, vaccination_status, vaccination_expiry, is_spayed_neutered, is_senior, grooming_notes ),
+                    pets:pet_id ( id, name, breed, weight, age, sex, allergies, medications, vaccination_status, vaccination_expiry, is_spayed_neutered, is_senior, grooming_notes, behavior_tags ),
                     services:service_id ( id, service_name, price, time_block_minutes ),
                     staff_members:staff_id ( id, first_name, last_name, color_code ),
                     recurring_series:recurring_series_id ( id, interval_weeks, total_count, start_date, status ),
@@ -682,7 +684,7 @@ export default function Calendar() {
                         quoted_price,
                         service_notes,
                         groomer_notes,
-                        pets:pet_id ( id, name, breed, weight, age, sex, allergies, medications, vaccination_status, vaccination_expiry, is_spayed_neutered, is_senior, grooming_notes ),
+                        pets:pet_id ( id, name, breed, weight, age, sex, allergies, medications, vaccination_status, vaccination_expiry, is_spayed_neutered, is_senior, grooming_notes, behavior_tags ),
                         services:service_id ( id, service_name, price, time_block_minutes ),
                         appointment_pet_addons (
                             id,
@@ -2574,6 +2576,10 @@ export default function Calendar() {
                                                                 {ap.pets && !ap.pets.is_spayed_neutered && <span className="appt-tag appt-tag-yellow">Intact</span>}
                                                                 {ap.pets?.is_senior && <span className="appt-tag appt-tag-blue">Senior</span>}
                                                             </div>
+                                                            {/* Behavior warning pills — full set for this pet */}
+                                                            {ap.pets?.behavior_tags && ap.pets.behavior_tags.length > 0 && (
+                                                                <BehaviorTagsRow tags={ap.pets.behavior_tags} />
+                                                            )}
                                                         </div>
                                                     </div>
                                                     {/* × Remove button (auto-shrinks appointment) */}
@@ -4003,6 +4009,17 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                             wApptServiceNames.push(appt.services.service_name)
                                         }
                                         const wServiceLine = wApptServiceNames.join(' · ')
+                                        // Behavior tag warning pills (high-priority only on tile)
+                                        const wTagKeys = []
+                                        ;(appt.appointment_pets || []).forEach(function (ap) {
+                                            if (ap.pets && Array.isArray(ap.pets.behavior_tags)) {
+                                                ap.pets.behavior_tags.forEach(function (k) { if (wTagKeys.indexOf(k) === -1) wTagKeys.push(k) })
+                                            }
+                                        })
+                                        if (wTagKeys.length === 0 && appt.pets && Array.isArray(appt.pets.behavior_tags)) {
+                                            appt.pets.behavior_tags.forEach(function (k) { wTagKeys.push(k) })
+                                        }
+                                        const wHighPriorityTags = resolveHighPriorityTags(wTagKeys)
                                         const groomerName = appt.staff_members ? appt.staff_members.first_name : 'Unassigned'
                                         const isRecurring = !!appt.recurring_series_id
                                         const hasConflict = !!appt.recurring_conflict
@@ -4071,6 +4088,9 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                     <span className="appt-service" style={{ fontSize: '11px', opacity: 0.92, fontStyle: 'italic', display: 'block', whiteSpace: 'normal', lineHeight: 1.3, marginTop: '1px' }}>
                                                         {wServiceLine}
                                                     </span>
+                                                )}
+                                                {wHighPriorityTags.length > 0 && (
+                                                    <BehaviorTagsRow tags={wTagKeys} compact={true} max={4} />
                                                 )}
                                                 <span className="appt-groomer-tag">{groomerName}</span>
                                                 {statusBadge && (
@@ -4207,6 +4227,18 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
             apptServiceNames.push(appt.services.service_name)
         }
         const serviceLine = apptServiceNames.join(' · ')
+        // Collect HIGH-priority behavior tags across all pets in the appointment
+        // (de-duped by tag key) for compact warning pills on the tile.
+        const apptTagKeys = []
+        ;(appt.appointment_pets || []).forEach(function (ap) {
+            if (ap.pets && Array.isArray(ap.pets.behavior_tags)) {
+                ap.pets.behavior_tags.forEach(function (k) { if (apptTagKeys.indexOf(k) === -1) apptTagKeys.push(k) })
+            }
+        })
+        if (apptTagKeys.length === 0 && appt.pets && Array.isArray(appt.pets.behavior_tags)) {
+            appt.pets.behavior_tags.forEach(function (k) { apptTagKeys.push(k) })
+        }
+        const apptHighPriorityTags = resolveHighPriorityTags(apptTagKeys)
         // Side-by-side overlap: lane index + total lanes tell us how to
         // split the column. Default to full width (single lane) when no
         // layout info is passed.
@@ -4269,6 +4301,9 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                     <span className="appt-service" style={{ fontSize: '11px', opacity: 0.92, fontStyle: 'italic', display: 'block', whiteSpace: 'normal', lineHeight: 1.3, marginTop: '1px' }}>
                         {serviceLine}
                     </span>
+                )}
+                {apptHighPriorityTags.length > 0 && (
+                    <BehaviorTagsRow tags={apptTagKeys} compact={true} max={4} />
                 )}
                 <span className="appt-groomer-tag">{groomerName}</span>
                 {isFlaggedPending && !appt.checked_in_at && !appt.checked_out_at && (

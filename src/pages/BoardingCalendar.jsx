@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { BehaviorTagsRow } from '../components/BehaviorTags'
 import '../boarding-styles.css'
 
 export default function BoardingCalendar() {
@@ -403,7 +404,7 @@ export default function BoardingCalendar() {
           *,
           boarding_reservation_pets (
             pet_id,
-            pets:pet_id ( id, name, breed, weight, age, sex, allergies, medications, vaccination_status, vaccination_expiry, is_spayed_neutered )
+            pets:pet_id ( id, name, breed, weight, age, sex, allergies, medications, vaccination_status, vaccination_expiry, is_spayed_neutered, behavior_tags )
           ),
           clients:client_id ( id, first_name, last_name, phone, email, address, preferred_contact, notes ),
           kennels:kennel_id ( name ),
@@ -1409,6 +1410,10 @@ export default function BoardingCalendar() {
                           {pet.is_spayed_neutered && <span className="kc-tag kc-tag-green">Spayed/Neutered</span>}
                           {!pet.is_spayed_neutered && <span className="kc-tag kc-tag-yellow">Intact</span>}
                         </div>
+                        {/* Behavior warning pills — bites, kennel aggressive, etc. */}
+                        {pet.behavior_tags && pet.behavior_tags.length > 0 && (
+                          <BehaviorTagsRow tags={pet.behavior_tags} />
+                        )}
                       </div>
                     </div>
 
