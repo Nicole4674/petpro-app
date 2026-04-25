@@ -634,7 +634,12 @@ export default function ClientDetail() {
 
   const openMergeModal = () => {
     setMergeSearch('')
-    setMergeCandidates([])
+      setMergeCandidates([])
+      setMerging(false)
+      setShowMergeModal(false)
+      setMergeSearch('')
+      setMergeCandidates([])
+    setMerging(false) // safety belt — never reopen with stale "Merging..." state
     setShowMergeModal(true)
   }
 
@@ -690,6 +695,13 @@ export default function ClientDetail() {
       setMerging(false)
       return
     }
+    // Reset all merge state BEFORE navigating — otherwise the modal +
+    // "Merging..." stays stuck because React Router re-renders this same
+    // component instead of unmounting it (we're going /clients/A → /clients/B)
+    setMerging(false)
+    setShowMergeModal(false)
+    setMergeSearch('')
+    setMergeCandidates([])
     // Redirect to the target client — where all the data now lives
     navigate('/clients/' + target.id)
   }
