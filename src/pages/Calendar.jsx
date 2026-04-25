@@ -344,7 +344,7 @@ export default function Calendar() {
         const [apptResult, clientResult, petResult, serviceResult, staffResult, blockedResult] = await Promise.all([
             supabase
                 .from('appointments')
-                .select('*, clients(id, first_name, last_name, phone), pets(name, breed), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed))')
+                .select('*, clients(id, first_name, last_name, phone), pets(name, breed), services:service_id(id, service_name), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed), services:service_id(id, service_name), appointment_pet_addons(id, service_id, services:service_id(id, service_name)))')
                 .gte('appointment_date', startDate)
                 .lte('appointment_date', endDate)
                 .order('start_time'),
@@ -3991,6 +3991,18 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                         const wWidthPct = 100 / Math.max(1, wLaneCnt)
                                         const wLeftPct  = wWidthPct * wLaneIdx
                                         const groomerColor = appt.staff_members?.color_code || '#9ca3af'
+                                        // Service list (primary + add-ons) so the tile shows what's booked at a glance
+                                        const wApptServiceNames = []
+                                        ;(appt.appointment_pets || []).forEach(function (ap) {
+                                            if (ap.services && ap.services.service_name) wApptServiceNames.push(ap.services.service_name)
+                                            ;(ap.appointment_pet_addons || []).forEach(function (addon) {
+                                                if (addon.services && addon.services.service_name) wApptServiceNames.push(addon.services.service_name)
+                                            })
+                                        })
+                                        if (wApptServiceNames.length === 0 && appt.services && appt.services.service_name) {
+                                            wApptServiceNames.push(appt.services.service_name)
+                                        }
+                                        const wServiceLine = wApptServiceNames.join(' · ')
                                         const groomerName = appt.staff_members ? appt.staff_members.first_name : 'Unassigned'
                                         const isRecurring = !!appt.recurring_series_id
                                         const hasConflict = !!appt.recurring_conflict
@@ -4055,6 +4067,11 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                 <span className="appt-time">{formatTime(appt.start_time)}</span>
                                                 <span className="appt-pet">{(appt.appointment_pets && appt.appointment_pets.length > 0) ? appt.appointment_pets.map(function(ap){ return ap.pets?.name }).filter(Boolean).join(', ') : appt.pets?.name}</span>
                                                 <span className="appt-client">{appt.clients?.first_name} {appt.clients?.last_name}</span>
+                                                {wServiceLine && (
+                                                    <span className="appt-service" style={{ fontSize: '11px', opacity: 0.92, fontStyle: 'italic', display: 'block', whiteSpace: 'normal', lineHeight: 1.3, marginTop: '1px' }}>
+                                                        {wServiceLine}
+                                                    </span>
+                                                )}
                                                 <span className="appt-groomer-tag">{groomerName}</span>
                                                 {statusBadge && (
                                                     <span
@@ -4176,6 +4193,20 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
         const startOffsetMin = startTotalMin - ((hour || sh) * 60)
         const topPct = (startOffsetMin / 60) * 100
         const heightPct = (durationMin / 60) * 100
+        // Build a list of all services (primary + add-ons across all pets)
+        // so the groomer can see at a glance what's booked without opening.
+        const apptServiceNames = []
+        ;(appt.appointment_pets || []).forEach(function (ap) {
+            if (ap.services && ap.services.service_name) apptServiceNames.push(ap.services.service_name)
+            ;(ap.appointment_pet_addons || []).forEach(function (addon) {
+                if (addon.services && addon.services.service_name) apptServiceNames.push(addon.services.service_name)
+            })
+        })
+        // Fallback for legacy appointments (no appointment_pets) — use the top-level service
+        if (apptServiceNames.length === 0 && appt.services && appt.services.service_name) {
+            apptServiceNames.push(appt.services.service_name)
+        }
+        const serviceLine = apptServiceNames.join(' · ')
         // Side-by-side overlap: lane index + total lanes tell us how to
         // split the column. Default to full width (single lane) when no
         // layout info is passed.
@@ -4234,6 +4265,11 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                 <span className="appt-time">{formatTime(appt.start_time)}</span>
                 <span className="appt-pet">{(appt.appointment_pets && appt.appointment_pets.length > 0) ? appt.appointment_pets.map(function(ap){ return ap.pets?.name }).filter(Boolean).join(', ') : appt.pets?.name}</span>
                 <span className="appt-client">{appt.clients?.first_name} {appt.clients?.last_name}</span>
+                {serviceLine && (
+                    <span className="appt-service" style={{ fontSize: '11px', opacity: 0.92, fontStyle: 'italic', display: 'block', whiteSpace: 'normal', lineHeight: 1.3, marginTop: '1px' }}>
+                        {serviceLine}
+                    </span>
+                )}
                 <span className="appt-groomer-tag">{groomerName}</span>
                 {isFlaggedPending && !appt.checked_in_at && !appt.checked_out_at && (
                     <span
