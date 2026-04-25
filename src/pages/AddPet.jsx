@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { getBreedDefaults } from '../lib/breedDefaults'
+import BreedPicker from '../components/BreedPicker'
+import { DOG_BREEDS, CAT_BREEDS } from '../lib/breeds'
 
 export default function AddPet() {
   const { clientId } = useParams()
@@ -13,6 +15,7 @@ export default function AddPet() {
   const [form, setForm] = useState({
     // Basic Info
     name: '',
+    species: 'dog', // dog or cat — drives the breed picker filter
     breed: '',
     weight: '',
     age: '',
@@ -132,8 +135,59 @@ export default function AddPet() {
             <input type="text" name="name" value={form.name} onChange={handleChange} required />
           </div>
           <div className="form-group">
+            <label>Species *</label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={function () { setForm({ ...form, species: 'dog', breed: '' }) }}
+                style={{
+                  flex: 1,
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid ' + (form.species === 'dog' ? '#7c3aed' : '#d1d5db'),
+                  background: form.species === 'dog' ? '#7c3aed' : '#fff',
+                  color: form.species === 'dog' ? '#fff' : '#374151',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                }}
+              >
+                🐶 Dog
+              </button>
+              <button
+                type="button"
+                onClick={function () { setForm({ ...form, species: 'cat', breed: '' }) }}
+                style={{
+                  flex: 1,
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid ' + (form.species === 'cat' ? '#7c3aed' : '#d1d5db'),
+                  background: form.species === 'cat' ? '#7c3aed' : '#fff',
+                  color: form.species === 'cat' ? '#fff' : '#374151',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                }}
+              >
+                🐱 Cat
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="form-row">
+          <div className="form-group" style={{ width: '100%' }}>
             <label>Breed *</label>
-            <input type="text" name="breed" value={form.breed} onChange={handleChange} required placeholder="e.g. Goldendoodle, Shih Tzu" />
+            <BreedPicker
+              value={form.breed}
+              onChange={function (newBreed) {
+                // Reuse handleChange's coat auto-fill logic by simulating an event
+                handleChange({ target: { name: 'breed', value: newBreed, type: 'text' } })
+              }}
+              breeds={form.species === 'cat' ? CAT_BREEDS : DOG_BREEDS}
+              placeholder={form.species === 'cat' ? 'Search or type a cat breed...' : 'Search or type a dog breed...'}
+              required
+            />
           </div>
         </div>
 
