@@ -122,12 +122,29 @@ export default function StaffMe() {
       rangeEnd = new Date(weekStart); rangeEnd.setDate(rangeStart.getDate() + 7)
     }
     try {
-      var { data: tipPayments } = await supabase
+      // Two-step query (avoids RLS-on-join issues):
+      // 1) Get this staff's appointment IDs (RLS on appointments must allow this — the
+      //    staff can read their own appts because we added that policy earlier).
+      // 2) Get payments for those IDs in the date range.
+      var { data: myAppts, error: apptErr } = await supabase
+        .from('appointments')
+        .select('id')
+        .eq('staff_id', s.id)
+      if (apptErr) throw apptErr
+
+      var apptIds = (myAppts || []).map(function (a) { return a.id })
+      if (apptIds.length === 0) {
+        setTipsThisWeek({ total: 0, count: 0 })
+        return
+      }
+
+      var { data: tipPayments, error: payErr } = await supabase
         .from('payments')
-        .select('tip_amount, created_at, appointments!inner(staff_id)')
-        .eq('appointments.staff_id', s.id)
+        .select('tip_amount, created_at, appointment_id')
+        .in('appointment_id', apptIds)
         .gte('created_at', rangeStart.toISOString())
         .lt('created_at', rangeEnd.toISOString())
+      if (payErr) throw payErr
 
       var tipTotal = 0
       var tipCount = 0
