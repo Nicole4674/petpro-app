@@ -2438,53 +2438,119 @@ export default function Calendar() {
                                                 ✏️ Edit
                                             </button>
                                         </span>
-                                    ) : (
-                                        <div style={{ padding: '10px', border: '1px solid #e5e7eb', borderRadius: '8px', background: '#fafafa', minWidth: '240px' }}>
-                                            <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                                                <label style={{ flex: 1, fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>
-                                                    Start
-                                                    <input
-                                                        type="time"
-                                                        value={pendingStartTime}
-                                                        onChange={function (e) { setPendingStartTime(e.target.value) }}
-                                                        style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', background: '#fff', marginTop: '2px' }}
-                                                    />
-                                                </label>
-                                                <label style={{ flex: 1, fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>
-                                                    End
-                                                    <input
-                                                        type="time"
-                                                        value={pendingEndTime}
-                                                        onChange={function (e) { setPendingEndTime(e.target.value) }}
-                                                        style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', background: '#fff', marginTop: '2px' }}
-                                                    />
-                                                </label>
+                                    ) : (() => {
+                                        // Helpers — convert "HH:MM" ↔ minutes since midnight, and pretty-print duration.
+                                        var toMin = function (t) {
+                                            if (!t) return 0
+                                            var p = t.split(':').map(Number)
+                                            return (p[0] || 0) * 60 + (p[1] || 0)
+                                        }
+                                        var toTime = function (m) {
+                                            // Clamp 0–23:59 so "+1h" past midnight doesn't wrap weirdly
+                                            if (m < 0) m = 0
+                                            if (m > 23 * 60 + 59) m = 23 * 60 + 59
+                                            var h = Math.floor(m / 60)
+                                            var mm = m % 60
+                                            return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm
+                                        }
+                                        var startMin = toMin(pendingStartTime)
+                                        var endMin = toMin(pendingEndTime)
+                                        var durMin = endMin - startMin
+                                        var durLabel = durMin <= 0
+                                            ? '⚠️ End must be after start'
+                                            : (Math.floor(durMin / 60) > 0 ? Math.floor(durMin / 60) + 'h ' : '') + (durMin % 60) + 'm'
+                                        var bumpEnd = function (mins) {
+                                            setPendingEndTime(toTime(endMin + mins))
+                                        }
+                                        var setDuration = function (mins) {
+                                            setPendingEndTime(toTime(startMin + mins))
+                                        }
+                                        var btnSm = { padding: '6px 10px', background: '#fff', color: '#6d28d9', border: '1px solid #c4b5fd', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 600 }
+                                        return (
+                                            <div style={{ padding: '10px', border: '1px solid #e5e7eb', borderRadius: '8px', background: '#fafafa', minWidth: '260px' }}>
+                                                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                                                    <label style={{ flex: 1, fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>
+                                                        Start
+                                                        <input
+                                                            type="time"
+                                                            value={pendingStartTime}
+                                                            onChange={function (e) { setPendingStartTime(e.target.value) }}
+                                                            style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', background: '#fff', marginTop: '2px' }}
+                                                        />
+                                                    </label>
+                                                    <label style={{ flex: 1, fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>
+                                                        End
+                                                        <input
+                                                            type="time"
+                                                            value={pendingEndTime}
+                                                            onChange={function (e) { setPendingEndTime(e.target.value) }}
+                                                            style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', background: '#fff', marginTop: '2px' }}
+                                                        />
+                                                    </label>
+                                                </div>
+
+                                                {/* Live duration label + quick-bump buttons */}
+                                                <div style={{
+                                                    marginBottom: '8px',
+                                                    padding: '8px 10px',
+                                                    background: durMin <= 0 ? '#fee2e2' : '#f3e8ff',
+                                                    borderRadius: '6px',
+                                                    fontSize: '12px',
+                                                    fontWeight: 600,
+                                                    color: durMin <= 0 ? '#991b1b' : '#5b21b6',
+                                                    textAlign: 'center'
+                                                }}>
+                                                    Duration: {durLabel}
+                                                </div>
+
+                                                <div style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '4px' }}>
+                                                    Quick-extend End:
+                                                </div>
+                                                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                                                    <button onClick={function () { bumpEnd(15) }} style={btnSm}>+15m</button>
+                                                    <button onClick={function () { bumpEnd(30) }} style={btnSm}>+30m</button>
+                                                    <button onClick={function () { bumpEnd(60) }} style={btnSm}>+1h</button>
+                                                    <button onClick={function () { bumpEnd(-15) }} style={btnSm}>−15m</button>
+                                                    <button onClick={function () { bumpEnd(-30) }} style={btnSm}>−30m</button>
+                                                </div>
+
+                                                <div style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '4px' }}>
+                                                    Set total duration:
+                                                </div>
+                                                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                                                    <button onClick={function () { setDuration(30) }} style={btnSm}>30m</button>
+                                                    <button onClick={function () { setDuration(60) }} style={btnSm}>1h</button>
+                                                    <button onClick={function () { setDuration(90) }} style={btnSm}>1h 30m</button>
+                                                    <button onClick={function () { setDuration(120) }} style={btnSm}>2h</button>
+                                                    <button onClick={function () { setDuration(180) }} style={btnSm}>3h</button>
+                                                </div>
+
+                                                <div style={{ display: 'flex', gap: '8px' }}>
+                                                    <button
+                                                        onClick={handleChangeTime}
+                                                        disabled={savingTime || durMin <= 0}
+                                                        style={{ flex: 1, padding: '7px 12px', background: durMin <= 0 ? '#9ca3af' : '#10b981', color: 'white', border: 'none', borderRadius: '6px', cursor: (savingTime || durMin <= 0) ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: '12px', opacity: savingTime ? 0.7 : 1 }}
+                                                    >
+                                                        {savingTime ? 'Saving...' : '✓ Save'}
+                                                    </button>
+                                                    <button
+                                                        onClick={function () {
+                                                            setEditingTime(false)
+                                                            setPendingStartTime('')
+                                                            setPendingEndTime('')
+                                                        }}
+                                                        disabled={savingTime}
+                                                        style={{ flex: 1, padding: '7px 12px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '12px' }}
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                                <div style={{ marginTop: '6px', fontSize: '10px', color: '#6b7280', fontStyle: 'italic' }}>
+                                                    Same-day only. For date changes, use Reschedule.
+                                                </div>
                                             </div>
-                                            <div style={{ display: 'flex', gap: '8px' }}>
-                                                <button
-                                                    onClick={handleChangeTime}
-                                                    disabled={savingTime}
-                                                    style={{ flex: 1, padding: '7px 12px', background: '#10b981', color: 'white', border: 'none', borderRadius: '6px', cursor: savingTime ? 'wait' : 'pointer', fontWeight: 600, fontSize: '12px', opacity: savingTime ? 0.7 : 1 }}
-                                                >
-                                                    {savingTime ? 'Saving...' : '✓ Save'}
-                                                </button>
-                                                <button
-                                                    onClick={function () {
-                                                        setEditingTime(false)
-                                                        setPendingStartTime('')
-                                                        setPendingEndTime('')
-                                                    }}
-                                                    disabled={savingTime}
-                                                    style={{ flex: 1, padding: '7px 12px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '12px' }}
-                                                >
-                                                    Cancel
-                                                </button>
-                                            </div>
-                                            <div style={{ marginTop: '6px', fontSize: '10px', color: '#6b7280', fontStyle: 'italic' }}>
-                                                Same-day only. For date changes, use Reschedule.
-                                            </div>
-                                        </div>
-                                    )}
+                                        )
+                                    })()}
                                 </div>
                                 <div className="appt-detail-sched-item">
                                     <span className="appt-detail-sched-label">💰 Price</span>
