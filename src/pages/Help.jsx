@@ -128,12 +128,13 @@ var SECTIONS = [
       {
         q: 'How do I send a client portal invite?',
         steps: [
-          'Open the client\'s profile.',
-          'Look for "Portal access" section.',
-          'Click "Invite to portal" — sends them an email with a link to set up their password.',
-          'They click it, set a password, and can log in at yourshop.petpro.app/portal/login to view appointments, message you, and book themselves.',
+          'Open Settings → Shop Settings.',
+          'At the very top of the page, you\'ll see your client portal link section.',
+          'Click "Copy Link" — copies the portal URL to your clipboard.',
+          'Share it with clients via text, email, on a business card, or pinned on your front desk.',
+          'They open the link, create their own portal account, and can view appointments, message you, update their pet info, and self-book.',
         ],
-        tip: 'The client portal is included on Pro tier and above. Solo Starter accounts only let YOU manage clients.',
+        tip: 'The client portal is included on Pro tier and above. Solo Starter accounts only let YOU manage clients directly.',
       },
       {
         q: 'How do I merge two duplicate clients?',
@@ -277,12 +278,14 @@ var SECTIONS = [
       {
         q: 'How do I use voice mode for hands-free booking?',
         steps: [
-          'Click the 🎤 microphone in the AI assistant (bottom-right floating button).',
-          'Hold the mic and speak: "Book Bella for a full groom Thursday at 2."',
-          'PetPro transcribes, processes, and reads the proposed slot back.',
-          'Say "Yes" to confirm or describe a change ("make it 3 instead").',
+          'Open the left sidebar → under the AI section, click "Voice Mode".',
+          'You\'ll land on the Voice Mode page.',
+          'Hold the mic button and speak: "Book Bella for a full groom Thursday at 2."',
+          'PetPro transcribes, processes, and reads the proposed slot back to you.',
+          'Say "Yes" to confirm, or describe a change ("make it 3 instead").',
+          'The booking lands on your calendar — hands stay clean, dog stays calm.',
         ],
-        tip: 'Voice mode is included on Growing tier and above. Especially useful for mobile groomers in the van.',
+        tip: 'Voice mode is its own dedicated page, not the floating chat button. Especially useful for mobile groomers in the van or when your hands are wet.',
       },
       {
         q: 'How do I set up booking rules to prevent bad bookings?',
