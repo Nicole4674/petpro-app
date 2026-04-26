@@ -57,11 +57,22 @@ export default function SubscriptionGate({ children }) {
       }
 
       // 3) Owner / groomer — must have an active subscription_tier.
+      //    Look up by id first, then fall back to email. This handles legacy
+      //    accounts where the groomers row id doesn't match auth.users.id.
       var { data: groomerRow } = await supabase
         .from('groomers')
         .select('subscription_tier')
         .eq('id', user.id)
         .maybeSingle()
+
+      if (!groomerRow && user.email) {
+        var { data: byEmail } = await supabase
+          .from('groomers')
+          .select('subscription_tier')
+          .eq('email', user.email)
+          .maybeSingle()
+        if (byEmail) groomerRow = byEmail
+      }
 
       var tier = groomerRow && groomerRow.subscription_tier
       if (tier && String(tier).trim() !== '') {
