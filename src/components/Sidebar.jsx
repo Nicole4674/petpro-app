@@ -541,6 +541,12 @@ export default function Sidebar({ onToggle }) {
               >
                 🚀 Coming Soon
               </div>
+              <div
+                className={'sidebar-subitem' + (isActive('/help') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/help') }}
+              >
+                📚 Help
+              </div>
             </div>
           )}
         </div>

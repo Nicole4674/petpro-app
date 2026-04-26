@@ -36,6 +36,7 @@ import Messages from './pages/Messages'
 import ShopSettings from './pages/ShopSettings'
 import Account from './pages/Account'
 import Roadmap from './pages/Roadmap'
+import Help from './pages/Help'
 import ResetPassword from './pages/ResetPassword'
 import Balances from './pages/Balances'
 import Privacy from './pages/Privacy'
@@ -211,6 +212,7 @@ function App() {
                     <Route path="/settings/shop" element={gate(session, <ShopSettings />)} />
                     <Route path="/account" element={session ? <Account /> : <Navigate to="/login" />} />
                     <Route path="/roadmap" element={gate(session, <Roadmap />)} />
+                    <Route path="/help" element={gate(session, <Help />)} />
                     <Route path="/balances" element={gate(session, <Balances />)} />
                     <Route path="/messages" element={gate(session, <Messages />)} />
                 </Routes>
