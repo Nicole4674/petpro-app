@@ -82,7 +82,9 @@ function RootRedirect({ session }) {
     if (!session) return <Navigate to="/login" replace />
     if (userType === 'client') return <Navigate to="/portal" replace />
     if (userType === 'staff') return <Navigate to="/staff/me" replace />
-    return <Dashboard />
+    // Owner / groomer — must have a paid subscription. SubscriptionGate
+    // sends them to /plans if their tier is empty.
+    return <SubscriptionGate><Dashboard /></SubscriptionGate>
 }
 import ClientPortalDashboard from './pages/ClientPortalDashboard'
 import ClientPortalMessages from './pages/ClientPortalMessages'
@@ -90,7 +92,17 @@ import ClientPortalThread from './pages/ClientPortalThread'
 import AIChatWidget from './components/AIChatWidget'
 import ClientChatWidget from './components/ClientChatWidget'
 import Sidebar from './components/Sidebar'
+import SubscriptionGate from './components/SubscriptionGate'
 import './App.css'
+
+// Helper — every groomer-side route runs through this. Three checks in order:
+//   1. No session → /login
+//   2. Has session but no paid subscription_tier → /plans (handled by SubscriptionGate)
+//   3. All good → render the page
+function gate(session, element) {
+    if (!session) return <Navigate to="/login" />
+    return <SubscriptionGate>{element}</SubscriptionGate>
+}
 
 function AppLayout({ children }) {
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -163,44 +175,44 @@ function App() {
                     <Route path="/portal/messages" element={session ? <ClientPortalMessages /> : <Navigate to="/portal/login" />} />
                     <Route path="/portal/messages/:threadId" element={session ? <ClientPortalThread /> : <Navigate to="/portal/login" />} />
                     <Route path="/" element={<RootRedirect session={session} />} />
-                    <Route path="/clients" element={session ? <Clients /> : <Navigate to="/login" />} />
-                    <Route path="/clients/new" element={session ? <AddClient /> : <Navigate to="/login" />} />
-                    <Route path="/clients/:id" element={session ? <ClientDetail /> : <Navigate to="/login" />} />
-                    <Route path="/clients/:clientId/pets/new" element={session ? <AddPet /> : <Navigate to="/login" />} />
-                    <Route path="/pets/:id" element={session ? <PetDetail /> : <Navigate to="/login" />} />
-                    <Route path="/pricing" element={session ? <Pricing /> : <Navigate to="/login" />} />
-                    <Route path="/calendar" element={session ? <Calendar /> : <Navigate to="/login" />} />
-                    <Route path="/flagged" element={session ? <FlaggedBookings /> : <Navigate to="/login" />} />
-                    <Route path="/voice" element={session ? <VoiceMode /> : <Navigate to="/login" />} />
-                    <Route path="/import" element={session ? <ImportClients /> : <Navigate to="/login" />} />
-                    <Route path="/contact" element={session ? <Contact /> : <Navigate to="/login" />} />
-                    <Route path="/boarding/setup" element={session ? <BoardingSetup /> : <Navigate to="/login" />} />
-                    <Route path="/boarding/kennels" element={session ? <Kennels /> : <Navigate to="/login" />} />
-                    <Route path="/boarding/calendar" element={session ? <BoardingCalendar /> : <Navigate to="/login" />} />
-                    <Route path="/staff" element={session ? <StaffList /> : <Navigate to="/login" />} />
+                    <Route path="/clients" element={gate(session, <Clients />)} />
+                    <Route path="/clients/new" element={gate(session, <AddClient />)} />
+                    <Route path="/clients/:id" element={gate(session, <ClientDetail />)} />
+                    <Route path="/clients/:clientId/pets/new" element={gate(session, <AddPet />)} />
+                    <Route path="/pets/:id" element={gate(session, <PetDetail />)} />
+                    <Route path="/pricing" element={gate(session, <Pricing />)} />
+                    <Route path="/calendar" element={gate(session, <Calendar />)} />
+                    <Route path="/flagged" element={gate(session, <FlaggedBookings />)} />
+                    <Route path="/voice" element={gate(session, <VoiceMode />)} />
+                    <Route path="/import" element={gate(session, <ImportClients />)} />
+                    <Route path="/contact" element={gate(session, <Contact />)} />
+                    <Route path="/boarding/setup" element={gate(session, <BoardingSetup />)} />
+                    <Route path="/boarding/kennels" element={gate(session, <Kennels />)} />
+                    <Route path="/boarding/calendar" element={gate(session, <BoardingCalendar />)} />
+                    <Route path="/staff" element={gate(session, <StaffList />)} />
                     {/* Lobby Kiosk — leave open on a tablet; staff type PIN to clock in/out */}
                     <Route path="/kiosk" element={session ? <Kiosk /> : <Navigate to="/login" />} />
                     {/* Staff personal portal — email/password login + read-only schedule view */}
                     <Route path="/staff/login" element={<StaffLogin />} />
                     <Route path="/staff/me" element={session ? <StaffMe /> : <Navigate to="/staff/login" />} />
-                    <Route path="/staff/:id" element={session ? <StaffDetail /> : <Navigate to="/login" />} />
-                    <Route path="/waitlist" element={session ? <Waitlist /> : <Navigate to="/login" />} />
-                    <Route path="/staff/schedule" element={session ? <StaffSchedule /> : <Navigate to="/login" />} />
-                    <Route path="/staff/timeclock" element={session ? <TimeClock /> : <Navigate to="/login" />} />
-                    <Route path="/payroll" element={session ? <PayrollDashboard /> : <Navigate to="/login" />} />
-                    <Route path="/payroll/run" element={session ? <RunPayroll /> : <Navigate to="/login" />} />
-                    <Route path="/payroll/paycheck/:id" element={session ? <PaycheckDetail /> : <Navigate to="/login" />} />
-                    <Route path="/payroll/pay-periods" element={session ? <PayPeriods /> : <Navigate to="/login" />} />
-                    <Route path="/payroll/tax-settings" element={session ? <TaxSettings /> : <Navigate to="/login" />} />
-                    <Route path="/payroll/reports" element={session ? <PayrollReports /> : <Navigate to="/login" />} />
-                    <Route path="/payroll/year-end" element={session ? <YearEndForms /> : <Navigate to="/login" />} />
-                    <Route path="/ai/chat-settings" element={session ? <ChatSettings /> : <Navigate to="/login" />} />
-                    <Route path="/ai/booking-rules" element={session ? <BookingRules /> : <Navigate to="/login" />} />
-                    <Route path="/settings/shop" element={session ? <ShopSettings /> : <Navigate to="/login" />} />
+                    <Route path="/staff/:id" element={gate(session, <StaffDetail />)} />
+                    <Route path="/waitlist" element={gate(session, <Waitlist />)} />
+                    <Route path="/staff/schedule" element={gate(session, <StaffSchedule />)} />
+                    <Route path="/staff/timeclock" element={gate(session, <TimeClock />)} />
+                    <Route path="/payroll" element={gate(session, <PayrollDashboard />)} />
+                    <Route path="/payroll/run" element={gate(session, <RunPayroll />)} />
+                    <Route path="/payroll/paycheck/:id" element={gate(session, <PaycheckDetail />)} />
+                    <Route path="/payroll/pay-periods" element={gate(session, <PayPeriods />)} />
+                    <Route path="/payroll/tax-settings" element={gate(session, <TaxSettings />)} />
+                    <Route path="/payroll/reports" element={gate(session, <PayrollReports />)} />
+                    <Route path="/payroll/year-end" element={gate(session, <YearEndForms />)} />
+                    <Route path="/ai/chat-settings" element={gate(session, <ChatSettings />)} />
+                    <Route path="/ai/booking-rules" element={gate(session, <BookingRules />)} />
+                    <Route path="/settings/shop" element={gate(session, <ShopSettings />)} />
                     <Route path="/account" element={session ? <Account /> : <Navigate to="/login" />} />
-                    <Route path="/roadmap" element={session ? <Roadmap /> : <Navigate to="/login" />} />
-                    <Route path="/balances" element={session ? <Balances /> : <Navigate to="/login" />} />
-                    <Route path="/messages" element={session ? <Messages /> : <Navigate to="/login" />} />
+                    <Route path="/roadmap" element={gate(session, <Roadmap />)} />
+                    <Route path="/balances" element={gate(session, <Balances />)} />
+                    <Route path="/messages" element={gate(session, <Messages />)} />
                 </Routes>
             </AppLayout>
         </BrowserRouter>

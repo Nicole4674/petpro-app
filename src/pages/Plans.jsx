@@ -10,7 +10,7 @@
 // so the tier is preselected when they sign up.
 // ====================================================================
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 // ─── Tier data ────────────────────────────────────────────────────
@@ -211,6 +211,11 @@ var FAQS = [
 // ─── Main Component ─────────────────────────────────────────────
 export default function Plans() {
   var navigate = useNavigate()
+  var [searchParams] = useSearchParams()
+  // ?need_subscription=1 → user landed here from the SubscriptionGate
+  // (logged in but no paid tier yet). Show a welcome banner instead of
+  // the generic "pick your plan" header.
+  var needSubscription = searchParams.get('need_subscription') === '1'
   var [openFaq, setOpenFaq] = useState(null)
 
   async function handleStartTrial(tierSlug) {
@@ -239,6 +244,21 @@ export default function Plans() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#faf5ff', fontFamily: 'system-ui, -apple-system, sans-serif', color: '#111827' }}>
+      {/* ─── Welcome banner for logged-in users without a subscription yet ─── */}
+      {needSubscription && (
+        <div style={{
+          background: '#fef3c7',
+          borderBottom: '1px solid #fde68a',
+          color: '#92400e',
+          padding: '14px 24px',
+          textAlign: 'center',
+          fontSize: '14px',
+          fontWeight: '600',
+        }}>
+          👋 Welcome to PetPro! Pick a plan below to start your free trial. Your account is ready — you just need to choose a tier.
+        </div>
+      )}
+
       {/* ─── Launch Banner ─── */}
       <div style={{
         background: 'linear-gradient(90deg, #7c3aed 0%, #ec4899 100%)',
