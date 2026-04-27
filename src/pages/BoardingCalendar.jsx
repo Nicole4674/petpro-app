@@ -48,6 +48,18 @@ export default function BoardingCalendar() {
   const [pendingAddonServiceId, setPendingAddonServiceId] = useState('')
   const [savingAddon, setSavingAddon] = useState(false)
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false) // click-to-change status pill
+
+  // ─── Edit Booking modal ────────────────────────────────────────────────
+  // Lets you fix dates/times/kennel/price/notes on an existing reservation.
+  // Mirrors grooming's reschedule flow but covers more fields since boarding
+  // mistakes (wrong day, wrong kennel) are common.
+  const [editingReservation, setEditingReservation] = useState(null) // null when closed
+  const [editForm, setEditForm] = useState({
+    start_date: '', start_time: '', end_date: '', end_time: '',
+    kennel_id: '', total_price: '', notes: ''
+  })
+  const [savingEdit, setSavingEdit] = useState(false)
+
   const [shopSettings, setShopSettings] = useState(null) // Task #42 — for printed forms
   const [showIntakePicker, setShowIntakePicker] = useState(false) // Task #42
   const [hasLastStay, setHasLastStay] = useState(false) // Task #42
@@ -526,6 +538,85 @@ export default function BoardingCalendar() {
       console.error('Error loading kennel card:', err)
     } finally {
       setKennelCardLoading(false)
+    }
+  }
+
+  // ─── Open the Edit Booking modal pre-filled with current values ──────
+  function openEditReservation(reservation) {
+    if (!reservation) return
+    setEditForm({
+      start_date: reservation.start_date || '',
+      start_time: reservation.start_time || '08:00',
+      end_date: reservation.end_date || '',
+      end_time: reservation.end_time || '12:00',
+      kennel_id: reservation.kennel_id || '',
+      total_price: reservation.total_price != null ? String(reservation.total_price) : '',
+      notes: reservation.notes || ''
+    })
+    setEditingReservation(reservation)
+  }
+
+  // ─── Save edits ──────────────────────────────────────────────────────
+  // Validates dates, checks for kennel conflicts (excluding the current res),
+  // updates the row, then refreshes the kennel card + calendar.
+  async function handleSaveEdit() {
+    if (!editingReservation) return
+    if (!editForm.start_date || !editForm.end_date) {
+      alert('Please set both check-in and check-out dates.')
+      return
+    }
+    if (editForm.end_date < editForm.start_date) {
+      alert('Check-out date must be on or after check-in date.')
+      return
+    }
+    if (!editForm.kennel_id) {
+      alert('Please pick a kennel.')
+      return
+    }
+    setSavingEdit(true)
+    try {
+      // Conflict check — any other reservation overlapping the new dates
+      // in the chosen kennel? (Exclude this reservation's own id.)
+      const { data: conflicts } = await supabase
+        .from('boarding_reservations')
+        .select('id')
+        .eq('kennel_id', editForm.kennel_id)
+        .neq('status', 'cancelled')
+        .neq('id', editingReservation.id)
+        .lte('start_date', editForm.end_date)
+        .gte('end_date', editForm.start_date)
+
+      if (conflicts && conflicts.length > 0) {
+        alert('That kennel is already booked for some of those dates. Pick different dates or a different kennel.')
+        setSavingEdit(false)
+        return
+      }
+
+      const { error } = await supabase
+        .from('boarding_reservations')
+        .update({
+          start_date: editForm.start_date,
+          start_time: editForm.start_time || null,
+          end_date: editForm.end_date,
+          end_time: editForm.end_time || null,
+          kennel_id: editForm.kennel_id,
+          total_price: parseFloat(editForm.total_price) || 0,
+          notes: editForm.notes || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', editingReservation.id)
+
+      if (error) throw error
+
+      setEditingReservation(null)
+      // Reload the kennel card with the freshest data + the calendar grid
+      await openKennelCard({ id: editingReservation.id })
+      await loadData()
+    } catch (err) {
+      console.error('Error saving edit:', err)
+      alert('Error: ' + err.message)
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -1595,6 +1686,21 @@ export default function BoardingCalendar() {
                     }}
                   >✔️ Just Confirm (no check-in yet)</button>
                 )}
+                {/* Edit Booking — fix dates, times, kennel, total, notes */}
+                <button
+                  onClick={() => openEditReservation(selectedReservation)}
+                  style={{
+                    padding: '14px 18px',
+                    background: '#fff',
+                    color: '#1f2937',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '10px',
+                    fontWeight: 700,
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                  }}
+                  title="Move dates, change kennel, fix total"
+                >✏️ Edit Booking</button>
               </div>
             )}
 
@@ -2985,6 +3091,120 @@ export default function BoardingCalendar() {
           </div>
         )
       })()}
+
+      {/* ─── Edit Booking Modal ─────────────────────────────────────── */}
+      {editingReservation && (
+        <div className="cal-modal-overlay" onClick={() => !savingEdit && setEditingReservation(null)} style={{ zIndex: 60 }}>
+          <div className="cal-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '560px', width: '95%' }}>
+            <div className="cal-modal-header">
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>✏️ Edit Booking</h2>
+              <button className="cal-modal-close" onClick={() => setEditingReservation(null)} disabled={savingEdit}>✕</button>
+            </div>
+            <div style={{ padding: '20px' }}>
+              {/* Kennel picker */}
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Kennel
+                </label>
+                <select
+                  value={editForm.kennel_id}
+                  onChange={e => setEditForm({ ...editForm, kennel_id: e.target.value })}
+                  style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}
+                >
+                  <option value="">— Pick a kennel —</option>
+                  {kennels.map(k => (
+                    <option key={k.id} value={k.id}>{k.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Dates */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Check-In Date
+                  </label>
+                  <input type="date" value={editForm.start_date}
+                    onChange={e => setEditForm({ ...editForm, start_date: e.target.value })}
+                    style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}/>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Check-In Time
+                  </label>
+                  <input type="time" value={editForm.start_time}
+                    onChange={e => setEditForm({ ...editForm, start_time: e.target.value })}
+                    style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}/>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Check-Out Date
+                  </label>
+                  <input type="date" value={editForm.end_date}
+                    onChange={e => setEditForm({ ...editForm, end_date: e.target.value })}
+                    style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}/>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Check-Out Time
+                  </label>
+                  <input type="time" value={editForm.end_time}
+                    onChange={e => setEditForm({ ...editForm, end_time: e.target.value })}
+                    style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}/>
+                </div>
+              </div>
+
+              {/* Live nights preview */}
+              {editForm.start_date && editForm.end_date && editForm.end_date >= editForm.start_date && (
+                <div style={{ marginBottom: '12px', fontSize: '13px', color: '#6b7280' }}>
+                  🌙 {getDaysBetween(editForm.start_date, editForm.end_date)} night{getDaysBetween(editForm.start_date, editForm.end_date) === 1 ? '' : 's'}
+                </div>
+              )}
+
+              {/* Total price */}
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Total Price ($)
+                </label>
+                <input type="number" step="0.01" min="0" value={editForm.total_price}
+                  onChange={e => setEditForm({ ...editForm, total_price: e.target.value })}
+                  placeholder="0.00"
+                  style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}/>
+              </div>
+
+              {/* Notes */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Notes (optional)
+                </label>
+                <textarea value={editForm.notes}
+                  onChange={e => setEditForm({ ...editForm, notes: e.target.value })}
+                  placeholder="Anything special about this stay?"
+                  style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box', minHeight: '70px', resize: 'vertical', fontFamily: 'inherit' }}/>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => setEditingReservation(null)} disabled={savingEdit}
+                  style={{ flex: 1, padding: '12px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: '10px', fontWeight: 600, cursor: savingEdit ? 'not-allowed' : 'pointer' }}>
+                  Cancel
+                </button>
+                <button onClick={handleSaveEdit} disabled={savingEdit}
+                  style={{
+                    flex: 2, padding: '12px',
+                    background: savingEdit ? '#9ca3af' : '#7c3aed',
+                    color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 700, fontSize: '14px',
+                    cursor: savingEdit ? 'not-allowed' : 'pointer',
+                  }}>
+                  {savingEdit ? 'Saving...' : '✓ Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
