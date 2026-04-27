@@ -69,7 +69,9 @@ export default function BoardingCalendar() {
     vet_emergency_contact: '',
     // Extras
     grooming_at_end: false,
-    items_brought: ''
+    items_brought: '',
+    // Total price for the stay — drives the kennel card balance + payment flow
+    total_price: ''
   })
   const [savingRes, setSavingRes] = useState(false)
   const [clientSearch, setClientSearch] = useState('')
@@ -386,6 +388,9 @@ export default function BoardingCalendar() {
           vet_emergency_contact: newRes.vet_emergency_contact || null,
           grooming_at_end: newRes.grooming_at_end,
           items_brought: newRes.items_brought || null,
+          // Total price — manually entered for now. Stored as the source of truth
+          // for the kennel card "balance" math.
+          total_price: parseFloat(newRes.total_price) || 0,
           created_by: user.id
         })
         .select()
@@ -2469,6 +2474,28 @@ export default function BoardingCalendar() {
                     value={newRes.end_time}
                     onChange={e => setNewRes(prev => ({ ...prev, end_time: e.target.value }))} />
                 </div>
+              </div>
+
+              {/* Total Price — drives the kennel card balance + payment flow.
+                  Suggested calc: nights × your nightly rate. Editable for deposits
+                  / friend discounts / bundle deals. */}
+              <div className="boarding-field" style={{ marginTop: '12px' }}>
+                <label className="boarding-label">
+                  Total Price *
+                  {newRes.start_date && newRes.end_date && newRes.end_date >= newRes.start_date && (
+                    <span style={{ color: '#6b7280', fontWeight: 400, marginLeft: 8, fontSize: 12 }}>
+                      ({getDaysBetween(newRes.start_date, newRes.end_date)} night{getDaysBetween(newRes.start_date, newRes.end_date) === 1 ? '' : 's'})
+                    </span>
+                  )}
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="boarding-input"
+                  value={newRes.total_price}
+                  onChange={e => setNewRes(prev => ({ ...prev, total_price: e.target.value }))}
+                  placeholder="e.g. 200.00"
+                />
               </div>
 
               {/* Status */}
