@@ -565,9 +565,8 @@ export default function BoardingCalendar() {
   }
 
   // ─── Recalculate total when dates change ─────────────────────────────
-  // Uses the per_night_rate stashed from the original booking. If the
-  // groomer manually edits the total, that override sticks until they
-  // change dates again.
+  // Uses the per_night_rate. If the groomer manually edits the total,
+  // that override sticks until they change dates or the rate.
   function handleEditDateChange(field, value) {
     setEditForm(prev => {
       const next = { ...prev, [field]: value }
@@ -576,6 +575,21 @@ export default function BoardingCalendar() {
         next.total_price = (prev.per_night_rate * nights).toFixed(2)
       }
       return next
+    })
+  }
+
+  // ─── User edits the per-night rate directly ──────────────────────────
+  // Auto-bumps the total to (rate × current nights). This is what
+  // groomers actually want — they think in per-night rates, not totals.
+  function handlePerNightRateChange(value) {
+    const rate = parseFloat(value) || 0
+    setEditForm(prev => {
+      const nights = getDaysBetween(prev.start_date, prev.end_date)
+      return {
+        ...prev,
+        per_night_rate: rate,
+        total_price: nights >= 0 && rate > 0 ? (rate * nights).toFixed(2) : prev.total_price
+      }
     })
   }
 
@@ -3194,22 +3208,38 @@ export default function BoardingCalendar() {
                 </div>
               )}
 
-              {/* Total price — auto-recalculates when dates change, but
-                  groomer can still type a custom amount (weekend rate, etc.) */}
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Total Price ($)
-                </label>
-                <input type="number" step="0.01" min="0" value={editForm.total_price}
-                  onChange={e => setEditForm({ ...editForm, total_price: e.target.value })}
-                  placeholder="0.00"
-                  style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}/>
-                {editForm.per_night_rate > 0 && editForm.start_date && editForm.end_date && editForm.end_date >= editForm.start_date && (
-                  <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '6px' }}>
-                    💡 Auto: ${editForm.per_night_rate.toFixed(2)}/night × {getDaysBetween(editForm.start_date, editForm.end_date)} night{getDaysBetween(editForm.start_date, editForm.end_date) === 1 ? '' : 's'} = ${(editForm.per_night_rate * getDaysBetween(editForm.start_date, editForm.end_date)).toFixed(2)} (override above if needed)
-                  </div>
-                )}
+              {/* Per Night Rate — when this changes, the total auto-updates
+                  to (rate × nights). Lets groomers think in per-night terms. */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '8px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Per Night Rate ($)
+                  </label>
+                  <input type="number" step="0.01" min="0" value={editForm.per_night_rate || ''}
+                    onChange={e => handlePerNightRateChange(e.target.value)}
+                    placeholder="0.00"
+                    style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}/>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Total Price ($)
+                  </label>
+                  <input type="number" step="0.01" min="0" value={editForm.total_price}
+                    onChange={e => setEditForm({ ...editForm, total_price: e.target.value })}
+                    placeholder="0.00"
+                    style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}/>
+                </div>
               </div>
+              {editForm.per_night_rate > 0 && editForm.start_date && editForm.end_date && editForm.end_date >= editForm.start_date && (
+                <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '16px' }}>
+                  💡 ${editForm.per_night_rate.toFixed(2)}/night × {getDaysBetween(editForm.start_date, editForm.end_date)} night{getDaysBetween(editForm.start_date, editForm.end_date) === 1 ? '' : 's'} = ${(editForm.per_night_rate * getDaysBetween(editForm.start_date, editForm.end_date)).toFixed(2)}
+                </div>
+              )}
+              {(!editForm.per_night_rate || editForm.per_night_rate <= 0) && (
+                <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '16px' }}>
+                  💡 Tip: type a rate per night and the total fills in automatically
+                </div>
+              )}
 
               {/* Notes */}
               <div style={{ marginBottom: '20px' }}>
