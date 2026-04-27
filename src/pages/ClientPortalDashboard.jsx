@@ -206,9 +206,10 @@ export default function ClientPortalDashboard() {
       setUpcomingBoarding(openBoarding)
 
       // 7. Past grooming — appointments that have been checked out
+      // Pulls appointment_pets so multi-pet bookings show all pets
       var { data: pastApptsData } = await supabase
         .from('appointments')
-        .select('*, pets(id, name, breed), services(id, service_name, price, time_block_minutes)')
+        .select('*, pets(id, name, breed), services(id, service_name, price, time_block_minutes), appointment_pets(id, pets:pet_id(id, name, breed), services:service_id(id, service_name))')
         .eq('client_id', clientData.id)
         .not('checked_out_at', 'is', null)
         .order('appointment_date', { ascending: false })
@@ -1566,13 +1567,27 @@ export default function ClientPortalDashboard() {
                         </div>
                         <div className="cp-history-details">
                           <div className="cp-history-top-row">
-                            <span className="cp-history-service">{(appt.services && appt.services.service_name) || 'Grooming'}</span>
+                            <span className="cp-history-service">
+                              {(appt.appointment_pets && appt.appointment_pets.length > 0)
+                                ? appt.appointment_pets
+                                    .map(function (ap) { return ap.services && ap.services.service_name })
+                                    .filter(Boolean)
+                                    .join(' · ') || 'Grooming'
+                                : ((appt.services && appt.services.service_name) || 'Grooming')}
+                            </span>
                             {price && (
                               <span style={{ fontWeight: '700', color: '#16a34a' }}>${parseFloat(price).toFixed(2)}</span>
                             )}
                           </div>
                           <div className="cp-history-meta">
-                            <span>🐾 {(appt.pets && appt.pets.name) || 'Pet'}</span>
+                            <span>🐾 {
+                              (appt.appointment_pets && appt.appointment_pets.length > 0)
+                                ? appt.appointment_pets
+                                    .map(function (ap) { return ap.pets && ap.pets.name })
+                                    .filter(Boolean)
+                                    .join(', ')
+                                : ((appt.pets && appt.pets.name) || 'Pet')
+                            }</span>
                             {appt.start_time && <span>🕐 {formatTime(appt.start_time)}</span>}
                           </div>
                           {appt.service_notes && (
