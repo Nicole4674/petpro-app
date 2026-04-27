@@ -37,6 +37,16 @@ export default function BoardingCalendar() {
   const [payTip, setPayTip] = useState('')
   const [payNotes, setPayNotes] = useState('')
   const [recordingPayment, setRecordingPayment] = useState(false)
+
+  // ─── Departure service add-ons ─────────────────────────────────────────
+  // Tracks extra services added during a stay (e.g. bath/nail trim before pickup).
+  // Each addon bumps the reservation's total_price and is logged separately
+  // so it can be removed if added by mistake.
+  const [resAddons, setResAddons] = useState([])
+  const [services, setServices] = useState([])
+  const [showAddAddon, setShowAddAddon] = useState(false)
+  const [pendingAddonServiceId, setPendingAddonServiceId] = useState('')
+  const [savingAddon, setSavingAddon] = useState(false)
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false) // click-to-change status pill
   const [shopSettings, setShopSettings] = useState(null) // Task #42 — for printed forms
   const [showIntakePicker, setShowIntakePicker] = useState(false) // Task #42
@@ -149,6 +159,22 @@ export default function BoardingCalendar() {
   useEffect(() => {
     if (!selectedReservation) setStatusDropdownOpen(false)
   }, [selectedReservation?.id])
+
+  // Load services list once on mount — used by the Add Departure Service picker
+  useEffect(function () {
+    let cancelled = false
+    ;(async function () {
+      var { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      var { data } = await supabase
+        .from('services')
+        .select('id, service_name, price, category')
+        .eq('groomer_id', user.id)
+        .order('service_name')
+      if (!cancelled) setServices(data || [])
+    })()
+    return function () { cancelled = true }
+  }, [])
 
   async function loadData() {
     setLoading(true)
@@ -489,6 +515,14 @@ export default function BoardingCalendar() {
         .eq('boarding_reservation_id', reservation.id)
         .order('created_at', { ascending: false })
       setResPayments(paymentsData || [])
+
+      // Load departure add-on services (extras added during stay — bath at pickup, nails, etc.)
+      const { data: addonsData } = await supabase
+        .from('boarding_addons')
+        .select('id, service_id, service_name, quoted_price, created_at')
+        .eq('boarding_reservation_id', reservation.id)
+        .order('created_at', { ascending: false })
+      setResAddons(addonsData || [])
     } catch (err) {
       console.error('Error loading kennel card:', err)
     } finally {
@@ -557,6 +591,78 @@ export default function BoardingCalendar() {
       alert('Error recording payment: ' + (err.message || err))
     } finally {
       setRecordingPayment(false)
+    }
+  }
+
+  // ─── Add a departure service to the boarding stay ──────────────────────
+  // Inserts a row in boarding_addons + bumps the reservation's total_price.
+  async function handleAddBoardingAddon() {
+    if (!selectedReservation || !pendingAddonServiceId) return
+    const service = services.find(s => s.id === pendingAddonServiceId)
+    if (!service) return
+
+    setSavingAddon(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not signed in')
+
+      const price = parseFloat(service.price || 0)
+
+      // 1. Insert the addon row
+      const { error: insErr } = await supabase
+        .from('boarding_addons')
+        .insert({
+          boarding_reservation_id: selectedReservation.id,
+          service_id: service.id,
+          service_name: service.service_name,
+          quoted_price: price,
+          groomer_id: user.id,
+        })
+      if (insErr) throw insErr
+
+      // 2. Bump the reservation's total_price by the addon price
+      const newTotal = parseFloat(selectedReservation.total_price || 0) + price
+      const { error: updErr } = await supabase
+        .from('boarding_reservations')
+        .update({ total_price: newTotal, updated_at: new Date().toISOString() })
+        .eq('id', selectedReservation.id)
+      if (updErr) throw updErr
+
+      // 3. Refresh the kennel card so addon list + total + balance all update
+      await openKennelCard({ ...selectedReservation, total_price: newTotal })
+      setShowAddAddon(false)
+      setPendingAddonServiceId('')
+    } catch (err) {
+      alert('Error adding service: ' + (err.message || err))
+    } finally {
+      setSavingAddon(false)
+    }
+  }
+
+  // ─── Remove an addon (mistake / wrong service) ────────────────────────
+  // Deletes the boarding_addons row + decrements total_price.
+  async function handleRemoveBoardingAddon(addon) {
+    if (!selectedReservation || !addon) return
+    if (!window.confirm(`Remove "${addon.service_name}" from this stay?`)) return
+
+    try {
+      const { error: delErr } = await supabase
+        .from('boarding_addons')
+        .delete()
+        .eq('id', addon.id)
+      if (delErr) throw delErr
+
+      // Subtract from total_price (don't go negative)
+      const price = parseFloat(addon.quoted_price || 0)
+      const newTotal = Math.max(0, parseFloat(selectedReservation.total_price || 0) - price)
+      await supabase
+        .from('boarding_reservations')
+        .update({ total_price: newTotal, updated_at: new Date().toISOString() })
+        .eq('id', selectedReservation.id)
+
+      await openKennelCard({ ...selectedReservation, total_price: newTotal })
+    } catch (err) {
+      alert('Error removing service: ' + (err.message || err))
     }
   }
 
@@ -1575,6 +1681,115 @@ export default function BoardingCalendar() {
                   </div>
                 )
               })()}
+
+              {/* ═══════════════════════════════════════════════════
+                  DEPARTURE SERVICES — extras added during/before pickup
+                  Each addon increases the total_price of the stay.
+                  ═══════════════════════════════════════════════════ */}
+              <div className="kc-section" style={{ marginTop: '12px' }}>
+                <div className="kc-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>✂️ Departure Services {resAddons.length > 0 ? '(' + resAddons.length + ')' : ''}</span>
+                  {!showAddAddon && (
+                    <button
+                      onClick={() => { setShowAddAddon(true); setPendingAddonServiceId('') }}
+                      style={{
+                        background: 'transparent',
+                        border: '1px dashed #c4b5fd',
+                        color: '#6d28d9',
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}>
+                      + Add Service
+                    </button>
+                  )}
+                </div>
+
+                {/* Inline picker — shows when Add Service is clicked */}
+                {showAddAddon && (
+                  <div style={{
+                    padding: '10px',
+                    background: '#faf5ff',
+                    border: '1px dashed #c4b5fd',
+                    borderRadius: '8px',
+                    marginBottom: resAddons.length > 0 ? '8px' : 0,
+                  }}>
+                    <select
+                      value={pendingAddonServiceId}
+                      onChange={e => setPendingAddonServiceId(e.target.value)}
+                      style={{ width: '100%', padding: '8px 10px', fontSize: '14px', borderRadius: '6px', border: '1px solid #d1d5db', marginBottom: '8px', background: '#fff' }}
+                    >
+                      <option value="">— Pick a service to add —</option>
+                      {services.map(s => (
+                        <option key={s.id} value={s.id}>
+                          {s.service_name} — ${parseFloat(s.price || 0).toFixed(2)}
+                        </option>
+                      ))}
+                    </select>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        onClick={handleAddBoardingAddon}
+                        disabled={!pendingAddonServiceId || savingAddon}
+                        style={{
+                          flex: 1, padding: '8px 12px',
+                          background: pendingAddonServiceId && !savingAddon ? '#10b981' : '#d1d5db',
+                          color: '#fff', border: 'none', borderRadius: '6px',
+                          fontWeight: 600, fontSize: '13px',
+                          cursor: pendingAddonServiceId && !savingAddon ? 'pointer' : 'not-allowed',
+                        }}>
+                        {savingAddon ? 'Adding...' : '✓ Add to stay'}
+                      </button>
+                      <button
+                        onClick={() => { setShowAddAddon(false); setPendingAddonServiceId('') }}
+                        disabled={savingAddon}
+                        style={{
+                          flex: 1, padding: '8px 12px', background: '#fff',
+                          color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px',
+                          cursor: 'pointer', fontSize: '13px',
+                        }}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* List of added services */}
+                {resAddons.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {resAddons.map(addon => (
+                      <div key={addon.id} style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '10px 12px',
+                        background: '#f0fdf4',
+                        border: '1px solid #bbf7d0',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                      }}>
+                        <div>
+                          <span style={{ fontWeight: 700, color: '#111827' }}>{addon.service_name}</span>
+                          <span style={{ color: '#16a34a', fontWeight: 700, marginLeft: 8 }}>
+                            +${parseFloat(addon.quoted_price).toFixed(2)}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveBoardingAddon(addon)}
+                          title="Remove this service"
+                          style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '16px', padding: '2px 6px', lineHeight: 1 }}>
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (!showAddAddon && (
+                  <div style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic', padding: '6px 0' }}>
+                    Nothing added yet. Use "+ Add Service" to add a bath, nail trim, or other extra at pickup.
+                  </div>
+                ))}
+              </div>
 
               {/* Payment history — shows all payments recorded for this stay */}
               {resPayments && resPayments.length > 0 && (
