@@ -1935,6 +1935,19 @@ export default function Calendar() {
                         <span className="groomer-legend-swatch" style={{ backgroundColor: '#9ca3af' }}></span>
                         Unassigned
                     </span>
+                    {/* Note for new users — the grid expands as more appointments are added,
+                        so it can look skinny when the day is empty. */}
+                    <span style={{
+                        marginLeft: 'auto',
+                        fontSize: '11px',
+                        color: '#6b7280',
+                        fontStyle: 'italic',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                    }}>
+                        📌 Schedule grid auto-expands as you add appointments
+                    </span>
                 </div>
             )}
 
