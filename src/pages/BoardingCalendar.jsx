@@ -459,8 +459,7 @@ export default function BoardingCalendar() {
             pets:pet_id ( id, name, breed, weight, age, sex, allergies, medications, vaccination_status, vaccination_expiry, is_spayed_neutered, behavior_tags )
           ),
           clients:client_id ( id, first_name, last_name, phone, email, address, preferred_contact, notes ),
-          kennels:kennel_id ( name ),
-          boarding_addons ( id, addon_type, description, price, scheduled_for, completed )
+          kennels:kennel_id ( name )
         `)
         .eq('id', reservation.id)
         .single()
