@@ -252,12 +252,15 @@ export default function ClientDetail() {
   // Past-dated confirmed appointments that never got marked done still show here — with an overdue badge
   const fetchUpcomingAppointments = async () => {
     setLoadingTab(true)
+    // Includes appointment_pets so multi-pet recurring bookings show ALL pets
+    // on the upcoming list, not just the legacy primary pet.
     const { data, error } = await supabase
       .from('appointments')
       .select(`
         *,
         pets(id, name, breed),
-        services(id, service_name, price, time_block_minutes)
+        services(id, service_name, price, time_block_minutes),
+        appointment_pets(id, pets:pet_id(id, name, breed), services:service_id(id, service_name))
       `)
       .eq('client_id', id)
       .is('checked_out_at', null)
@@ -1265,7 +1268,15 @@ export default function ClientDetail() {
                       </div>
                       <div className="cp-history-details">
                         <div className="cp-history-top-row">
-                          <span className="cp-history-service">{appt.services?.service_name || 'Service'}</span>
+                          <span className="cp-history-service">
+                            {/* Multi-pet: list each pet's service joined; otherwise legacy primary service */}
+                            {(appt.appointment_pets && appt.appointment_pets.length > 0)
+                              ? appt.appointment_pets
+                                  .map(ap => ap.services && ap.services.service_name)
+                                  .filter(Boolean)
+                                  .join(' · ') || 'Service'
+                              : (appt.services?.service_name || 'Service')}
+                          </span>
                           {isOverdue && (
                             <span className="cp-upcoming-overdue-badge">⚠️ Overdue — needs action</span>
                           )}
@@ -1274,7 +1285,15 @@ export default function ClientDetail() {
                           </span>
                         </div>
                         <div className="cp-history-meta">
-                          <span>🐾 {appt.pets?.name || 'Unknown Pet'}</span>
+                          <span>🐾 {
+                            /* Show every pet on the appointment (multi-pet bookings) */
+                            (appt.appointment_pets && appt.appointment_pets.length > 0)
+                              ? appt.appointment_pets
+                                  .map(ap => ap.pets && ap.pets.name)
+                                  .filter(Boolean)
+                                  .join(', ')
+                              : (appt.pets?.name || 'Unknown Pet')
+                          }</span>
                           <span>🕐 {formatTime(appt.start_time)} — {formatTime(appt.end_time)}</span>
                           {appt.services?.time_block_minutes && <span>⏱️ {appt.services.time_block_minutes} min</span>}
                         </div>
