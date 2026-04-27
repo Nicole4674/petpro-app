@@ -60,6 +60,19 @@ export default function Signup() {
         console.error('Profile creation error:', profileError)
       }
 
+      // Fire Google Ads conversion event so Google can attribute this signup
+      // to whichever ad click brought them here. The actual conversion label
+      // gets configured in Google Ads → Tools → Conversions later — for now
+      // this fires a generic 'sign_up' event the algorithm can learn from.
+      if (typeof window !== 'undefined' && typeof window.gtag === 'function') {
+        try {
+          window.gtag('event', 'sign_up', {
+            send_to: 'AW-18122010108',
+            method: 'email',
+          })
+        } catch (e) { /* never block signup over a tracking call */ }
+      }
+
       // If they came from a pricing tile (?tier=pro etc.), forward them
       // straight to Stripe checkout with their UUID attached. The webhook
       // will match the payment back to this groomer row via client_reference_id.
