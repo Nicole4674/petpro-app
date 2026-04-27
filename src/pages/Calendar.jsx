@@ -372,7 +372,7 @@ export default function Calendar() {
                 .gte('appointment_date', startDate)
                 .lte('appointment_date', endDate)
                 .order('start_time'),
-            supabase.from('clients').select('id, first_name, last_name').eq('groomer_id', user.id).order('last_name'),
+            supabase.from('clients').select('id, first_name, last_name, phone').eq('groomer_id', user.id).order('last_name'),
             supabase.from('pets').select('id, name, breed, client_id').eq('groomer_id', user.id).order('name'),
             supabase.from('services').select('id, service_name, price, time_block_minutes').eq('groomer_id', user.id).eq('is_active', true),
             supabase.from('staff_members').select('id, first_name, last_name, color_code').eq('groomer_id', user.id).eq('status', 'active').order('first_name'),
@@ -5571,11 +5571,13 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                             }
 
                             var q = clientSearch.trim().toLowerCase()
-                            // Build unified matches: search BOTH client names AND pet names.
+                            // Build unified matches: search BOTH client names AND pet names AND phone numbers.
                             // Each entry: { client_id, client, pet (optional if matched via pet) }
                             var matches = []
                             if (q) {
                                 var seen = {}
+                                // Phone search is dash-tolerant — strip non-digits from both sides.
+                                var qDigits = q.replace(/[^0-9]/g, '')
                                 // Pass 1: client name matches
                                 clients.forEach(function (c) {
                                     var full = ((c.first_name || '') + ' ' + (c.last_name || '')).toLowerCase()
@@ -5584,7 +5586,18 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                                         seen[c.id] = true
                                     }
                                 })
-                                // Pass 2: pet name matches (include client via pet.client_id)
+                                // Pass 2: phone matches (only if user typed at least 3 digits)
+                                if (qDigits.length >= 3) {
+                                    clients.forEach(function (c) {
+                                        if (seen[c.id]) return // already matched by name
+                                        var phoneDigits = (c.phone || '').replace(/[^0-9]/g, '')
+                                        if (phoneDigits && phoneDigits.indexOf(qDigits) !== -1) {
+                                            matches.push({ key: 'c-' + c.id, client: c, pet: null })
+                                            seen[c.id] = true
+                                        }
+                                    })
+                                }
+                                // Pass 3: pet name matches (include client via pet.client_id)
                                 pets.forEach(function (p) {
                                     if (!p.name) return
                                     if (p.name.toLowerCase().indexOf(q) === -1) return
@@ -5599,7 +5612,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                                 <>
                                     <input
                                         type="text"
-                                        placeholder="🔍 Search by client OR pet name..."
+                                        placeholder="🔍 Search by client name, pet name, OR phone..."
                                         value={clientSearch}
                                         onChange={function (e) {
                                             setClientSearch(e.target.value)
@@ -5646,12 +5659,12 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                                                             {p ? (
                                                                 <>
                                                                     <strong>🐾 {p.name}</strong>
-                                                                    <span style={{ color: '#6c757d', marginLeft: '6px' }}>({c.first_name} {c.last_name})</span>
+                                                                    <span style={{ color: '#6c757d', marginLeft: '6px' }}>({c.first_name} {c.last_name}){c.phone ? ' · ' + formatPhone(c.phone) : ''}</span>
                                                                 </>
                                                             ) : (
                                                                 <>
                                                                     <strong>{c.first_name} {c.last_name}</strong>
-                                                                    <span style={{ color: '#6c757d', marginLeft: '6px' }}>(client)</span>
+                                                                    <span style={{ color: '#6c757d', marginLeft: '6px' }}>{c.phone ? '· ' + formatPhone(c.phone) : '(client)'}</span>
                                                                 </>
                                                             )}
                                                         </span>
