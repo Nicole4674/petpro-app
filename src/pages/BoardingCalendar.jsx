@@ -1440,6 +1440,14 @@ export default function BoardingCalendar() {
                   <span className="kc-stay-label">🌙 Nights</span>
                   <span className="kc-stay-value">{getDaysBetween(selectedReservation.start_date, selectedReservation.end_date)}</span>
                 </div>
+                {/* Total owed for this boarding stay — pulled from total_price on the reservation.
+                    Highlighted in green so the front desk can spot it instantly when the client checks out. */}
+                <div className="kc-stay-item" style={{ background: '#dcfce7', borderLeft: '3px solid #16a34a' }}>
+                  <span className="kc-stay-label" style={{ color: '#166534' }}>💰 Total Owed</span>
+                  <span className="kc-stay-value" style={{ color: '#16a34a', fontWeight: 800, fontSize: '15px' }}>
+                    ${parseFloat(selectedReservation.total_price || 0).toFixed(2)}
+                  </span>
+                </div>
               </div>
 
               {/* Pet Section */}
