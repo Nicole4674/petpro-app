@@ -35,6 +35,9 @@ export default function ShopSettings() {
   // AI toggles — tier 1 (manual / "Moe Go Mode") vs tier 2 (full AI brain)
   var [groomerAiEnabled, setGroomerAiEnabled] = useState(true)
   var [clientAiBookingEnabled, setClientAiBookingEnabled] = useState(true)
+  // Smart Nudges toggle — proactive AI insights on the chat bubble.
+  // Lives on the groomers row (not shop_settings) so each owner controls their own.
+  var [nudgesEnabled, setNudgesEnabled] = useState(true)
 
   // One-click migration: flip all existing clients from "New" to "Existing"
   var [markingExisting, setMarkingExisting] = useState(false)
@@ -78,6 +81,14 @@ export default function ShopSettings() {
         setGroomerAiEnabled(data.groomer_ai_enabled !== false)
         setClientAiBookingEnabled(data.client_ai_booking_enabled !== false)
       }
+
+      // Smart Nudges — lives on the groomers table (not shop_settings)
+      var { data: groomerRow } = await supabase
+        .from('groomers')
+        .select('nudges_enabled')
+        .eq('id', user.id)
+        .maybeSingle()
+      if (groomerRow) setNudgesEnabled(groomerRow.nudges_enabled !== false)
     } catch (err) {
       console.error('Error loading shop settings:', err)
       setError('Could not load settings: ' + err.message)
@@ -179,6 +190,12 @@ export default function ShopSettings() {
         .upsert(payload, { onConflict: 'groomer_id' })
 
       if (upsertError) throw upsertError
+
+      // Save Smart Nudges toggle to the groomers row (not shop_settings)
+      await supabase
+        .from('groomers')
+        .update({ nudges_enabled: nudgesEnabled })
+        .eq('id', user.id)
 
       setSaved(true)
       setTimeout(function () { setSaved(false) }, 3000)
@@ -378,6 +395,12 @@ export default function ShopSettings() {
           description="The PetPro AI chat bubble in your client portal. Off = no bubble at all — clients can only message you directly or call the shop."
           value={clientAiBookingEnabled}
           onChange={setClientAiBookingEnabled}
+        />
+        <Toggle
+          label="✨ Smart Nudges"
+          description="Proactive AI tips on the chat bubble — light schedule alerts, overdue balance reminders, due-for-rebook campaigns, vax expiring, and more. Uses a small amount of AI credits each day. Off = no nudges; chat works as a normal ask-anything assistant."
+          value={nudgesEnabled}
+          onChange={setNudgesEnabled}
         />
 
         {(!groomerAiEnabled && !clientAiBookingEnabled) && (

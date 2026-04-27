@@ -144,6 +144,17 @@ function App() {
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session)
             setLoading(false)
+            // Smart Nudges — generate proactive AI insights for the groomer.
+            // Lazy-imported so client/staff users don't pull the rules code.
+            // Only fires for groomer accounts (rule queries naturally return
+            // empty for clients since they don't own appointments).
+            if (session && session.user) {
+                import('./lib/insights').then(function (m) {
+                    m.runInsights(session.user.id).catch(function (err) {
+                        console.warn('[insights] runner failed:', err)
+                    })
+                })
+            }
         })
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
