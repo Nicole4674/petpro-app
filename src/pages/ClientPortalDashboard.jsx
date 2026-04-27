@@ -164,9 +164,11 @@ export default function ClientPortalDashboard() {
 
       // 5. Load upcoming grooming appointments (mirrors ClientDetail filter)
       // "Open" = not checked out AND status not in closed-out set
+      // Includes appointment_pets so multi-pet recurring bookings show all pets,
+      // not just the primary one.
       var { data: apptsData } = await supabase
         .from('appointments')
-        .select('*, pets(id, name, breed), services(id, service_name, price, time_block_minutes)')
+        .select('*, pets(id, name, breed), services(id, service_name, price, time_block_minutes), appointment_pets(id, pets:pet_id(id, name, breed), services:service_id(id, service_name))')
         .eq('client_id', clientData.id)
         .is('checked_out_at', null)
         .order('appointment_date', { ascending: true })
@@ -1406,13 +1408,29 @@ export default function ClientPortalDashboard() {
                             </div>
                             <div className="cp-history-details">
                               <div className="cp-history-top-row">
-                                <span className="cp-history-service">{(appt.services && appt.services.service_name) || 'Grooming'}</span>
+                                <span className="cp-history-service">
+                                  {/* Multi-pet: list each pet's service joined; otherwise fall back to the legacy primary service */}
+                                  {(appt.appointment_pets && appt.appointment_pets.length > 0)
+                                    ? appt.appointment_pets
+                                        .map(function (ap) { return ap.services && ap.services.service_name })
+                                        .filter(Boolean)
+                                        .join(' · ') || 'Grooming'
+                                    : ((appt.services && appt.services.service_name) || 'Grooming')}
+                                </span>
                                 {isOverdue && (
                                   <span className="cp-upcoming-overdue-badge">⚠️ Needs your groomer's attention</span>
                                 )}
                               </div>
                               <div className="cp-history-meta">
-                                <span>🐾 {(appt.pets && appt.pets.name) || 'Pet'}</span>
+                                <span>🐾 {
+                                  /* Show every pet on the appointment (multi-pet bookings) */
+                                  (appt.appointment_pets && appt.appointment_pets.length > 0)
+                                    ? appt.appointment_pets
+                                        .map(function (ap) { return ap.pets && ap.pets.name })
+                                        .filter(Boolean)
+                                        .join(', ')
+                                    : ((appt.pets && appt.pets.name) || 'Pet')
+                                }</span>
                                 <span>🕐 {formatTime(appt.start_time)}{appt.end_time ? ' — ' + formatTime(appt.end_time) : ''}</span>
                                 {appt.services && appt.services.time_block_minutes && (
                                   <span>⏱️ {appt.services.time_block_minutes} min</span>
