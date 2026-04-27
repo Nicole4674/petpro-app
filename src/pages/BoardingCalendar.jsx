@@ -542,8 +542,14 @@ export default function BoardingCalendar() {
   }
 
   // ─── Open the Edit Booking modal pre-filled with current values ──────
+  // Also closes the kennel card behind it so only the edit modal shows.
+  // Computes the per-night rate from current total/nights so we can
+  // auto-bump the total when dates change.
   function openEditReservation(reservation) {
     if (!reservation) return
+    const origNights = getDaysBetween(reservation.start_date, reservation.end_date) || 0
+    const origTotal = parseFloat(reservation.total_price || 0)
+    const perNight = origNights > 0 && origTotal > 0 ? (origTotal / origNights) : 0
     setEditForm({
       start_date: reservation.start_date || '',
       start_time: reservation.start_time || '08:00',
@@ -551,9 +557,34 @@ export default function BoardingCalendar() {
       end_time: reservation.end_time || '12:00',
       kennel_id: reservation.kennel_id || '',
       total_price: reservation.total_price != null ? String(reservation.total_price) : '',
-      notes: reservation.notes || ''
+      notes: reservation.notes || '',
+      per_night_rate: perNight // remembered so date changes can auto-bump the total
     })
+    setSelectedReservation(null) // close the kennel card popup behind it
     setEditingReservation(reservation)
+  }
+
+  // ─── Recalculate total when dates change ─────────────────────────────
+  // Uses the per_night_rate stashed from the original booking. If the
+  // groomer manually edits the total, that override sticks until they
+  // change dates again.
+  function handleEditDateChange(field, value) {
+    setEditForm(prev => {
+      const next = { ...prev, [field]: value }
+      const nights = getDaysBetween(next.start_date, next.end_date)
+      if (nights >= 0 && prev.per_night_rate > 0) {
+        next.total_price = (prev.per_night_rate * nights).toFixed(2)
+      }
+      return next
+    })
+  }
+
+  // ─── Close edit modal + reopen the kennel card with the latest data ──
+  // Used by both Cancel and Save so the user always lands back on the card.
+  async function closeEditAndReopenCard() {
+    const id = editingReservation?.id
+    setEditingReservation(null)
+    if (id) await openKennelCard({ id })
   }
 
   // ─── Save edits ──────────────────────────────────────────────────────
@@ -608,9 +639,9 @@ export default function BoardingCalendar() {
 
       if (error) throw error
 
-      setEditingReservation(null)
-      // Reload the kennel card with the freshest data + the calendar grid
-      await openKennelCard({ id: editingReservation.id })
+      // Close the edit modal and reopen the kennel card with fresh data,
+      // then refresh the calendar grid so the move shows up.
+      await closeEditAndReopenCard()
       await loadData()
     } catch (err) {
       console.error('Error saving edit:', err)
@@ -3094,11 +3125,11 @@ export default function BoardingCalendar() {
 
       {/* ─── Edit Booking Modal ─────────────────────────────────────── */}
       {editingReservation && (
-        <div className="cal-modal-overlay" onClick={() => !savingEdit && setEditingReservation(null)} style={{ zIndex: 60 }}>
+        <div className="cal-modal-overlay" onClick={() => !savingEdit && closeEditAndReopenCard()} style={{ zIndex: 60 }}>
           <div className="cal-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '560px', width: '95%' }}>
             <div className="cal-modal-header">
               <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>✏️ Edit Booking</h2>
-              <button className="cal-modal-close" onClick={() => setEditingReservation(null)} disabled={savingEdit}>✕</button>
+              <button className="cal-modal-close" onClick={closeEditAndReopenCard} disabled={savingEdit}>✕</button>
             </div>
             <div style={{ padding: '20px' }}>
               {/* Kennel picker */}
@@ -3125,7 +3156,7 @@ export default function BoardingCalendar() {
                     Check-In Date
                   </label>
                   <input type="date" value={editForm.start_date}
-                    onChange={e => setEditForm({ ...editForm, start_date: e.target.value })}
+                    onChange={e => handleEditDateChange('start_date', e.target.value)}
                     style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}/>
                 </div>
                 <div>
@@ -3143,7 +3174,7 @@ export default function BoardingCalendar() {
                     Check-Out Date
                   </label>
                   <input type="date" value={editForm.end_date}
-                    onChange={e => setEditForm({ ...editForm, end_date: e.target.value })}
+                    onChange={e => handleEditDateChange('end_date', e.target.value)}
                     style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}/>
                 </div>
                 <div>
@@ -3163,7 +3194,8 @@ export default function BoardingCalendar() {
                 </div>
               )}
 
-              {/* Total price */}
+              {/* Total price — auto-recalculates when dates change, but
+                  groomer can still type a custom amount (weekend rate, etc.) */}
               <div style={{ marginBottom: '16px' }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                   Total Price ($)
@@ -3172,6 +3204,11 @@ export default function BoardingCalendar() {
                   onChange={e => setEditForm({ ...editForm, total_price: e.target.value })}
                   placeholder="0.00"
                   style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}/>
+                {editForm.per_night_rate > 0 && editForm.start_date && editForm.end_date && editForm.end_date >= editForm.start_date && (
+                  <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '6px' }}>
+                    💡 Auto: ${editForm.per_night_rate.toFixed(2)}/night × {getDaysBetween(editForm.start_date, editForm.end_date)} night{getDaysBetween(editForm.start_date, editForm.end_date) === 1 ? '' : 's'} = ${(editForm.per_night_rate * getDaysBetween(editForm.start_date, editForm.end_date)).toFixed(2)} (override above if needed)
+                  </div>
+                )}
               </div>
 
               {/* Notes */}
@@ -3187,7 +3224,7 @@ export default function BoardingCalendar() {
 
               {/* Actions */}
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={() => setEditingReservation(null)} disabled={savingEdit}
+                <button onClick={closeEditAndReopenCard} disabled={savingEdit}
                   style={{ flex: 1, padding: '12px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: '10px', fontWeight: 600, cursor: savingEdit ? 'not-allowed' : 'pointer' }}>
                   Cancel
                 </button>
