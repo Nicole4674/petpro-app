@@ -13,6 +13,7 @@
 // ====================================================================
 
 import { supabase } from './supabase'
+import { formatPhone } from './phone'
 import { resolveBehaviorTags } from './behaviorTags'
 
 // Format a HH:MM time into "9:00 AM"
@@ -182,7 +183,7 @@ export async function printDailySheet(dateStr, shopNameOverride) {
         ? apPets[0].pets.breed
         : (a.pets && a.pets.breed) || ''
       var clientName = a.clients ? (a.clients.first_name || '') + ' ' + (a.clients.last_name || '') : ''
-      var phone = a.clients && a.clients.phone ? a.clients.phone : ''
+      var phone = a.clients && a.clients.phone ? formatPhone(a.clients.phone) : ''
       var groomer = a.staff_members ? a.staff_members.first_name : 'Unassigned'
 
       // Services list (primary + add-ons across all pets)
@@ -246,7 +247,7 @@ export async function printDailySheet(dateStr, shopNameOverride) {
       var petNames = pets.map(function (p) { return p.name }).filter(Boolean).join(', ') || 'Unknown'
       var breeds = pets.map(function (p) { return p.breed }).filter(Boolean).join(' / ')
       var clientName = r.clients ? (r.clients.first_name || '') + ' ' + (r.clients.last_name || '') : ''
-      var phone = r.clients && r.clients.phone ? r.clients.phone : ''
+      var phone = r.clients && r.clients.phone ? formatPhone(r.clients.phone) : ''
       var kennelName = r.kennels ? r.kennels.name : '—'
       // nights
       var s = new Date(r.start_date + 'T00:00:00')
@@ -291,7 +292,7 @@ export async function printDailySheet(dateStr, shopNameOverride) {
       var pets = petsByResId[r.id] || []
       var petNames = pets.map(function (p) { return p.name }).filter(Boolean).join(', ') || 'Unknown'
       var clientName = r.clients ? (r.clients.first_name || '') + ' ' + (r.clients.last_name || '') : ''
-      var phone = r.clients && r.clients.phone ? r.clients.phone : ''
+      var phone = r.clients && r.clients.phone ? formatPhone(r.clients.phone) : ''
       var kennelName = r.kennels ? r.kennels.name : '—'
 
       html += '<div class="row">'

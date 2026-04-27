@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { formatPhone, formatPhoneOnInput } from '../lib/phone'
 
 var ROLE_LABELS = {
   owner: 'Owner',
@@ -166,11 +167,14 @@ export default function StaffList() {
   // Filter staff
   var filtered = staff.filter(function(s) {
     var q = search.toLowerCase()
+    var qDigits = q.replace(/[^0-9]/g, '')
+    var phoneDigits = (s.phone || '').replace(/[^0-9]/g, '')
     var matchSearch = !q ||
       (s.first_name || '').toLowerCase().includes(q) ||
       (s.last_name || '').toLowerCase().includes(q) ||
       (s.email || '').toLowerCase().includes(q) ||
-      (s.phone || '').includes(q)
+      (s.phone || '').includes(q) ||
+      (qDigits.length >= 3 && phoneDigits.includes(qDigits))
     var matchRole = filterRole === 'all' || s.role === filterRole
     var matchStatus = filterStatus === 'all' || s.status === filterStatus
     return matchSearch && matchRole && matchStatus
@@ -346,7 +350,7 @@ export default function StaffList() {
                     {s.phone && (
                       <div className="sl-info-row">
                         <span className="sl-info-icon">📱</span>
-                        <span className="sl-info-text">{s.phone}</span>
+                        <span className="sl-info-text">{formatPhone(s.phone)}</span>
                       </div>
                     )}
                     {s.hire_date && (
@@ -453,9 +457,9 @@ export default function StaffList() {
                   <input
                     type="tel"
                     value={newStaff.phone}
-                    onChange={function(e) { setNewStaff(Object.assign({}, newStaff, { phone: e.target.value })) }}
+                    onChange={function(e) { setNewStaff(Object.assign({}, newStaff, { phone: formatPhoneOnInput(e.target.value) })) }}
                     className="sl-input"
-                    placeholder="(555) 123-4567"
+                    placeholder="713-098-3746"
                   />
                 </div>
               </div>

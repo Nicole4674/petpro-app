@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import ROLE_DEFAULTS from '../lib/roleDefaults'
 import StaffDeductions from '../components/StaffDeductions'
+import { formatPhone, formatPhoneOnInput } from '../lib/phone'
 
 // Old ROLE_DEFAULTS block removed — now imported from lib/roleDefaults.js
 var _OLD_DEFAULTS = {
@@ -900,7 +901,7 @@ export default function StaffDetail() {
             </div>
             <div className="sd-header-meta">
               {s.email && <span>📧 {s.email}</span>}
-              {s.phone && <span>📱 {s.phone}</span>}
+              {s.phone && <span>📱 {formatPhone(s.phone)}</span>}
               {s.hire_date && <span>📅 Hired {formatDate(s.hire_date)}</span>}
             </div>
           </div>
@@ -960,7 +961,7 @@ export default function StaffDetail() {
                     </div>
                     <div className="sd-info-item">
                       <span className="sd-info-label">Phone</span>
-                      <span className="sd-info-value">{s.phone || '—'}</span>
+                      <span className="sd-info-value">{formatPhone(s.phone) || '—'}</span>
                     </div>
                     <div className="sd-info-item">
                       <span className="sd-info-label">Role</span>
@@ -1018,7 +1019,7 @@ export default function StaffDetail() {
                   </div>
                   <div className="sl-form-group">
                     <label className="sl-label">Phone</label>
-                    <input type="tel" value={editData.phone || ''} onChange={function(e) { setEditData(Object.assign({}, editData, { phone: e.target.value })) }} className="sl-input" />
+                    <input type="tel" value={editData.phone || ''} onChange={function(e) { setEditData(Object.assign({}, editData, { phone: formatPhoneOnInput(e.target.value) })) }} className="sl-input" placeholder="713-098-3746" />
                   </div>
                 </div>
                 <div className="sl-form-row">

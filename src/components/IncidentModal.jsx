@@ -16,6 +16,7 @@
 // =======================================================
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { formatPhone } from '../lib/phone'
 
 var INCIDENT_TYPES = [
   { value: 'bite',            label: '🦷 Bite' },
@@ -281,7 +282,7 @@ export default function IncidentModal({ mode, petId, clientId, appointmentId, st
                 <div>
                   <div style={{ fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: '700' }}>Owner</div>
                   <div style={{ fontWeight: '700' }}>{clientInfo.first_name} {clientInfo.last_name}</div>
-                  <div style={{ color: '#6b7280', fontSize: '12px' }}>{clientInfo.phone || clientInfo.email || ''}</div>
+                  <div style={{ color: '#6b7280', fontSize: '12px' }}>{formatPhone(clientInfo.phone) || clientInfo.email || ''}</div>
                 </div>
                 <div>
                   <div style={{ fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: '700' }}>Date & Time</div>

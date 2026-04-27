@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { formatPhoneOnInput } from '../lib/phone'
 
 export default function AddClient() {
   const navigate = useNavigate()
@@ -84,8 +85,8 @@ export default function AddClient() {
               type="tel"
               name="phone"
               value={form.phone}
-              onChange={handleChange}
-              placeholder="555-555-5555"
+              onChange={(e) => setForm({ ...form, phone: formatPhoneOnInput(e.target.value) })}
+              placeholder="713-098-3746"
               required
             />
           </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { formatPhone } from '../lib/phone'
 
 var STATUS_COLORS = {
   waiting: '#7c3aed',
@@ -429,7 +430,7 @@ export default function Waitlist() {
                   {/* Client Info */}
                   <div className="wl-client-row">
                     <span>👤 {w.clients ? w.clients.first_name + ' ' + w.clients.last_name : 'Unknown'}</span>
-                    {w.clients && w.clients.phone && <span>📱 {w.clients.phone}</span>}
+                    {w.clients && w.clients.phone && <span>📱 {formatPhone(w.clients.phone)}</span>}
                   </div>
 
                   {/* Preferences */}
@@ -546,7 +547,7 @@ export default function Waitlist() {
                       }}>
                         <span>
                           👤 {selectedClient ? selectedClient.first_name + ' ' + selectedClient.last_name : 'Unknown'}
-                          {selectedClient && selectedClient.phone ? ' · ' + selectedClient.phone : ''}
+                          {selectedClient && selectedClient.phone ? ' · ' + formatPhone(selectedClient.phone) : ''}
                         </span>
                         <button
                           type="button"
@@ -649,7 +650,7 @@ export default function Waitlist() {
                                 </div>
                                 {c.phone && (
                                   <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-                                    📱 {c.phone}
+                                    📱 {formatPhone(c.phone)}
                                   </div>
                                 )}
                               </div>

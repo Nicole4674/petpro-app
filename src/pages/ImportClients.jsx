@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
+import { formatPhone } from '../lib/phone'
 
 export default function ImportClients() {
   const [step, setStep] = useState('upload') // upload, preview, importing, done
@@ -814,7 +815,7 @@ export default function ImportClients() {
                         <strong>{client.first_name} {client.last_name}</strong>
                         {isDNB && <span className="dnb-badge">DO NOT BOOK</span>}
                       </td>
-                      <td>{client.phone}</td>
+                      <td>{formatPhone(client.phone)}</td>
                       <td>
                         {client.pets.map(function(pet, pi) {
                           return <span key={pi} className="pet-badge">{pet.name} <small>({pet.breed || '?'})</small></span>

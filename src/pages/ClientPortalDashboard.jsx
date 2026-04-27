@@ -14,6 +14,7 @@ import EnableNotifications from '../components/EnableNotifications'
 import ReportCardModal from '../components/ReportCardModal'
 import BreedPicker from '../components/BreedPicker'
 import { DOG_BREEDS, CAT_BREEDS } from '../lib/breeds'
+import { formatPhone, formatPhoneOnInput } from '../lib/phone'
 
 const TABS = [
   { key: 'overview', label: '🐾 Overview' },
@@ -758,7 +759,7 @@ export default function ClientPortalDashboard() {
               {client.phone && (
                 <>
                   <span className="cp-stat-dot">·</span>
-                  <span>📞 {client.phone}</span>
+                  <span>📞 {formatPhone(client.phone)}</span>
                 </>
               )}
               {client.preferred_contact && (
@@ -813,7 +814,7 @@ export default function ClientPortalDashboard() {
                   <div className="cp-contact-grid">
                     <div className="cp-contact-item">
                       <span className="cp-contact-label">Phone</span>
-                      <span className="cp-contact-value">{client.phone || 'Not provided'}</span>
+                      <span className="cp-contact-value">{formatPhone(client.phone) || 'Not provided'}</span>
                     </div>
                     <div className="cp-contact-item">
                       <span className="cp-contact-label">Email</span>
@@ -913,7 +914,7 @@ export default function ClientPortalDashboard() {
                     <input
                       type="tel"
                       value={editPhone}
-                      onChange={function (e) { setEditPhone(e.target.value) }}
+                      onChange={function (e) { setEditPhone(formatPhoneOnInput(e.target.value)) }}
                       placeholder="(555) 123-4567"
                       style={{
                         width: '100%',
@@ -1089,7 +1090,7 @@ export default function ClientPortalDashboard() {
                                 </span>
                               )}
                             </div>
-                            <div style={{ fontSize: '14px', color: '#374151' }}>📞 {c.phone}</div>
+                            <div style={{ fontSize: '14px', color: '#374151' }}>📞 {formatPhone(c.phone)}</div>
                             {c.email && <div style={{ fontSize: '13px', color: '#6b7280' }}>✉️ {c.email}</div>}
                             {c.notes && <div style={{ fontSize: '12px', color: '#6b7280', fontStyle: 'italic', marginTop: '4px' }}>{c.notes}</div>}
                           </div>
@@ -1137,9 +1138,9 @@ export default function ClientPortalDashboard() {
                     />
                     <input
                       type="tel"
-                      placeholder="Phone * (555) 123-4567"
+                      placeholder="Phone * (713-098-3746)"
                       value={myContactForm.phone}
-                      onChange={function (e) { setMyContactForm({ ...myContactForm, phone: e.target.value }) }}
+                      onChange={function (e) { setMyContactForm({ ...myContactForm, phone: formatPhoneOnInput(e.target.value) }) }}
                       style={portalInputStyle}
                     />
                     <input

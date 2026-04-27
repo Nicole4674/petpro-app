@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import EnableNotifications from '../components/EnableNotifications'
 import AIUsageWidget from '../components/AIUsageWidget'
+import { formatPhoneOnInput } from '../lib/phone'
 
 export default function ShopSettings() {
   var navigate = useNavigate()
@@ -479,7 +480,7 @@ export default function ShopSettings() {
           Contact Info
         </div>
 
-        <Field label="Phone" value={phone} onChange={setPhone} placeholder="(555) 123-4567" />
+        <Field label="Phone" value={phone} onChange={(v) => setPhone(formatPhoneOnInput(v))} placeholder="713-098-3746" />
         <Field label="Email" value={email} onChange={setEmail} placeholder="shop@example.com" type="email" />
         <Field label="Website" value={website} onChange={setWebsite} placeholder="https://yourshop.com" />
         <TextArea label="Address" value={address} onChange={setAddress} placeholder="123 Main St, City, State 12345" />

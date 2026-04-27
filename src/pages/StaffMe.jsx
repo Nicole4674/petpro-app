@@ -12,6 +12,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { formatPhone } from '../lib/phone'
 
 var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -374,7 +375,7 @@ export default function StaffMe() {
             </div>
             <div>
               <div style={{ fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: '600', marginBottom: '2px' }}>Phone</div>
-              <div style={{ color: '#111827' }}>{staff.phone || '—'}</div>
+              <div style={{ color: '#111827' }}>{formatPhone(staff.phone) || '—'}</div>
             </div>
             <div>
               <div style={{ fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: '600', marginBottom: '2px' }}>Role</div>

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { BehaviorTagsRow } from '../components/BehaviorTags'
 import { printDailySheet } from '../lib/printDailySheet'
 import ReportCardModal from '../components/ReportCardModal'
+import { formatPhone } from '../lib/phone'
 import '../boarding-styles.css'
 
 export default function BoardingCalendar() {
@@ -296,10 +297,13 @@ export default function BoardingCalendar() {
     const search = clientSearch.toLowerCase()
     const results = []
     const seen = {}
-    // Match by client name OR phone
+    // Match by client name OR phone (phone search is dash-tolerant)
+    const searchDigits = search.replace(/[^0-9]/g, '')
     clients.forEach(c => {
+      const phoneDigits = (c.phone || '').replace(/[^0-9]/g, '')
       const hit = (c.first_name + ' ' + c.last_name).toLowerCase().includes(search) ||
-                  (c.phone || '').includes(search)
+                  (c.phone || '').includes(search) ||
+                  (searchDigits.length >= 3 && phoneDigits.includes(searchDigits))
       if (hit) {
         results.push({ client: c, matchedPet: null })
         seen[c.id] = true
@@ -791,7 +795,7 @@ export default function BoardingCalendar() {
     <div class="section-title">👤 Owner Contact</div>
     <div class="owner-box">
       <div class="owner-name">${client.first_name || ''} ${client.last_name || ''}</div>
-      ${client.phone ? '<div class="owner-detail">📱 ' + client.phone + '</div>' : ''}
+      ${client.phone ? '<div class="owner-detail">📱 ' + formatPhone(client.phone) + '</div>' : ''}
       ${client.email ? '<div class="owner-detail">📧 ' + client.email + '</div>' : ''}
       ${client.address ? '<div class="owner-detail">📍 ' + client.address + '</div>' : ''}
       ${client.preferred_contact ? '<div class="owner-detail">Prefers: <strong>' + client.preferred_contact + '</strong></div>' : ''}
@@ -869,7 +873,7 @@ export default function BoardingCalendar() {
           <div style="font-size:22px;font-weight:800;color:${brandColor};">${field(shop.shop_name) || 'Your Shop Name'}</div>
           ${shop.tagline ? `<div style="font-size:11px;color:#64748b;font-style:italic;">${shop.tagline}</div>` : ''}
           <div style="font-size:10px;color:#475569;margin-top:4px;">
-            ${shop.phone ? '📱 ' + shop.phone : ''}
+            ${shop.phone ? '📱 ' + formatPhone(shop.phone) : ''}
             ${shop.email ? ' &nbsp; ✉️ ' + shop.email : ''}
             ${shop.website ? ' &nbsp; 🌐 ' + shop.website : ''}
           </div>
@@ -940,7 +944,7 @@ export default function BoardingCalendar() {
   <div class="row">
     <div class="field">
       <div class="field-label">Owner Phone</div>
-      ${line(field(client.phone))}
+      ${line(field(formatPhone(client.phone)))}
     </div>
     <div class="field">
       <div class="field-label">Owner Email</div>
@@ -1690,7 +1694,7 @@ export default function BoardingCalendar() {
                     </div>
                     <div className="kc-owner-details">
                       {selectedReservation.clients.phone && (
-                        <div className="kc-owner-row">📱 {selectedReservation.clients.phone}</div>
+                        <div className="kc-owner-row">📱 {formatPhone(selectedReservation.clients.phone)}</div>
                       )}
                       {selectedReservation.clients.email && (
                         <div className="kc-owner-row">📧 {selectedReservation.clients.email}</div>
@@ -2231,7 +2235,7 @@ export default function BoardingCalendar() {
                           ) : (
                             <>
                               <strong>{client.first_name} {client.last_name}</strong>
-                              {client.phone && <span className="cal-dropdown-sub"> — {client.phone}</span>}
+                              {client.phone && <span className="cal-dropdown-sub"> — {formatPhone(client.phone)}</span>}
                             </>
                           )}
                         </div>

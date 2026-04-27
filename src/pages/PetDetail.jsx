@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import IncidentModal from '../components/IncidentModal'
 import { BehaviorTagsRow, BehaviorTagsEditor } from '../components/BehaviorTags'
 import ReportCardModal from '../components/ReportCardModal'
+import { formatPhone } from '../lib/phone'
 
 var TABS = [
   { key: 'overview', label: '🐾 Overview' },
@@ -744,7 +745,7 @@ export default function PetDetail() {
             {client && (
               <p className="pd-owner">
                 Owner: <Link to={'/clients/' + client.id} className="pd-owner-link">{client.first_name} {client.last_name}</Link>
-                {client.phone && <span className="pd-owner-phone"> · 📱 {client.phone}</span>}
+                {client.phone && <span className="pd-owner-phone"> · 📱 {formatPhone(client.phone)}</span>}
               </p>
             )}
           </div>

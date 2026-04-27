@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { formatPhone, formatPhoneOnInput } from '../lib/phone'
 
 const TABS = [
   { key: 'overview', label: '🐾 Overview' },
@@ -935,7 +936,7 @@ export default function ClientDetail() {
             <div className="cp-quick-stats">
               <span>🐾 {pets.length} Pet{pets.length !== 1 ? 's' : ''}</span>
               <span className="cp-stat-dot">·</span>
-              <span>📞 {client.phone || 'No phone'}</span>
+              <span>📞 {formatPhone(client.phone) || 'No phone'}</span>
               {client.email && (
                 <>
                   <span className="cp-stat-dot">·</span>
@@ -1005,7 +1006,7 @@ export default function ClientDetail() {
                     </div>
                     <div className="cp-contact-item">
                       <span className="cp-contact-label">Phone</span>
-                      <span className="cp-contact-value">{client.phone || 'Not provided'}</span>
+                      <span className="cp-contact-value">{formatPhone(client.phone) || 'Not provided'}</span>
                     </div>
                     <div className="cp-contact-item">
                       <span className="cp-contact-label">Email</span>
@@ -1067,8 +1068,8 @@ export default function ClientDetail() {
                       <input
                         type="tel"
                         value={editClientForm.phone}
-                        onChange={function (e) { setEditClientForm({ ...editClientForm, phone: e.target.value }) }}
-                        placeholder="(555) 123-4567"
+                        onChange={function (e) { setEditClientForm({ ...editClientForm, phone: formatPhoneOnInput(e.target.value) }) }}
+                        placeholder="713-098-3746"
                         style={contactInputStyle}
                       />
                     </label>
@@ -1761,7 +1762,7 @@ export default function ClientDetail() {
                             )}
                           </div>
                           <div style={{ fontSize: '14px', color: '#374151', marginBottom: '2px' }}>
-                            📞 <a href={'tel:' + c.phone} style={{ color: '#7c3aed', textDecoration: 'none' }}>{c.phone}</a>
+                            📞 <a href={'tel:' + c.phone} style={{ color: '#7c3aed', textDecoration: 'none' }}>{formatPhone(c.phone)}</a>
                           </div>
                           {c.email && (
                             <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '2px' }}>
@@ -1839,8 +1840,8 @@ export default function ClientDetail() {
                     <input
                       type="tel"
                       value={contactForm.phone}
-                      onChange={function (e) { setContactForm({ ...contactForm, phone: e.target.value }) }}
-                      placeholder="(555) 123-4567"
+                      onChange={function (e) { setContactForm({ ...contactForm, phone: formatPhoneOnInput(e.target.value) }) }}
+                      placeholder="713-098-3746"
                       style={contactInputStyle}
                     />
                   </label>
@@ -2150,7 +2151,7 @@ export default function ClientDetail() {
                       <div>
                         <div style={{ fontWeight: '700', fontSize: '14px', color: '#111827' }}>{fullName || 'Unnamed'}</div>
                         <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
-                          {c.phone || 'No phone'} {c.email && '· ' + c.email}
+                          {formatPhone(c.phone) || 'No phone'} {c.email && '· ' + c.email}
                           {c.user_id && <span style={{ marginLeft: '6px', padding: '1px 6px', background: '#ede9fe', color: '#6d28d9', borderRadius: '999px', fontSize: '10px', fontWeight: '700' }}>HAS LOGIN</span>}
                         </div>
                       </div>

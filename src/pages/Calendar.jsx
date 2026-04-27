@@ -7,6 +7,7 @@ import { BehaviorTagsRow } from '../components/BehaviorTags'
 import { resolveHighPriorityTags } from '../lib/behaviorTags'
 import { printDailySheet } from '../lib/printDailySheet'
 import ReportCardModal from '../components/ReportCardModal'
+import { formatPhone } from '../lib/phone'
 
 const HOURS = []
 for (let h = 7; h <= 18; h++) {
@@ -2307,7 +2308,7 @@ export default function Calendar() {
                                                             <span style={{ flex: 1 }}>
                                                                 <strong>{c.name || 'Unnamed'}</strong>
                                                                 <span style={{ color: '#6b7280', marginLeft: '6px' }}>
-                                                                    {c.phone || '(no phone)'} {c.times.length > 0 && '· ' + c.times.join(', ')}
+                                                                    {formatPhone(c.phone) || '(no phone)'} {c.times.length > 0 && '· ' + c.times.join(', ')}
                                                                 </span>
                                                             </span>
                                                         </label>
@@ -3327,7 +3328,7 @@ export default function Calendar() {
                                                 🐾 View Profile
                                             </button>
                                         </div>
-                                        {selectedAppt.clients.phone && <div className="appt-detail-owner-row">📱 {selectedAppt.clients.phone}</div>}
+                                        {selectedAppt.clients.phone && <div className="appt-detail-owner-row">📱 {formatPhone(selectedAppt.clients.phone)}</div>}
                                         {selectedAppt.clients.email && <div className="appt-detail-owner-row">📧 {selectedAppt.clients.email}</div>}
                                         {selectedAppt.clients.preferred_contact && (
                                             <span className="appt-tag appt-tag-purple">Prefers: {selectedAppt.clients.preferred_contact}</span>

@@ -9,6 +9,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { notifyUser } from '../lib/push'
+import { formatPhoneOnInput } from '../lib/phone'
 
 export default function ClientSignup() {
   var [searchParams] = useSearchParams()
@@ -259,7 +260,7 @@ export default function ClientSignup() {
             </div>
           </div>
           <FormField label="Email" value={email} onChange={setEmail} placeholder="you@example.com" type="email" />
-          <FormField label="Phone" value={phone} onChange={setPhone} placeholder="(555) 123-4567" type="tel" />
+          <FormField label="Phone" value={phone} onChange={(v) => setPhone(formatPhoneOnInput(v))} placeholder="713-098-3746" type="tel" />
           <FormField label="Password" value={password} onChange={setPassword} placeholder="Create a strong password" type="password" />
 
           {/* Password requirements helper — prevents the "I tried 5 passwords

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { formatPhone } from '../lib/phone'
 
 export default function Clients() {
   const [clients, setClients] = useState([])
@@ -45,7 +46,16 @@ export default function Clients() {
     const phone = (client.phone || '')
     const email = (client.email || '').toLowerCase()
     const petNames = (client.pets || []).map(p => (p.name || '').toLowerCase()).join(' ')
-    return fullName.includes(q) || phone.includes(q) || email.includes(q) || petNames.includes(q)
+
+    // Phone-aware search — if the search term looks like digits (with or
+    // without dashes/spaces/parens), strip everything except digits on both
+    // sides before comparing. So "7130983746", "713-098-3746", and
+    // "(713) 098-3746" all match the same stored number.
+    const qDigits = q.replace(/[^0-9]/g, '')
+    const phoneDigits = phone.replace(/[^0-9]/g, '')
+    const phoneMatches = qDigits.length >= 3 && phoneDigits.includes(qDigits)
+
+    return fullName.includes(q) || phoneMatches || phone.includes(q) || email.includes(q) || petNames.includes(q)
   })
 
   const activeCount = clients.filter(c => c.is_active !== false).length
@@ -111,7 +121,7 @@ export default function Clients() {
                 )}
                 {client.is_first_time && <span className="badge badge-new">New Client</span>}
               </div>
-              <p className="client-phone">{client.phone}</p>
+              <p className="client-phone">{formatPhone(client.phone)}</p>
               {client.pets && client.pets.length > 0 && (
                 <div className="client-pets-preview">
                   {client.pets.map((pet) => (

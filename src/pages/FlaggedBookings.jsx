@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { notifyUser } from '../lib/push'
+import { formatPhone } from '../lib/phone'
 
 function formatTime(timeStr) {
   if (!timeStr) return ''
@@ -204,7 +205,7 @@ export default function FlaggedBookings() {
                 {/* Client & Service */}
                 <div className="flagged-details-row">
                   <span>Client: {appt.clients?.first_name} {appt.clients?.last_name}</span>
-                  {appt.clients?.phone && <span> • {appt.clients.phone}</span>}
+                  {appt.clients?.phone && <span> • {formatPhone(appt.clients.phone)}</span>}
                   {appt.services?.service_name && <span> • {appt.services.service_name}</span>}
                   {appt.quoted_price && <span> • ${parseFloat(appt.quoted_price).toFixed(2)}</span>}
                 </div>
