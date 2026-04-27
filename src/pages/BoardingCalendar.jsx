@@ -26,6 +26,17 @@ export default function BoardingCalendar() {
   // Map { petId: existingReportCard } for the currently selected reservation
   const [resReportCards, setResReportCards] = useState({})
   const [kennelCardLoading, setKennelCardLoading] = useState(false)
+  // ─── Boarding payment state ────────────────────────────────────────────
+  // Mirrors the grooming payment flow but linked via boarding_reservation_id.
+  // resPayments: array of payment rows for the open kennel card
+  // payingRes: when set, opens the "Take Payment" modal
+  const [resPayments, setResPayments] = useState([])
+  const [payingRes, setPayingRes] = useState(null)
+  const [payAmount, setPayAmount] = useState('')
+  const [payMethod, setPayMethod] = useState('')
+  const [payTip, setPayTip] = useState('')
+  const [payNotes, setPayNotes] = useState('')
+  const [recordingPayment, setRecordingPayment] = useState(false)
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false) // click-to-change status pill
   const [shopSettings, setShopSettings] = useState(null) // Task #42 — for printed forms
   const [showIntakePicker, setShowIntakePicker] = useState(false) // Task #42
@@ -464,6 +475,15 @@ export default function BoardingCalendar() {
       const cardsByPet = {}
       ;(reportCardsData || []).forEach(rc => { cardsByPet[rc.pet_id] = rc })
       setResReportCards(cardsByPet)
+
+      // Load existing payments for this reservation — drives the "paid / balance"
+      // display + the payment history list on the kennel card.
+      const { data: paymentsData } = await supabase
+        .from('payments')
+        .select('id, amount, tip_amount, method, notes, created_at')
+        .eq('boarding_reservation_id', reservation.id)
+        .order('created_at', { ascending: false })
+      setResPayments(paymentsData || [])
     } catch (err) {
       console.error('Error loading kennel card:', err)
     } finally {
@@ -485,6 +505,53 @@ export default function BoardingCalendar() {
     } catch (err) {
       console.error('Error updating status:', err)
       alert('Error: ' + err.message)
+    }
+  }
+
+  // ─── Record a boarding payment ─────────────────────────────────────────
+  // Mirrors the grooming record_payment flow but writes to payments rows
+  // linked via boarding_reservation_id (not appointment_id).
+  async function handleRecordBoardingPayment() {
+    if (!payingRes) return
+    if (!payMethod) {
+      alert('Pick a payment method (Cash, Zelle, Venmo, Card, or Other).')
+      return
+    }
+    const amt = parseFloat(payAmount)
+    if (isNaN(amt) || amt <= 0) {
+      alert('Enter a payment amount greater than 0.')
+      return
+    }
+    const tip = parseFloat(payTip) || 0
+
+    setRecordingPayment(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not signed in')
+
+      const { error } = await supabase.from('payments').insert({
+        boarding_reservation_id: payingRes.id,
+        client_id: payingRes.client_id,
+        groomer_id: user.id,
+        amount: amt,
+        tip_amount: tip,
+        method: payMethod,
+        notes: payNotes || null,
+      })
+      if (error) throw error
+
+      // Refresh the kennel card so the new payment shows in history + balance updates
+      await openKennelCard(selectedReservation)
+      // Reset modal state
+      setPayingRes(null)
+      setPayAmount('')
+      setPayMethod('')
+      setPayTip('')
+      setPayNotes('')
+    } catch (err) {
+      alert('Error recording payment: ' + (err.message || err))
+    } finally {
+      setRecordingPayment(false)
     }
   }
 
@@ -1440,15 +1507,109 @@ export default function BoardingCalendar() {
                   <span className="kc-stay-label">🌙 Nights</span>
                   <span className="kc-stay-value">{getDaysBetween(selectedReservation.start_date, selectedReservation.end_date)}</span>
                 </div>
-                {/* Total owed for this boarding stay — pulled from total_price on the reservation.
-                    Highlighted in green so the front desk can spot it instantly when the client checks out. */}
-                <div className="kc-stay-item" style={{ background: '#dcfce7', borderLeft: '3px solid #16a34a' }}>
-                  <span className="kc-stay-label" style={{ color: '#166534' }}>💰 Total Owed</span>
-                  <span className="kc-stay-value" style={{ color: '#16a34a', fontWeight: 800, fontSize: '15px' }}>
-                    ${parseFloat(selectedReservation.total_price || 0).toFixed(2)}
-                  </span>
-                </div>
+                {/* Money breakdown — total, paid, balance — calculated live from
+                    the payments rows linked to this boarding_reservation_id. */}
+                {(() => {
+                  const total = parseFloat(selectedReservation.total_price || 0)
+                  const paid = (resPayments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0)
+                  const balance = total - paid
+                  const balanceColor = balance <= 0 ? '#16a34a' : '#dc2626'
+                  return (
+                    <>
+                      <div className="kc-stay-item" style={{ background: '#f9fafb' }}>
+                        <span className="kc-stay-label">💰 Total</span>
+                        <span className="kc-stay-value" style={{ fontWeight: 700 }}>${total.toFixed(2)}</span>
+                      </div>
+                      <div className="kc-stay-item" style={{ background: '#f0fdf4' }}>
+                        <span className="kc-stay-label" style={{ color: '#166534' }}>✓ Paid</span>
+                        <span className="kc-stay-value" style={{ color: '#16a34a', fontWeight: 700 }}>${paid.toFixed(2)}</span>
+                      </div>
+                      <div className="kc-stay-item" style={{ background: balance <= 0 ? '#dcfce7' : '#fef2f2', borderLeft: '3px solid ' + balanceColor }}>
+                        <span className="kc-stay-label" style={{ color: balance <= 0 ? '#166534' : '#991b1b' }}>
+                          {balance <= 0 ? '🎉 Paid in full' : '⚠️ Balance Due'}
+                        </span>
+                        <span className="kc-stay-value" style={{ color: balanceColor, fontWeight: 800, fontSize: '15px' }}>
+                          ${Math.max(0, balance).toFixed(2)}
+                        </span>
+                      </div>
+                    </>
+                  )
+                })()}
               </div>
+
+              {/* Take Payment button — opens the boarding payment modal */}
+              {(() => {
+                const total = parseFloat(selectedReservation.total_price || 0)
+                const paid = (resPayments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0)
+                const balance = total - paid
+                if (balance <= 0) return null
+                return (
+                  <div style={{ marginTop: '12px', marginBottom: '4px' }}>
+                    <button
+                      onClick={() => {
+                        setPayingRes(selectedReservation)
+                        setPayAmount(balance.toFixed(2))
+                        setPayMethod('')
+                        setPayTip('')
+                        setPayNotes('')
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '12px',
+                        background: '#7c3aed',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '10px',
+                        fontWeight: 700,
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      💰 Take Payment (${balance.toFixed(2)})
+                    </button>
+                  </div>
+                )
+              })()}
+
+              {/* Payment history — shows all payments recorded for this stay */}
+              {resPayments && resPayments.length > 0 && (
+                <div className="kc-section" style={{ marginTop: '12px' }}>
+                  <div className="kc-section-title">💳 Payment History ({resPayments.length})</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {resPayments.map(p => (
+                      <div key={p.id} style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '8px 12px',
+                        background: '#f9fafb',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                      }}>
+                        <div>
+                          <div style={{ fontWeight: 700, color: '#111827' }}>
+                            ${parseFloat(p.amount).toFixed(2)}
+                            {p.tip_amount && parseFloat(p.tip_amount) > 0 && (
+                              <span style={{ color: '#6b7280', fontWeight: 400, marginLeft: 6 }}>
+                                + ${parseFloat(p.tip_amount).toFixed(2)} tip
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                            {p.method}
+                          </div>
+                          {p.notes && (
+                            <div style={{ fontSize: '12px', color: '#4b5563', fontStyle: 'italic', marginTop: '2px' }}>📝 {p.notes}</div>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+                          {new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Pet Section */}
               {selectedReservation.boarding_reservation_pets && selectedReservation.boarding_reservation_pets.map((rp, idx) => {
@@ -2457,6 +2618,132 @@ export default function BoardingCalendar() {
           </div>
         </div>
       )}
+
+      {/* ═══════════════════════════════════════════════════
+          BOARDING PAYMENT MODAL
+          Mirrors the grooming payment modal — cash/zelle/venmo/card,
+          optional tip, optional notes. Amount pre-filled with the balance.
+          ═══════════════════════════════════════════════════ */}
+      {payingRes && (() => {
+        const total = parseFloat(payingRes.total_price || 0)
+        const paid = (resPayments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0)
+        const balance = total - paid
+        return (
+          <div
+            onClick={() => { if (!recordingPayment) setPayingRes(null) }}
+            style={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              background: 'rgba(0,0,0,0.6)', zIndex: 2000,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '20px',
+            }}
+          >
+            <div onClick={e => e.stopPropagation()} style={{
+              background: '#fff', borderRadius: '14px', padding: '24px',
+              width: '100%', maxWidth: '440px', maxHeight: '90vh', overflowY: 'auto',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '20px', color: '#111827', fontWeight: 800 }}>💰 Take Payment</h2>
+                  <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '2px' }}>
+                    Boarding stay · Balance ${balance.toFixed(2)}
+                  </div>
+                </div>
+                <button onClick={() => setPayingRes(null)} disabled={recordingPayment}
+                  style={{ background: 'transparent', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#6b7280' }}>×</button>
+              </div>
+
+              {/* Quick stat strip */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                <div style={{ flex: 1, padding: '10px', background: '#f9fafb', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase' }}>Total</div>
+                  <div style={{ fontSize: '15px', fontWeight: 700 }}>${total.toFixed(2)}</div>
+                </div>
+                <div style={{ flex: 1, padding: '10px', background: '#f0fdf4', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '11px', color: '#166534', textTransform: 'uppercase' }}>Paid</div>
+                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#16a34a' }}>${paid.toFixed(2)}</div>
+                </div>
+                <div style={{ flex: 1, padding: '10px', background: '#fef2f2', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '11px', color: '#991b1b', textTransform: 'uppercase' }}>Balance</div>
+                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#dc2626' }}>${balance.toFixed(2)}</div>
+                </div>
+              </div>
+
+              {/* Method buttons */}
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Method <span style={{ color: '#dc2626' }}>*</span>
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                  {['cash', 'zelle', 'venmo', 'card', 'other'].map(m => (
+                    <button key={m} onClick={() => setPayMethod(m)}
+                      style={{
+                        padding: '10px 8px',
+                        background: payMethod === m ? '#7c3aed' : '#fff',
+                        color: payMethod === m ? '#fff' : '#374151',
+                        border: '1px solid ' + (payMethod === m ? '#7c3aed' : '#d1d5db'),
+                        borderRadius: '8px', fontWeight: 600, fontSize: '13px', cursor: 'pointer',
+                        textTransform: 'capitalize',
+                      }}>
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Amount + Tip */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+                <div style={{ flex: 2 }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Amount Paid <span style={{ color: '#dc2626' }}>*</span>
+                  </label>
+                  <input type="number" step="0.01" value={payAmount}
+                    onChange={e => setPayAmount(e.target.value)}
+                    placeholder={balance.toFixed(2)}
+                    style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}/>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Tip
+                  </label>
+                  <input type="number" step="0.01" value={payTip}
+                    onChange={e => setPayTip(e.target.value)}
+                    placeholder="0.00"
+                    style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}/>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Notes (optional)
+                </label>
+                <textarea value={payNotes} onChange={e => setPayNotes(e.target.value)}
+                  placeholder="Anything to remember about this payment?"
+                  style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box', minHeight: '60px', resize: 'vertical', fontFamily: 'inherit' }}/>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => setPayingRes(null)} disabled={recordingPayment}
+                  style={{ flex: 1, padding: '11px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: '10px', fontWeight: 600, cursor: 'pointer' }}>
+                  Cancel
+                </button>
+                <button onClick={handleRecordBoardingPayment} disabled={recordingPayment || !payMethod}
+                  style={{
+                    flex: 2, padding: '11px',
+                    background: (recordingPayment || !payMethod) ? '#9ca3af' : '#10b981',
+                    color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 700, fontSize: '14px',
+                    cursor: (recordingPayment || !payMethod) ? 'not-allowed' : 'pointer',
+                  }}>
+                  {recordingPayment ? 'Saving...' : '✓ Confirm Payment'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
