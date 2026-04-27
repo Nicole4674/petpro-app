@@ -4533,6 +4533,12 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                         {wServiceLine}
                                                     </span>
                                                 )}
+                                                {/* Phone at-a-glance — when a client calls, owner can spot the appointment fast */}
+                                                {appt.clients?.phone && (
+                                                    <span style={{ fontSize: '11px', opacity: 0.85, display: 'block', lineHeight: 1.3, marginTop: '2px' }}>
+                                                        📞 {formatPhone(appt.clients.phone)}
+                                                    </span>
+                                                )}
                                                 {wHighPriorityTags.length > 0 && (
                                                     <BehaviorTagsRow tags={wTagKeys} compact={true} max={4} />
                                                 )}
@@ -4748,6 +4754,12 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                 </span>
                 <span className="appt-pet">{(appt.appointment_pets && appt.appointment_pets.length > 0) ? appt.appointment_pets.map(function(ap){ return ap.pets?.name }).filter(Boolean).join(', ') : appt.pets?.name}</span>
                 <span className="appt-client">{appt.clients?.first_name} {appt.clients?.last_name}</span>
+                {/* Phone at-a-glance — when a client calls, owner can spot the appointment fast */}
+                {appt.clients?.phone && (
+                    <span style={{ fontSize: '11px', opacity: 0.85, display: 'block', lineHeight: 1.3, marginTop: '1px' }}>
+                        📞 {formatPhone(appt.clients.phone)}
+                    </span>
+                )}
                 {serviceLine && (
                     <span className="appt-service" style={{ fontSize: '11px', opacity: 0.92, fontStyle: 'italic', display: 'block', whiteSpace: 'normal', lineHeight: 1.3, marginTop: '1px' }}>
                         {serviceLine}
