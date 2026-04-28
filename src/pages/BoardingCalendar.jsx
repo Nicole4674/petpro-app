@@ -547,7 +547,7 @@ export default function BoardingCalendar() {
   // auto-bump the total when dates change.
   function openEditReservation(reservation) {
     if (!reservation) return
-    const origNights = getDaysBetween(reservation.start_date, reservation.end_date) || 0
+    const origNights = getNightsBetween(reservation.start_date, reservation.end_date) || 0
     const origTotal = parseFloat(reservation.total_price || 0)
     const perNight = origNights > 0 && origTotal > 0 ? (origTotal / origNights) : 0
     setEditForm({
@@ -570,7 +570,7 @@ export default function BoardingCalendar() {
   function handleEditDateChange(field, value) {
     setEditForm(prev => {
       const next = { ...prev, [field]: value }
-      const nights = getDaysBetween(next.start_date, next.end_date)
+      const nights = getNightsBetween(next.start_date, next.end_date)
       if (nights >= 0 && prev.per_night_rate > 0) {
         next.total_price = (prev.per_night_rate * nights).toFixed(2)
       }
@@ -584,7 +584,7 @@ export default function BoardingCalendar() {
   function handlePerNightRateChange(value) {
     const rate = parseFloat(value) || 0
     setEditForm(prev => {
-      const nights = getDaysBetween(prev.start_date, prev.end_date)
+      const nights = getNightsBetween(prev.start_date, prev.end_date)
       return {
         ...prev,
         per_night_rate: rate,
@@ -801,11 +801,24 @@ export default function BoardingCalendar() {
     }
   }
 
+  // getDaysBetween — INCLUSIVE day count (24th–27th = 4 days).
+  // Used for rendering how many calendar cells a reservation spans.
   function getDaysBetween(start, end) {
     const s = new Date(start)
     const e = new Date(end)
     const diff = Math.ceil((e - s) / (1000 * 60 * 60 * 24))
     return diff + 1
+  }
+
+  // getNightsBetween — NIGHTS count for billing (24th–27th = 3 nights).
+  // Boarding facilities charge per overnight stay, not per day in the building.
+  // Use this anywhere we display "Nights" or compute price.
+  function getNightsBetween(start, end) {
+    if (!start || !end) return 0
+    const s = new Date(start)
+    const e = new Date(end)
+    const diff = Math.ceil((e - s) / (1000 * 60 * 60 * 24))
+    return Math.max(0, diff)
   }
 
   function togglePetSelection(petId) {
@@ -1101,7 +1114,7 @@ export default function BoardingCalendar() {
     <div><div class="stay-label">📍 Kennel</div><div class="stay-value">${res.kennels?.name || ''}</div></div>
     <div><div class="stay-label">📅 Check-In</div><div class="stay-value">${res.start_date} ${res.start_time || ''}</div></div>
     <div><div class="stay-label">📅 Check-Out</div><div class="stay-value">${res.end_date} ${res.end_time || ''}</div></div>
-    <div><div class="stay-label">🌙 Nights</div><div class="stay-value">${getDaysBetween(res.start_date, res.end_date)}</div></div>
+    <div><div class="stay-label">🌙 Nights</div><div class="stay-value">${getNightsBetween(res.start_date, res.end_date)}</div></div>
   </div>
   ${petSections}
   <div style="margin-top:16px;">
@@ -1766,7 +1779,7 @@ export default function BoardingCalendar() {
                 </div>
                 <div className="kc-stay-item">
                   <span className="kc-stay-label">🌙 Nights</span>
-                  <span className="kc-stay-value">{getDaysBetween(selectedReservation.start_date, selectedReservation.end_date)}</span>
+                  <span className="kc-stay-value">{getNightsBetween(selectedReservation.start_date, selectedReservation.end_date)}</span>
                 </div>
                 {/* Money breakdown — total, paid, balance — calculated live from
                     the payments rows linked to this boarding_reservation_id. */}
@@ -2849,7 +2862,7 @@ export default function BoardingCalendar() {
                   Total Price *
                   {newRes.start_date && newRes.end_date && newRes.end_date >= newRes.start_date && (
                     <span style={{ color: '#6b7280', fontWeight: 400, marginLeft: 8, fontSize: 12 }}>
-                      ({getDaysBetween(newRes.start_date, newRes.end_date)} night{getDaysBetween(newRes.start_date, newRes.end_date) === 1 ? '' : 's'})
+                      ({getNightsBetween(newRes.start_date, newRes.end_date)} night{getNightsBetween(newRes.start_date, newRes.end_date) === 1 ? '' : 's'})
                     </span>
                   )}
                 </label>
@@ -3204,7 +3217,7 @@ export default function BoardingCalendar() {
               {/* Live nights preview */}
               {editForm.start_date && editForm.end_date && editForm.end_date >= editForm.start_date && (
                 <div style={{ marginBottom: '12px', fontSize: '13px', color: '#6b7280' }}>
-                  🌙 {getDaysBetween(editForm.start_date, editForm.end_date)} night{getDaysBetween(editForm.start_date, editForm.end_date) === 1 ? '' : 's'}
+                  🌙 {getNightsBetween(editForm.start_date, editForm.end_date)} night{getNightsBetween(editForm.start_date, editForm.end_date) === 1 ? '' : 's'}
                 </div>
               )}
 
@@ -3232,7 +3245,7 @@ export default function BoardingCalendar() {
               </div>
               {editForm.per_night_rate > 0 && editForm.start_date && editForm.end_date && editForm.end_date >= editForm.start_date && (
                 <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '16px' }}>
-                  💡 ${editForm.per_night_rate.toFixed(2)}/night × {getDaysBetween(editForm.start_date, editForm.end_date)} night{getDaysBetween(editForm.start_date, editForm.end_date) === 1 ? '' : 's'} = ${(editForm.per_night_rate * getDaysBetween(editForm.start_date, editForm.end_date)).toFixed(2)}
+                  💡 ${editForm.per_night_rate.toFixed(2)}/night × {getNightsBetween(editForm.start_date, editForm.end_date)} night{getNightsBetween(editForm.start_date, editForm.end_date) === 1 ? '' : 's'} = ${(editForm.per_night_rate * getNightsBetween(editForm.start_date, editForm.end_date)).toFixed(2)}
                 </div>
               )}
               {(!editForm.per_night_rate || editForm.per_night_rate <= 0) && (
