@@ -44,9 +44,60 @@ export default function ShopSettings() {
   var [markedCount, setMarkedCount] = useState(null)
   var [markError, setMarkError] = useState('')
 
+  // ─── Stripe Connect (client payments) ──────────────────────────────────
+  // Each groomer connects their own Stripe account so their clients pay
+  // them directly. Status drives the UI in the Payments section.
+  var [stripeConnectStatus, setStripeConnectStatus] = useState('not_started')
+  var [stripeChargesEnabled, setStripeChargesEnabled] = useState(false)
+  var [stripePayoutsEnabled, setStripePayoutsEnabled] = useState(false)
+  var [stripeAccountId, setStripeAccountId] = useState(null)
+  var [connectingStripe, setConnectingStripe] = useState(false)
+  var [connectError, setConnectError] = useState('')
+
   useEffect(function () {
     loadSettings()
   }, [])
+
+  // ─── Detect return from Stripe Connect onboarding ───────────────────
+  // After the groomer finishes Stripe's hosted onboarding, Stripe sends
+  // them back here with ?stripe_return=1 in the URL. We re-load settings
+  // to pick up any status updates from the webhook and clean up the URL.
+  useEffect(function () {
+    var params = new URLSearchParams(window.location.search)
+    if (params.get('stripe_return') === '1') {
+      loadSettings()
+      // Clean the query string so refresh doesn't re-fire this
+      window.history.replaceState({}, '', '/settings/shop')
+    }
+    if (params.get('stripe_refresh') === '1') {
+      // Stripe's "session expired" path — just reload to start over
+      loadSettings()
+      window.history.replaceState({}, '', '/settings/shop')
+    }
+  }, [])
+
+  // ─── Kick off Stripe Connect onboarding ─────────────────────────────
+  // Calls the stripe-connect-onboard edge function which (a) creates a
+  // Stripe Express account if needed and (b) returns a hosted onboarding
+  // URL. We redirect the groomer there to verify ID, link bank, etc.
+  async function handleConnectStripe() {
+    setConnectingStripe(true)
+    setConnectError('')
+    try {
+      var { data, error: invokeError } = await supabase.functions.invoke('stripe-connect-onboard', {})
+      if (invokeError) throw invokeError
+      if (!data || !data.url) {
+        throw new Error(data && data.error ? data.error : 'No onboarding URL returned')
+      }
+      // Redirect to Stripe's hosted onboarding. After they finish, Stripe
+      // will redirect them back to /settings/shop?stripe_return=1.
+      window.location.href = data.url
+    } catch (err) {
+      console.error('Stripe Connect error:', err)
+      setConnectError('Could not start Stripe onboarding: ' + (err.message || err))
+      setConnectingStripe(false)
+    }
+  }
 
   async function loadSettings() {
     setLoading(true)
@@ -82,13 +133,20 @@ export default function ShopSettings() {
         setClientAiBookingEnabled(data.client_ai_booking_enabled !== false)
       }
 
-      // Smart Nudges — lives on the groomers table (not shop_settings)
+      // Smart Nudges + Stripe Connect status — both live on the groomers
+      // table (not shop_settings). We pull them in one query.
       var { data: groomerRow } = await supabase
         .from('groomers')
-        .select('nudges_enabled')
+        .select('nudges_enabled, stripe_connect_account_id, stripe_connect_status, stripe_connect_charges_enabled, stripe_connect_payouts_enabled')
         .eq('id', user.id)
         .maybeSingle()
-      if (groomerRow) setNudgesEnabled(groomerRow.nudges_enabled !== false)
+      if (groomerRow) {
+        setNudgesEnabled(groomerRow.nudges_enabled !== false)
+        setStripeAccountId(groomerRow.stripe_connect_account_id || null)
+        setStripeConnectStatus(groomerRow.stripe_connect_status || 'not_started')
+        setStripeChargesEnabled(groomerRow.stripe_connect_charges_enabled === true)
+        setStripePayoutsEnabled(groomerRow.stripe_connect_payouts_enabled === true)
+      }
     } catch (err) {
       console.error('Error loading shop settings:', err)
       setError('Could not load settings: ' + err.message)
@@ -412,6 +470,126 @@ export default function ShopSettings() {
 
       {/* AI Usage widget — shows used / cap for current month */}
       <AIUsageWidget />
+
+      {/* ─── Payments / Stripe Connect ──────────────────────────────────── */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+          <span style={{ fontSize: '22px' }}>💳</span>
+          <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#1f2937' }}>Payments</h2>
+        </div>
+        <p style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#6b7280', lineHeight: 1.5 }}>
+          Connect your Stripe account so clients can pay you by card directly from the client portal — no more chasing Zelle, Venmo, or Cash App. Money lands in your bank daily.
+        </p>
+
+        {/* NOT STARTED — show big Connect button */}
+        {stripeConnectStatus === 'not_started' && !stripeAccountId && (
+          <>
+            <button
+              onClick={handleConnectStripe}
+              disabled={connectingStripe}
+              style={{
+                width: '100%',
+                padding: '14px',
+                background: connectingStripe ? '#a78bfa' : '#7c3aed',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '10px',
+                fontSize: '15px',
+                fontWeight: 700,
+                cursor: connectingStripe ? 'not-allowed' : 'pointer',
+                boxShadow: '0 2px 8px rgba(124,58,237,0.25)',
+              }}
+            >
+              {connectingStripe ? 'Opening Stripe...' : '🔗 Connect Stripe Account'}
+            </button>
+            <div style={{ marginTop: '10px', fontSize: '12px', color: '#9ca3af' }}>
+              You'll be sent to Stripe to verify your identity and link your bank. Takes about 5 minutes.
+            </div>
+          </>
+        )}
+
+        {/* PENDING — partway through onboarding (account exists but not enabled) */}
+        {(stripeConnectStatus === 'pending' || (stripeAccountId && !stripeChargesEnabled)) && stripeConnectStatus !== 'enabled' && (
+          <>
+            <div style={{ padding: '12px 14px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '8px', marginBottom: '12px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#92400e', marginBottom: '4px' }}>
+                ⏳ Onboarding in progress
+              </div>
+              <div style={{ fontSize: '13px', color: '#78350f' }}>
+                Stripe is reviewing your info, or you didn't finish all the steps. Click below to continue.
+              </div>
+            </div>
+            <button
+              onClick={handleConnectStripe}
+              disabled={connectingStripe}
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: connectingStripe ? '#a78bfa' : '#7c3aed',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '10px',
+                fontSize: '14px',
+                fontWeight: 700,
+                cursor: connectingStripe ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {connectingStripe ? 'Opening Stripe...' : 'Continue Setup on Stripe →'}
+            </button>
+          </>
+        )}
+
+        {/* ENABLED — fully connected, can accept payments */}
+        {stripeConnectStatus === 'enabled' && stripeChargesEnabled && (
+          <div style={{ padding: '14px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+              <span style={{ fontSize: '18px' }}>✅</span>
+              <span style={{ fontSize: '15px', fontWeight: 700, color: '#166534' }}>Stripe Connected</span>
+            </div>
+            <div style={{ fontSize: '13px', color: '#15803d', lineHeight: 1.5 }}>
+              Clients can now pay you by card from the client portal. Daily payouts to your bank.
+              {stripePayoutsEnabled ? ' Bank account verified ✓' : ' (bank verification still in progress)'}
+            </div>
+          </div>
+        )}
+
+        {/* RESTRICTED — Stripe needs more info or has paused the account */}
+        {stripeConnectStatus === 'restricted' && (
+          <>
+            <div style={{ padding: '12px 14px', background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', marginBottom: '12px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#991b1b', marginBottom: '4px' }}>
+                ⚠️ Action required by Stripe
+              </div>
+              <div style={{ fontSize: '13px', color: '#7f1d1d' }}>
+                Stripe needs more information from you. Click below to fix it on Stripe's side.
+              </div>
+            </div>
+            <button
+              onClick={handleConnectStripe}
+              disabled={connectingStripe}
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: connectingStripe ? '#fca5a5' : '#dc2626',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '10px',
+                fontSize: '14px',
+                fontWeight: 700,
+                cursor: connectingStripe ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {connectingStripe ? 'Opening Stripe...' : 'Fix on Stripe →'}
+            </button>
+          </>
+        )}
+
+        {connectError && (
+          <div style={{ marginTop: '10px', padding: '10px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', fontSize: '13px', color: '#991b1b' }}>
+            {connectError}
+          </div>
+        )}
+      </div>
 
       {/* Logo upload */}
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
