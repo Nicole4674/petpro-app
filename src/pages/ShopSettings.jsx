@@ -53,6 +53,7 @@ export default function ShopSettings() {
   var [stripeAccountId, setStripeAccountId] = useState(null)
   var [connectingStripe, setConnectingStripe] = useState(false)
   var [connectError, setConnectError] = useState('')
+  var [refreshingStripe, setRefreshingStripe] = useState(false)
 
   useEffect(function () {
     loadSettings()
@@ -75,6 +76,33 @@ export default function ShopSettings() {
       window.history.replaceState({}, '', '/settings/shop')
     }
   }, [])
+
+  // ─── Refresh Stripe Connect status from Stripe ───────────────────────
+  // Asks Stripe directly for the groomer's account state and updates
+  // the local UI + DB. Called automatically when the page loads (if they
+  // have an account) and when they return from onboarding. Also wired to
+  // a manual "Refresh status" button.
+  async function refreshStripeStatus(silent) {
+    if (!silent) setRefreshingStripe(true)
+    try {
+      var { data, error: invokeError } = await supabase.functions.invoke('stripe-connect-refresh', {})
+      if (invokeError) throw invokeError
+      if (data) {
+        if (data.status) setStripeConnectStatus(data.status)
+        if (typeof data.charges_enabled === 'boolean') setStripeChargesEnabled(data.charges_enabled)
+        if (typeof data.payouts_enabled === 'boolean') setStripePayoutsEnabled(data.payouts_enabled)
+      }
+    } catch (err) {
+      console.warn('refreshStripeStatus failed (non-fatal):', err)
+      // Silent failure on auto-load — don't bother the user. The DB still
+      // has the last-known state, which is what loadSettings already loaded.
+      if (!silent) {
+        setConnectError('Could not refresh status: ' + (err.message || err))
+      }
+    } finally {
+      if (!silent) setRefreshingStripe(false)
+    }
+  }
 
   // ─── Kick off Stripe Connect onboarding ─────────────────────────────
   // Calls the stripe-connect-onboard edge function which (a) creates a
@@ -146,6 +174,12 @@ export default function ShopSettings() {
         setStripeConnectStatus(groomerRow.stripe_connect_status || 'not_started')
         setStripeChargesEnabled(groomerRow.stripe_connect_charges_enabled === true)
         setStripePayoutsEnabled(groomerRow.stripe_connect_payouts_enabled === true)
+
+        // Auto-refresh from Stripe if we have an account — keeps status fresh
+        // even if webhooks miss something. Runs silently in background.
+        if (groomerRow.stripe_connect_account_id) {
+          refreshStripeStatus(true)
+        }
       }
     } catch (err) {
       console.error('Error loading shop settings:', err)
@@ -519,23 +553,43 @@ export default function ShopSettings() {
                 Stripe is reviewing your info, or you didn't finish all the steps. Click below to continue.
               </div>
             </div>
-            <button
-              onClick={handleConnectStripe}
-              disabled={connectingStripe}
-              style={{
-                width: '100%',
-                padding: '12px',
-                background: connectingStripe ? '#a78bfa' : '#7c3aed',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '10px',
-                fontSize: '14px',
-                fontWeight: 700,
-                cursor: connectingStripe ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {connectingStripe ? 'Opening Stripe...' : 'Continue Setup on Stripe →'}
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={handleConnectStripe}
+                disabled={connectingStripe}
+                style={{
+                  flex: 2,
+                  padding: '12px',
+                  background: connectingStripe ? '#a78bfa' : '#7c3aed',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '10px',
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  cursor: connectingStripe ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {connectingStripe ? 'Opening Stripe...' : 'Continue Setup on Stripe →'}
+              </button>
+              <button
+                onClick={() => refreshStripeStatus(false)}
+                disabled={refreshingStripe}
+                title="Check current status with Stripe"
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  background: '#fff',
+                  color: '#6b7280',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '10px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: refreshingStripe ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {refreshingStripe ? '...' : '🔄 Refresh'}
+              </button>
+            </div>
           </>
         )}
 
