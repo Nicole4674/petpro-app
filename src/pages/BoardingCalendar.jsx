@@ -107,7 +107,13 @@ export default function BoardingCalendar() {
   }
 
   function formatDate(d) {
-    return d.toISOString().split('T')[0]
+    // Use LOCAL date parts, not UTC. Previously this used toISOString() which
+    // shifted dates by 1 day for users in negative-offset timezones (e.g. CST)
+    // when viewed in the evening — calendar bars appeared a day early.
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
   }
 
   function formatDateShort(d) {
@@ -1074,7 +1080,7 @@ export default function BoardingCalendar() {
       '<table style="width:100%;border-collapse:collapse;font-size:11px;"><tr style="background:#f1f5f9;"><th style="padding:4px;border:1px solid #d1d5db;">Date</th><th style="padding:4px;border:1px solid #d1d5db;">Bkfst</th><th style="padding:4px;border:1px solid #d1d5db;">Lunch</th><th style="padding:4px;border:1px solid #d1d5db;">Dinner</th><th style="padding:4px;border:1px solid #d1d5db;">Water</th><th style="padding:4px;border:1px solid #d1d5db;">BM</th><th style="padding:4px;border:1px solid #d1d5db;">Pee</th><th style="padding:4px;border:1px solid #d1d5db;">Vomit</th><th style="padding:4px;border:1px solid #d1d5db;">Notes</th></tr>' +
       Array.from({ length: getDaysBetween(res.start_date, res.end_date) }, (_, i) => {
         const d = new Date(res.start_date); d.setDate(d.getDate() + i)
-        return '<tr><td style="padding:4px;border:1px solid #d1d5db;">' + d.toISOString().split('T')[0] + '</td>' + '<td style="padding:4px;border:1px solid #d1d5db;"></td>'.repeat(7) + '<td style="padding:4px;border:1px solid #d1d5db;"></td></tr>'
+        return '<tr><td style="padding:4px;border:1px solid #d1d5db;">' + formatDate(d) + '</td>' + '<td style="padding:4px;border:1px solid #d1d5db;"></td>'.repeat(7) + '<td style="padding:4px;border:1px solid #d1d5db;"></td></tr>'
       }).join('') +
       '</table></div>')
     : ''
@@ -1084,7 +1090,7 @@ export default function BoardingCalendar() {
       '<table style="width:100%;border-collapse:collapse;font-size:' + (isClipboard ? '12' : '11') + 'px;"><tr style="background:#f1f5f9;"><th style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;">Date</th><th style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;">Bkfst</th><th style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;">Lunch</th><th style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;">Dinner</th><th style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;">Water</th><th style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;">BM</th><th style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;">Pee</th><th style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;">Vomit</th><th style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;">Behavior / Notes</th></tr>' +
       Array.from({ length: Math.max(getDaysBetween(res.start_date, res.end_date), 3) }, (_, i) => {
         const d = new Date(res.start_date); d.setDate(d.getDate() + i)
-        return '<tr><td style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;font-size:' + (isClipboard ? '11' : '10') + 'px;">' + d.toISOString().split('T')[0] + '</td>' + ('<td style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;height:' + (isClipboard ? '28' : '20') + 'px;"></td>').repeat(7) + '<td style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;min-width:80px;"></td></tr>'
+        return '<tr><td style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;font-size:' + (isClipboard ? '11' : '10') + 'px;">' + formatDate(d) + '</td>' + ('<td style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;height:' + (isClipboard ? '28' : '20') + 'px;"></td>').repeat(7) + '<td style="padding:' + (isClipboard ? '6' : '4') + 'px;border:1px solid #d1d5db;min-width:80px;"></td></tr>'
       }).join('') +
       '</table></div>'
 
