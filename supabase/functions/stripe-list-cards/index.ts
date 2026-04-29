@@ -39,6 +39,15 @@ serve(async (req: Request) => {
     if (!authHeader) return jsonError('Missing authorization', 401)
     const token = authHeader.replace('Bearer ', '')
 
+    // Optional body — if a client_id is supplied, this is a GROOMER asking
+    // for that client's cards (e.g. ringing them up at the front desk).
+    // If no body, it's a CLIENT asking for their own cards (portal flow).
+    let bodyClientId: string | null = null
+    try {
+      const body = await req.json()
+      if (body && typeof body.client_id === 'string') bodyClientId = body.client_id
+    } catch { /* no body — that's fine, defaults to client-portal mode */ }
+
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -47,14 +56,46 @@ serve(async (req: Request) => {
     const { data: { user }, error: userErr } = await supabase.auth.getUser(token)
     if (userErr || !user) return jsonError('Invalid auth token', 401)
 
-    // 2. Find client by user_id
-    const { data: client } = await supabase
-      .from('clients')
-      .select('id, groomer_id, stripe_customer_id')
-      .eq('user_id', user.id)
-      .maybeSingle()
+    // 2. Resolve which client's cards we're listing
+    let client: any = null
 
-    if (!client) return jsonError('Client record not found', 404)
+    if (bodyClientId) {
+      // GROOMER MODE — verify caller is a groomer that owns this client
+      let { data: groomer } = await supabase
+        .from('groomers')
+        .select('id, email')
+        .eq('id', user.id)
+        .maybeSingle()
+      if (!groomer && user.email) {
+        const fb = await supabase
+          .from('groomers')
+          .select('id, email')
+          .eq('email', user.email)
+          .maybeSingle()
+        groomer = fb.data
+      }
+      if (!groomer) return jsonError('Only groomers can list a specific client\'s cards', 403)
+
+      const { data: targetClient } = await supabase
+        .from('clients')
+        .select('id, groomer_id, stripe_customer_id')
+        .eq('id', bodyClientId)
+        .maybeSingle()
+      if (!targetClient) return jsonError('Client not found', 404)
+      if (targetClient.groomer_id !== groomer.id) {
+        return jsonError('This client does not belong to your shop', 403)
+      }
+      client = targetClient
+    } else {
+      // CLIENT-PORTAL MODE — find client by their auth user_id
+      const { data: ownClient } = await supabase
+        .from('clients')
+        .select('id, groomer_id, stripe_customer_id')
+        .eq('user_id', user.id)
+        .maybeSingle()
+      if (!ownClient) return jsonError('Client record not found', 404)
+      client = ownClient
+    }
 
     // 3. If client has no Stripe customer yet, they have no cards
     if (!client.stripe_customer_id) {

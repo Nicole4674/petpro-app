@@ -248,6 +248,13 @@ export default function Calendar() {
     const [discountReason, setDiscountReason] = useState('')
     const [paymentNotes, setPaymentNotes] = useState('')
     const [recordingPayment, setRecordingPayment] = useState(false)
+    // ─── Saved card support (Phase 4b) ───────────────────────────────────
+    // When the groomer picks Card method, we offer the client's saved cards
+    // (charged via Stripe) by default. Manual fallback for offline terminals.
+    const [groomerSavedCards, setGroomerSavedCards] = useState([])
+    const [selectedSavedCardId, setSelectedSavedCardId] = useState(null)
+    const [loadingSavedCards, setLoadingSavedCards] = useState(false)
+    const [useManualCardEntry, setUseManualCardEntry] = useState(false) // true = skip Stripe, just record
     const [apptPayments, setApptPayments] = useState([]) // payment history for the appt detail popup
     // Payment edit modal state — for fixing typos or adding a tip that came in later
     const [editingPayment, setEditingPayment] = useState(null) // full payment row being edited, or null
@@ -1582,7 +1589,56 @@ export default function Calendar() {
         setDiscountReason(appt.discount_reason || '')
         setPaymentMethod('')
         setPaymentNotes('')
+
+        // Reset saved-card state for fresh popup. Cards load when "Card"
+        // method is clicked (lazy — saves an API call if they choose Cash/Zelle).
+        setGroomerSavedCards([])
+        setSelectedSavedCardId(null)
+        setUseManualCardEntry(false)
+
         setShowPaymentPopup(true)
+    }
+
+    // Load the client's saved cards for the open payment popup. Called
+    // lazily when the groomer clicks the Card method button.
+    const loadGroomerSavedCards = async (appt) => {
+        if (!appt || !appt.client_id) return
+        setLoadingSavedCards(true)
+        try {
+            // Use the existing stripe-list-cards function but pass the
+            // target client_id so the groomer can list a specific client's
+            // cards. The function defaults to the auth'd user's cards
+            // (client portal use case) — for groomer use we need a tweak.
+            // Workaround: query the clients table for stripe_customer_id
+            // and use a groomer-side card list approach.
+            //
+            // Simpler approach: call stripe-list-cards-for-client with the
+            // client_id. Since we haven't built that yet, we'll fetch
+            // payment methods directly through Supabase functions.invoke
+            // by extending the existing function in a minute. For now,
+            // call a new dedicated endpoint.
+            // Re-using stripe-list-cards. When body.client_id is set, the
+            // function treats the caller as a groomer and returns THAT
+            // client's cards (after verifying ownership).
+            const { data, error: invokeError } = await supabase.functions.invoke('stripe-list-cards', {
+                body: { client_id: appt.client_id }
+            })
+            if (invokeError) {
+                console.warn('Could not load saved cards for this client:', invokeError)
+                setGroomerSavedCards([])
+                return
+            }
+            const cards = (data && data.cards) || []
+            setGroomerSavedCards(cards)
+            // Auto-select default card if there is one
+            const def = cards.find(c => c.is_default) || cards[0]
+            if (def) setSelectedSavedCardId(def.id)
+        } catch (err) {
+            console.warn('Saved cards load error:', err)
+            setGroomerSavedCards([])
+        } finally {
+            setLoadingSavedCards(false)
+        }
     }
 
     // Record the payment AND stamp checked_out_at in one flow
@@ -1614,8 +1670,41 @@ export default function Calendar() {
             }).eq('id', paymentAppt.id)
         }
 
-        // 2. Create payment row (skip if amount and tip are both 0 — just updating discount)
-        if (amt > 0 || tip > 0) {
+        // ─── STRIPE PATH ───
+        // Card method + a saved card selected + NOT manual entry mode →
+        // route through stripe-groomer-charge to actually charge the card.
+        const useStripe = paymentMethod === 'card' && !useManualCardEntry && selectedSavedCardId
+        if (useStripe && (amt > 0 || tip > 0)) {
+            try {
+                const { data, error: invokeError } = await supabase.functions.invoke('stripe-groomer-charge', {
+                    body: {
+                        appointment_id: paymentAppt.id,
+                        payment_method_id: selectedSavedCardId,
+                        tip_amount: tip,
+                    }
+                })
+                // Surface the real error message from non-2xx responses
+                if (invokeError) {
+                    let realMsg = invokeError.message || 'Charge failed'
+                    try {
+                        if (invokeError.context && typeof invokeError.context.json === 'function') {
+                            const body = await invokeError.context.json()
+                            if (body && body.error) realMsg = body.error
+                        }
+                    } catch { /* ignore */ }
+                    throw new Error(realMsg)
+                }
+                if (data && data.error) throw new Error(data.error)
+                if (!data || !data.success) throw new Error('Charge did not succeed')
+                // stripe-groomer-charge already wrote the payment row.
+                // Skip the manual insert below.
+            } catch (err) {
+                alert('Error charging card: ' + (err.message || err))
+                setRecordingPayment(false)
+                return
+            }
+        } else if (amt > 0 || tip > 0) {
+            // ─── MANUAL PATH (Cash/Zelle/Venmo OR card with manual entry) ───
             const { error } = await supabase.from('payments').insert({
                 appointment_id: paymentAppt.id,
                 client_id: paymentAppt.client_id,
@@ -4169,12 +4258,90 @@ export default function Calendar() {
                                             <button
                                                 type="button"
                                                 className={'payment-method-btn' + (paymentMethod === 'card' ? ' payment-method-btn-active' : '')}
-                                                onClick={() => setPaymentMethod('card')}
+                                                onClick={() => {
+                                                    setPaymentMethod('card')
+                                                    // Lazy-load the client's saved cards on first card click
+                                                    if (groomerSavedCards.length === 0 && !loadingSavedCards) {
+                                                        loadGroomerSavedCards(paymentAppt)
+                                                    }
+                                                }}
                                                 disabled={recordingPayment}
                                             >
                                                 💳 Credit Card
                                             </button>
                                         </div>
+
+                                        {/* Saved cards picker — appears when Card method is selected
+                                             AND we found cards on file AND user hasn't toggled manual mode */}
+                                        {paymentMethod === 'card' && !useManualCardEntry && (
+                                            <div style={{ marginTop: '12px', padding: '12px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '10px' }}>
+                                                {loadingSavedCards ? (
+                                                    <div style={{ fontSize: '13px', color: '#6b7280', padding: '8px' }}>Loading saved cards...</div>
+                                                ) : groomerSavedCards.length === 0 ? (
+                                                    <div style={{ fontSize: '13px', color: '#92400e', padding: '8px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '8px' }}>
+                                                        💡 No saved cards on file for this client. They can add one in their portal, or you can record this payment manually below.
+                                                        <div style={{ marginTop: '8px' }}>
+                                                            <button type="button" onClick={() => setUseManualCardEntry(true)}
+                                                                style={{ background: 'transparent', border: 'none', color: '#7c3aed', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', padding: 0, fontSize: '13px' }}>
+                                                                → Just record manually
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <>
+                                                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                                            Charge a card on file
+                                                        </div>
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                                            {groomerSavedCards.map(card => (
+                                                                <label key={card.id} style={{
+                                                                    display: 'flex', alignItems: 'center', padding: '10px 12px',
+                                                                    border: '2px solid ' + (selectedSavedCardId === card.id ? '#7c3aed' : '#e5e7eb'),
+                                                                    background: selectedSavedCardId === card.id ? '#f5f3ff' : '#fff',
+                                                                    borderRadius: '8px', cursor: 'pointer', fontSize: '14px',
+                                                                }}>
+                                                                    <input type="radio" name="groomerCard" checked={selectedSavedCardId === card.id}
+                                                                        onChange={() => setSelectedSavedCardId(card.id)} style={{ marginRight: '10px' }} />
+                                                                    <span style={{ flex: 1 }}>
+                                                                        <span style={{ fontWeight: 700 }}>
+                                                                            {(card.brand || 'Card').charAt(0).toUpperCase() + (card.brand || '').slice(1)} •••• {card.last4}
+                                                                        </span>
+                                                                        {card.is_default && (
+                                                                            <span style={{ marginLeft: '8px', fontSize: '11px', background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: '10px' }}>
+                                                                                Default
+                                                                            </span>
+                                                                        )}
+                                                                    </span>
+                                                                    {card.exp_month && card.exp_year && (
+                                                                        <span style={{ fontSize: '12px', color: '#9ca3af' }}>
+                                                                            {String(card.exp_month).padStart(2, '0')}/{String(card.exp_year).slice(-2)}
+                                                                        </span>
+                                                                    )}
+                                                                </label>
+                                                            ))}
+                                                        </div>
+                                                        <div style={{ marginTop: '10px', fontSize: '12px', color: '#6b7280', textAlign: 'center' }}>
+                                                            Just recording an external swipe instead?{' '}
+                                                            <button type="button" onClick={() => setUseManualCardEntry(true)}
+                                                                style={{ background: 'transparent', border: 'none', color: '#7c3aed', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', padding: 0, fontSize: '12px' }}>
+                                                                Click to enter manually
+                                                            </button>
+                                                        </div>
+                                                    </>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* Manual entry indicator (when toggled) */}
+                                        {paymentMethod === 'card' && useManualCardEntry && (
+                                            <div style={{ marginTop: '8px', padding: '8px 12px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '8px', fontSize: '12px', color: '#78350f' }}>
+                                                📝 Manual entry mode — payment will be recorded but no Stripe charge.{' '}
+                                                <button type="button" onClick={() => setUseManualCardEntry(false)}
+                                                    style={{ background: 'transparent', border: 'none', color: '#7c3aed', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', padding: 0, fontSize: '12px' }}>
+                                                    Switch back to Stripe
+                                                </button>
+                                            </div>
+                                        )}
 
                                         {/* Amount + Tip side by side */}
                                         <div className="payment-amount-row">
