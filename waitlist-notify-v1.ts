@@ -309,6 +309,39 @@ Deno.serve(async function (req) {
       )
     }
 
+    // ─── Quiet-hours guard ─────────────────────────────────────────────────
+    // Don't send waitlist offers outside 9 AM – 8 PM. Real reason: MoeGo
+    // messages at 8 AM and clients complain. We start at 9 AM. Hardcoded to
+    // America/Chicago for now since that's the only shop in production. When
+    // we onboard groomers in other timezones, move this to shop_settings.
+    // The message simply won't fire — the next slot opening during business
+    // hours will offer the same waitlist person.
+    try {
+      var hourStr = new Date().toLocaleString('en-US', {
+        timeZone: 'America/Chicago',
+        hour: '2-digit',
+        hour12: false,
+      })
+      // Some browsers return "24" for midnight — treat as 0
+      var nowLocalHour = parseInt(hourStr, 10)
+      if (Number.isNaN(nowLocalHour)) nowLocalHour = 12
+      if (nowLocalHour === 24) nowLocalHour = 0
+      // 9 AM ≤ hour < 20 (8 PM) is the "send" window
+      if (nowLocalHour < 9 || nowLocalHour >= 20) {
+        console.log('[waitlist-notify] Quiet hours active — skipping (local hour:', nowLocalHour, ')')
+        return new Response(
+          JSON.stringify({
+            notified: false,
+            reason: 'Outside business hours (9 AM – 8 PM CT). Will offer next time a slot opens during the day.'
+          }),
+          { status: 200, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders) }
+        )
+      }
+    } catch (tzErr) {
+      // Don't block the flow on a TZ formatting error — just log and continue
+      console.warn('[waitlist-notify] Quiet-hours TZ check failed (continuing):', tzErr)
+    }
+
     var responseMins = settings.waitlist_response_window_minutes || 30
     var filterRules = settings.waitlist_auto_notify_instructions || ''
     var shopName = settings.shop_name || ''

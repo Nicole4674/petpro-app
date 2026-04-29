@@ -126,7 +126,7 @@ export default function Login() {
         </p>
 
         <p className="switch-auth">
-          Don't have an account? <Link to="/signup">Create Account</Link>
+          Don't have an account? <Link to="/plans">Create Account</Link>
         </p>
       </div>
     </div>

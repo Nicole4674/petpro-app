@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams, Navigate } from 'react-router-dom'
 
 // Stripe Payment Links (LIVE). Kept in sync with Plans.jsx.
 // Replaced sandbox `test_` URLs on launch.
@@ -14,6 +14,16 @@ const PAYMENT_LINKS = {
 export default function Signup() {
   const [searchParams] = useSearchParams()
   const tierFromUrl = searchParams.get('tier')
+
+  // ─── Bypass guard ─────────────────────────────────────────────────────
+  // /signup MUST be reached via the Plans page (which adds ?tier=...).
+  // If someone lands here directly, redirect them to /plans first so they
+  // pick a tier. This is what prevents orphan accounts that bypass Stripe
+  // entirely (e.g. directly typing the URL or clicking the old "Create
+  // Account" link from the login page).
+  if (!tierFromUrl || !PAYMENT_LINKS[tierFromUrl]) {
+    return <Navigate to="/plans?need_subscription=1" replace />
+  }
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [businessName, setBusinessName] = useState('')
