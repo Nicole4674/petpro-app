@@ -98,6 +98,10 @@ export default function BoardingCalendar() {
     vet_emergency_contact: '',
     // Extras
     grooming_at_end: false,
+    // If grooming_at_end is checked, this holds the picked service id so we
+    // can auto-add it as a boarding addon when the reservation saves. Saves
+    // the groomer from having to reopen the kennel card to add the service.
+    grooming_at_end_service_id: '',
     items_brought: '',
     // Total price for the stay — drives the kennel card balance + payment flow
     total_price: ''
@@ -460,6 +464,38 @@ export default function BoardingCalendar() {
         .insert(petInserts)
 
       if (petError) throw petError
+
+      // ─── Auto-add the "grooming at end of stay" service as a boarding addon ─
+      // If the groomer checked the box AND picked a service, insert the addon
+      // row + bump the reservation's total_price so the kennel card shows it
+      // immediately. This saves them from having to reopen the kennel card and
+      // add the service manually.
+      if (newRes.grooming_at_end && newRes.grooming_at_end_service_id) {
+        const picked = services.find(s => s.id === newRes.grooming_at_end_service_id)
+        if (picked) {
+          const price = parseFloat(picked.price || 0)
+          const { error: addonErr } = await supabase
+            .from('boarding_addons')
+            .insert({
+              boarding_reservation_id: resData.id,
+              service_id: picked.id,
+              service_name: picked.service_name,
+              quoted_price: price,
+              groomer_id: user.id,
+            })
+          if (addonErr) {
+            console.error('Could not add departure service addon:', addonErr)
+            alert('Reservation saved, but we could not auto-add the grooming service. You can add it manually from the kennel card.')
+          } else if (price > 0) {
+            // Bump total_price on the reservation
+            const newTotal = parseFloat(newRes.total_price || 0) + price
+            await supabase
+              .from('boarding_reservations')
+              .update({ total_price: newTotal, updated_at: new Date().toISOString() })
+              .eq('id', resData.id)
+          }
+        }
+      }
 
       setShowNewReservation(null)
       await loadData() // Refresh
@@ -3103,10 +3139,47 @@ export default function BoardingCalendar() {
                   <input
                     type="checkbox"
                     checked={newRes.grooming_at_end}
-                    onChange={e => setNewRes(prev => ({ ...prev, grooming_at_end: e.target.checked }))}
+                    onChange={e => setNewRes(prev => ({
+                      ...prev,
+                      grooming_at_end: e.target.checked,
+                      // Clear the picked service if they uncheck the box
+                      grooming_at_end_service_id: e.target.checked ? prev.grooming_at_end_service_id : ''
+                    }))}
                   />
                   <span>✂️ Wants grooming at end of stay</span>
                 </label>
+
+                {/* Service picker — only when the checkbox is on. Picks one
+                    service that gets auto-added as a boarding addon on save. */}
+                {newRes.grooming_at_end && (
+                  <div style={{ marginTop: '8px', paddingLeft: '24px' }}>
+                    <label className="boarding-label" style={{ fontSize: '12px' }}>
+                      Pick the service (you can add more later from the kennel card)
+                    </label>
+                    <select
+                      className="boarding-input"
+                      value={newRes.grooming_at_end_service_id}
+                      onChange={e => setNewRes(prev => ({ ...prev, grooming_at_end_service_id: e.target.value }))}
+                      style={{ width: '100%' }}
+                    >
+                      <option value="">— Choose a service —</option>
+                      {services.map(svc => (
+                        <option key={svc.id} value={svc.id}>
+                          {svc.service_name} — ${parseFloat(svc.price || 0).toFixed(2)}
+                        </option>
+                      ))}
+                    </select>
+                    {newRes.grooming_at_end_service_id && (() => {
+                      const picked = services.find(s => s.id === newRes.grooming_at_end_service_id)
+                      if (!picked) return null
+                      return (
+                        <div style={{ fontSize: '12px', color: '#16a34a', marginTop: '4px' }}>
+                          ✓ ${parseFloat(picked.price || 0).toFixed(2)} will be added to the stay total automatically
+                        </div>
+                      )
+                    })()}
+                  </div>
+                )}
               </div>
 
               <div className="boarding-field" style={{ marginTop: '12px' }}>
