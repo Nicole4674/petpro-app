@@ -23,11 +23,11 @@ export default function ShopSettings() {
   var [copiedLink, setCopiedLink] = useState(false)
 
   // ─── Platform-owner gate (Phase 5 safety) ────────────────────────────
-  // Stripe Connect is in sandbox/test mode until live approval comes through.
-  // Hide the Stripe Connect UI from non-platform-owners so new groomers don't
-  // hit a broken sandbox onboarding. Flip STRIPE_CONNECT_LIVE to true once
-  // we're approved + keys swapped in edge functions.
-  var STRIPE_CONNECT_LIVE = false
+  // Stripe Connect is now LIVE — Stripe approved the platform + keys swapped
+  // to sk_live_/pk_live_. All groomers can see the Stripe Connect section
+  // and onboard their own Connect Express accounts. Flip back to false only
+  // if we need to hide it from new groomers during a maintenance window.
+  var STRIPE_CONNECT_LIVE = true
   var PLATFORM_OWNER_EMAILS = ['treadwell4674@gmail.com', 'nicole@trypetpro.com']
   var [userEmail, setUserEmail] = useState('')
   var isPlatformOwner = userEmail && PLATFORM_OWNER_EMAILS.indexOf(userEmail.toLowerCase()) >= 0
