@@ -1991,6 +1991,38 @@ export default function Calendar() {
             if (newStatus === 'cancelled') {
                 await checkWaitlistForOpening(apptId)
             }
+
+            // Auto-charge no-show fee if shop has one configured (Phase 5c)
+            if (newStatus === 'no_show') {
+                try {
+                    var { data: feeResult } = await supabase.functions.invoke('stripe-charge-no-show-fee', {
+                        body: { appointment_id: apptId }
+                    })
+                    // Friendly feedback based on what happened
+                    if (feeResult && feeResult.charged) {
+                        alert('No-show recorded. Auto-charged $' + parseFloat(feeResult.amount).toFixed(2) + ' no-show fee to client\'s card on file.')
+                    } else if (feeResult && feeResult.skipped) {
+                        // Silent skips — these are normal, not errors:
+                        //   no_fee_configured → groomer hasn't set a fee
+                        //   client_no_card → client hasn't saved a card yet
+                        //   shop_no_stripe → shop hasn't connected Stripe yet
+                        // Don't pop an alert for these (would be noisy on every no-show)
+                    } else if (feeResult && feeResult.error) {
+                        alert('No-show recorded, but auto-charge failed: ' + feeResult.error)
+                    }
+                    // Refresh payments if we're viewing this appt
+                    if (selectedAppt && selectedAppt.id === apptId) {
+                        var { data: refreshed } = await supabase
+                            .from('payments')
+                            .select('*')
+                            .eq('appointment_id', apptId)
+                            .order('created_at', { ascending: true })
+                        setApptPayments(refreshed || [])
+                    }
+                } catch (chargeErr) {
+                    console.warn('No-show auto-charge attempt failed (non-fatal):', chargeErr)
+                }
+            }
         } catch (err) {
             console.error('Error updating status:', err)
             alert('Error: ' + err.message)
