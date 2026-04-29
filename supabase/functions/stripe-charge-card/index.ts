@@ -240,7 +240,17 @@ serve(async (req: Request) => {
       })
     }
 
-    // 11. Done!
+    // 11. Fire-and-forget receipt email (don't block on it). If it fails,
+    //     the charge still succeeded — we just log and move on.
+    try {
+      await supabase.functions.invoke('stripe-send-receipt', {
+        body: { payment_id: paymentRow.id }
+      })
+    } catch (emailErr) {
+      console.warn('[stripe-charge-card] Receipt email failed (non-fatal):', emailErr)
+    }
+
+    // 12. Done!
     return new Response(JSON.stringify({
       success: true,
       payment_id: paymentRow.id,
