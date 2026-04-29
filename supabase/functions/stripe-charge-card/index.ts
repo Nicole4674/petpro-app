@@ -218,7 +218,7 @@ serve(async (req: Request) => {
         appointment_id: appointmentId,
         amount: balance,            // service amount only
         tip_amount: tipAmount,      // tip recorded separately
-        method: 'Card',
+        method: 'card',
         notes: 'Paid via client portal (Stripe)',
         stripe_payment_intent_id: paymentIntent.id,
       })
