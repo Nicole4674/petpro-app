@@ -22,6 +22,17 @@ export default function ShopSettings() {
   var [userId, setUserId] = useState(null)
   var [copiedLink, setCopiedLink] = useState(false)
 
+  // ─── Platform-owner gate (Phase 5 safety) ────────────────────────────
+  // Stripe Connect is in sandbox/test mode until live approval comes through.
+  // Hide the Stripe Connect UI from non-platform-owners so new groomers don't
+  // hit a broken sandbox onboarding. Flip STRIPE_CONNECT_LIVE to true once
+  // we're approved + keys swapped in edge functions.
+  var STRIPE_CONNECT_LIVE = false
+  var PLATFORM_OWNER_EMAILS = ['treadwell4674@gmail.com', 'nicole@trypetpro.com']
+  var [userEmail, setUserEmail] = useState('')
+  var isPlatformOwner = userEmail && PLATFORM_OWNER_EMAILS.indexOf(userEmail.toLowerCase()) >= 0
+  var canSeeStripeConnect = STRIPE_CONNECT_LIVE || isPlatformOwner
+
   // Form fields
   var [shopName, setShopName] = useState('')
   var [tagline, setTagline] = useState('')
@@ -145,6 +156,7 @@ export default function ShopSettings() {
         return
       }
       setUserId(user.id)
+      setUserEmail((user.email || '').toLowerCase())
 
       var { data, error: fetchError } = await supabase
         .from('shop_settings')
@@ -522,6 +534,25 @@ export default function ShopSettings() {
       <AIUsageWidget />
 
       {/* ─── Payments / Stripe Connect ──────────────────────────────────── */}
+      {/* Gated until live Connect approval comes through — see canSeeStripeConnect */}
+      {!canSeeStripeConnect && (
+        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+            <span style={{ fontSize: '22px' }}>💳</span>
+            <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#1f2937' }}>Card Payments</h2>
+            <span style={{ marginLeft: 'auto', fontSize: '11px', fontWeight: 700, color: '#92400e', background: '#fef3c7', padding: '4px 10px', borderRadius: '20px' }}>
+              Coming Soon
+            </span>
+          </div>
+          <p style={{ margin: 0, fontSize: '14px', color: '#6b7280', lineHeight: 1.6 }}>
+            Card payment processing is launching shortly. You'll be able to connect your Stripe account so clients can pay you directly through the client portal — no more chasing Zelle, Venmo, or Cash App. We'll email you when it goes live for your shop.
+          </p>
+          <p style={{ margin: '10px 0 0 0', fontSize: '13px', color: '#9ca3af', lineHeight: 1.5 }}>
+            In the meantime, you can keep tracking payments manually (Cash, Zelle, Venmo, Card) on the appointment popup.
+          </p>
+        </div>
+      )}
+      {canSeeStripeConnect && (
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
           <span style={{ fontSize: '22px' }}>💳</span>
@@ -735,6 +766,7 @@ export default function ShopSettings() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Logo upload */}
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
