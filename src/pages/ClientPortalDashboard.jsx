@@ -253,10 +253,15 @@ export default function ClientPortalDashboard() {
         setVaccinations([])
       }
 
-      // 10. Payment history
+      // 10. Payment history — joins both appointments AND boarding_reservations
+      // so we can label the row correctly in the history list.
       var { data: payData } = await supabase
         .from('payments')
-        .select('*, appointments:appointment_id(id, appointment_date, pets:pet_id(name), services:service_id(service_name), appointment_pets(id, pets:pet_id(name), services:service_id(service_name)))')
+        .select(`
+          *,
+          appointments:appointment_id(id, appointment_date, pets:pet_id(name), services:service_id(service_name), appointment_pets(id, pets:pet_id(name), services:service_id(service_name))),
+          boarding_reservations:boarding_reservation_id(id, start_date, end_date, boarding_reservation_pets(id, pets:pet_id(name)))
+        `)
         .eq('client_id', clientData.id)
         .order('created_at', { ascending: false })
 
@@ -1968,12 +1973,23 @@ export default function ClientPortalDashboard() {
                         var amount = parseFloat(p.amount || 0)
                         var tip = parseFloat(p.tip_amount || 0)
                         var total = amount + tip
-                        // MULTI-PET aware pet name + service name (fall back to single pet for legacy)
+                        // Boarding vs grooming branch — pick the right label format.
+                        // Boarding: "🏠 Boarding 4/27 → 4/29 · bella"
+                        // Grooming: "✂️ Full Groom · bella"
+                        var boarding = p.boarding_reservations
+                        var isBoardingPayment = !!boarding
                         var appt = p.appointments
                         var aps = appt && appt.appointment_pets
                         var isMultiPet = aps && aps.length > 0
-                        var petName, serviceName
-                        if (isMultiPet) {
+                        var petName, serviceName, boardingLabel
+                        if (isBoardingPayment) {
+                          var bps = boarding.boarding_reservation_pets || []
+                          petName = bps.map(function (bp) { return bp.pets && bp.pets.name }).filter(Boolean).join(', ')
+                          var startD = boarding.start_date ? new Date(boarding.start_date + 'T00:00:00') : null
+                          var endD = boarding.end_date ? new Date(boarding.end_date + 'T00:00:00') : null
+                          var fmt = function (d) { return d ? (d.getMonth() + 1) + '/' + d.getDate() : '' }
+                          boardingLabel = '🏠 Boarding ' + fmt(startD) + (endD ? ' → ' + fmt(endD) : '')
+                        } else if (isMultiPet) {
                           petName = aps.map(function (ap) { return ap.pets && ap.pets.name }).filter(Boolean).join(', ')
                           var svcList = []
                           aps.forEach(function (ap) {
@@ -2001,6 +2017,7 @@ export default function ClientPortalDashboard() {
                               </div>
                               <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
                                 {formatDate(p.created_at)}
+                                {boardingLabel && <span> · {boardingLabel}</span>}
                                 {serviceName && <span> · ✂️ {serviceName}</span>}
                                 {petName && <span> · 🐾 {petName}</span>}
                               </div>
