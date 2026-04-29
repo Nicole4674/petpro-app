@@ -37,6 +37,13 @@ export default function BoardingCalendar() {
   const [payTip, setPayTip] = useState('')
   const [payNotes, setPayNotes] = useState('')
   const [recordingPayment, setRecordingPayment] = useState(false)
+  // ─── Saved-card-on-file Stripe charging ─────────────────────────────────
+  // When method=card we load the client's saved cards and charge the default
+  // through stripe-groomer-charge-boarding. If the client has no card on file,
+  // we fall back to manual logging (notes-only) like cash/Zelle/Venmo.
+  const [groomerSavedCards, setGroomerSavedCards] = useState([])
+  const [selectedSavedCardId, setSelectedSavedCardId] = useState(null)
+  const [loadingSavedCards, setLoadingSavedCards] = useState(false)
 
   // ─── Departure service add-ons ─────────────────────────────────────────
   // Tracks extra services added during a stay (e.g. bath/nail trim before pickup).
@@ -688,9 +695,41 @@ export default function BoardingCalendar() {
     }
   }
 
+  // ─── Load saved cards on file for this reservation's client ────────────
+  // Called when the groomer picks "Card" as the payment method. Uses the
+  // existing stripe-list-cards function with body.client_id so the groomer
+  // can see THAT client's cards.
+  async function loadGroomerSavedCardsForBoarding(res) {
+    if (!res || !res.client_id) return
+    setLoadingSavedCards(true)
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('stripe-list-cards', {
+        body: { client_id: res.client_id }
+      })
+      if (invokeError) {
+        console.warn('Could not load saved cards:', invokeError)
+        setGroomerSavedCards([])
+        return
+      }
+      const cards = (data && data.cards) || []
+      setGroomerSavedCards(cards)
+      const def = cards.find(c => c.is_default) || cards[0]
+      if (def) setSelectedSavedCardId(def.id)
+    } catch (err) {
+      console.warn('Saved cards load error:', err)
+      setGroomerSavedCards([])
+    } finally {
+      setLoadingSavedCards(false)
+    }
+  }
+
   // ─── Record a boarding payment ─────────────────────────────────────────
-  // Mirrors the grooming record_payment flow but writes to payments rows
-  // linked via boarding_reservation_id (not appointment_id).
+  // Two paths now:
+  //   • Stripe path: method = card AND client has a saved card on file →
+  //     route through stripe-groomer-charge-boarding to actually charge,
+  //     which writes the payment row + fires receipt email.
+  //   • Manual path: any other method (cash/zelle/venmo/other) OR card
+  //     when client has no saved card → just insert a payments row directly.
   async function handleRecordBoardingPayment() {
     if (!payingRes) return
     if (!payMethod) {
@@ -709,16 +748,45 @@ export default function BoardingCalendar() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not signed in')
 
-      const { error } = await supabase.from('payments').insert({
-        boarding_reservation_id: payingRes.id,
-        client_id: payingRes.client_id,
-        groomer_id: user.id,
-        amount: amt,
-        tip_amount: tip,
-        method: payMethod,
-        notes: payNotes || null,
-      })
-      if (error) throw error
+      // ─── STRIPE PATH ───
+      // Card method + a saved card selected → real Stripe charge.
+      const useStripe = payMethod === 'card' && !!selectedSavedCardId
+      if (useStripe) {
+        const { data, error: invokeError } = await supabase.functions.invoke('stripe-groomer-charge-boarding', {
+          body: {
+            boarding_reservation_id: payingRes.id,
+            payment_method_id: selectedSavedCardId,
+            tip_amount: tip,
+          }
+        })
+        // Surface real error message from non-2xx responses
+        if (invokeError) {
+          let realMsg = invokeError.message || 'Charge failed'
+          try {
+            if (invokeError.context && typeof invokeError.context.json === 'function') {
+              const ebody = await invokeError.context.json()
+              if (ebody && ebody.error) realMsg = ebody.error
+            }
+          } catch { /* ignore */ }
+          throw new Error(realMsg)
+        }
+        if (data && data.error) throw new Error(data.error)
+        if (!data || !data.success) throw new Error('Charge did not succeed')
+        // stripe-groomer-charge-boarding already wrote the payment row + sent receipt.
+      } else {
+        // ─── MANUAL PATH ───
+        // Cash/Zelle/Venmo/Other OR card with no saved card on file.
+        const { error } = await supabase.from('payments').insert({
+          boarding_reservation_id: payingRes.id,
+          client_id: payingRes.client_id,
+          groomer_id: user.id,
+          amount: amt,
+          tip_amount: tip,
+          method: payMethod,
+          notes: payNotes || null,
+        })
+        if (error) throw error
+      }
 
       // Refresh the kennel card so the new payment shows in history + balance updates
       await openKennelCard(selectedReservation)
@@ -728,6 +796,8 @@ export default function BoardingCalendar() {
       setPayMethod('')
       setPayTip('')
       setPayNotes('')
+      setGroomerSavedCards([])
+      setSelectedSavedCardId(null)
     } catch (err) {
       alert('Error recording payment: ' + (err.message || err))
     } finally {
@@ -3101,7 +3171,17 @@ export default function BoardingCalendar() {
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
                   {['cash', 'zelle', 'venmo', 'card', 'other'].map(m => (
-                    <button key={m} onClick={() => setPayMethod(m)}
+                    <button key={m} onClick={() => {
+                      setPayMethod(m)
+                      // When the user picks Card, load their saved cards on file
+                      // so we can charge via Stripe. Other methods skip this.
+                      if (m === 'card') {
+                        loadGroomerSavedCardsForBoarding(payingRes)
+                      } else {
+                        setGroomerSavedCards([])
+                        setSelectedSavedCardId(null)
+                      }
+                    }}
                       style={{
                         padding: '10px 8px',
                         background: payMethod === m ? '#7c3aed' : '#fff',
@@ -3115,6 +3195,53 @@ export default function BoardingCalendar() {
                   ))}
                 </div>
               </div>
+
+              {/* Saved cards list — shown only when method=card. Either lists
+                  cards on file (and pre-selects the default) or shows a
+                  fallback message if the client has no card saved. */}
+              {payMethod === 'card' && (
+                <div style={{ marginBottom: '14px', padding: '12px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '10px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Card on file
+                  </div>
+                  {loadingSavedCards ? (
+                    <div style={{ fontSize: '13px', color: '#6b7280' }}>Loading saved cards…</div>
+                  ) : groomerSavedCards.length === 0 ? (
+                    <div style={{ fontSize: '13px', color: '#92400e', padding: '8px 10px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '8px' }}>
+                      ⚠️ No card on file for this client. The payment will be logged as a card transaction (no Stripe charge). Ask them to add a card in their portal to enable real card-on-file charges.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {groomerSavedCards.map(card => (
+                        <label key={card.id} style={{
+                          display: 'flex', alignItems: 'center', padding: '10px 12px',
+                          border: '2px solid ' + (selectedSavedCardId === card.id ? '#7c3aed' : '#e5e7eb'),
+                          background: selectedSavedCardId === card.id ? '#f5f3ff' : '#fff',
+                          borderRadius: '8px', cursor: 'pointer', fontSize: '13px',
+                        }}>
+                          <input type="radio" name="boardingCard" checked={selectedSavedCardId === card.id}
+                            onChange={() => setSelectedSavedCardId(card.id)}
+                            style={{ marginRight: '10px' }} />
+                          <span style={{ flex: 1, fontWeight: 700 }}>
+                            {(card.brand || 'Card').charAt(0).toUpperCase() + (card.brand || '').slice(1)} •••• {card.last4}
+                          </span>
+                          {card.is_default && (
+                            <span style={{ fontSize: '11px', background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: '10px', marginRight: '6px' }}>Default</span>
+                          )}
+                          {card.exp_month && card.exp_year && (
+                            <span style={{ fontSize: '11px', color: '#9ca3af' }}>
+                              {String(card.exp_month).padStart(2, '0')}/{String(card.exp_year).slice(-2)}
+                            </span>
+                          )}
+                        </label>
+                      ))}
+                      <div style={{ fontSize: '11px', color: '#16a34a', marginTop: '4px' }}>
+                        💳 Picking Card here will charge the selected card via Stripe and email a receipt automatically.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Amount + Tip */}
               <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
