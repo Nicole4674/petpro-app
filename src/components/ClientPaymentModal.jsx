@@ -77,7 +77,19 @@ export default function ClientPaymentModal({ appointment, balance, onClose, onSu
           tip_amount: tipDollars,
         }
       })
-      if (invokeError) throw invokeError
+      // Extract the real error message from non-2xx responses. Supabase-js
+      // wraps the actual function error inside invokeError.context, which is
+      // a Response object we can read.
+      if (invokeError) {
+        let realMsg = invokeError.message || 'Could not process payment'
+        try {
+          if (invokeError.context && typeof invokeError.context.json === 'function') {
+            const body = await invokeError.context.json()
+            if (body && body.error) realMsg = body.error
+          }
+        } catch { /* ignore parse errors, fall back to wrapper message */ }
+        throw new Error(realMsg)
+      }
       if (data?.error) throw new Error(data.error)
       if (!data?.success) throw new Error('Payment did not succeed — please try a different card')
       onSuccess(data)

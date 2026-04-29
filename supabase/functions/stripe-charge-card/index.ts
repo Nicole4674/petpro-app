@@ -74,31 +74,65 @@ serve(async (req: Request) => {
     if (!client) return jsonError('Client record not found', 404)
     if (!client.stripe_customer_id) return jsonError('No Stripe customer on file — add a card first', 400)
 
-    // 5. Look up the appointment + verify it's THIS client's. Also pull
-    //    service price + multi-pet appointment_pets so we can compute total
-    //    when total_price isn't explicitly set on the row.
-    const { data: appointment } = await supabase
+    // 5. Look up the appointment with just the core fields. Separate
+    //    queries below pull pricing data — keeps joins simple and avoids
+    //    any Supabase relationship-detection issues.
+    const { data: appointment, error: apptErr } = await supabase
       .from('appointments')
-      .select('id, client_id, groomer_id, total_price, status, services(price), appointment_pets(services:service_id(price))')
+      .select('id, client_id, groomer_id, total_price, service_id, status')
       .eq('id', appointmentId)
       .maybeSingle()
 
+    if (apptErr) {
+      console.error('[stripe-charge-card] Appointment lookup error:', apptErr)
+      return jsonError('Could not look up appointment: ' + apptErr.message, 500)
+    }
     if (!appointment) return jsonError('Appointment not found', 404)
     if (appointment.client_id !== client.id) return jsonError('This appointment does not belong to you', 403)
 
-    // 6. Compute total — same fallback logic as the frontend uses:
+    // 6. Compute total — fallback chain:
     //    a. Explicit total_price column
     //    b. Sum of service prices across appointment_pets (multi-pet)
     //    c. Legacy single service.price
     let totalPrice = parseFloat(appointment.total_price || 0)
-    if (!totalPrice && appointment.appointment_pets && appointment.appointment_pets.length > 0) {
-      totalPrice = appointment.appointment_pets.reduce((sum: number, ap: any) => {
-        return sum + parseFloat((ap.services && ap.services.price) || 0)
-      }, 0)
+
+    if (!totalPrice) {
+      // Try multi-pet bookings: query appointment_pets, then services
+      const { data: apptPets } = await supabase
+        .from('appointment_pets')
+        .select('service_id')
+        .eq('appointment_id', appointmentId)
+
+      if (apptPets && apptPets.length > 0) {
+        const serviceIds = apptPets.map(ap => ap.service_id).filter(Boolean)
+        if (serviceIds.length > 0) {
+          const { data: petServices } = await supabase
+            .from('services')
+            .select('id, price')
+            .in('id', serviceIds)
+          if (petServices && petServices.length > 0) {
+            // Sum every appointment_pet's service price
+            totalPrice = apptPets.reduce((sum: number, ap: any) => {
+              const svc = petServices.find(s => s.id === ap.service_id)
+              return sum + parseFloat((svc && svc.price) || 0)
+            }, 0)
+          }
+        }
+      }
     }
-    if (!totalPrice && appointment.services && (appointment.services as any).price) {
-      totalPrice = parseFloat((appointment.services as any).price) || 0
+
+    if (!totalPrice && appointment.service_id) {
+      // Legacy single-service path
+      const { data: svc } = await supabase
+        .from('services')
+        .select('price')
+        .eq('id', appointment.service_id)
+        .maybeSingle()
+      if (svc && svc.price) {
+        totalPrice = parseFloat(svc.price) || 0
+      }
     }
+
     if (!totalPrice || totalPrice <= 0) {
       return jsonError('This appointment has no price set — please contact the shop', 400)
     }
