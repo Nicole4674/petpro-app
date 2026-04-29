@@ -3421,7 +3421,14 @@ export default function Calendar() {
                             {(() => {
                                 const servicePrice = parseFloat(selectedAppt.final_price || selectedAppt.quoted_price || 0)
                                 const discount = parseFloat(selectedAppt.discount_amount || 0)
-                                const totalPaid = apptPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0)
+                                // Subtract refunded amounts from totalPaid so a refunded charge
+                                // properly flips the appointment back to unpaid. Refund is capped
+                                // at the row's own amount so it can't go negative.
+                                const totalPaid = apptPayments.reduce((sum, p) => {
+                                    const paid = parseFloat(p.amount || 0)
+                                    const refunded = parseFloat(p.refunded_amount || 0)
+                                    return sum + Math.max(0, paid - refunded)
+                                }, 0)
                                 const totalTips = apptPayments.reduce((sum, p) => sum + parseFloat(p.tip_amount || 0), 0)
                                 const amountDue = Math.max(0, servicePrice - discount)
                                 const balance = Math.max(0, amountDue - totalPaid)

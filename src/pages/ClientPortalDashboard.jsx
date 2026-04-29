@@ -1467,9 +1467,14 @@ export default function ClientPortalDashboard() {
                                   total = parseFloat(appt.services.price)
                                 }
                                 if (!total || total <= 0) return null
+                                // Net paid = sum of (amount - refunded_amount), clamped to >=0 per row
                                 var paid = (clientPayments || [])
                                   .filter(function (p) { return p.appointment_id === appt.id })
-                                  .reduce(function (sum, p) { return sum + parseFloat(p.amount || 0) }, 0)
+                                  .reduce(function (sum, p) {
+                                    var paidAmt = parseFloat(p.amount || 0)
+                                    var refunded = parseFloat(p.refunded_amount || 0)
+                                    return sum + Math.max(0, paidAmt - refunded)
+                                  }, 0)
                                 var bal = total - paid
                                 if (bal <= 0.001) {
                                   return (
