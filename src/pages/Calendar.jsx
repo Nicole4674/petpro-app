@@ -1812,6 +1812,73 @@ export default function Calendar() {
         }
     }
 
+    // ─── Refund a Stripe-paid charge ────────────────────────────────────
+    // Only available on payments with a stripe_payment_intent_id (i.e.
+    // payments processed through the client portal Stripe flow). Calls the
+    // stripe-refund-charge edge function which (a) refunds via Stripe API
+    // on the connected account, (b) updates the payment row.
+    const handleRefundPayment = async (p) => {
+        if (!p || !p.stripe_payment_intent_id) return
+        var totalCharged = parseFloat(p.amount || 0) + parseFloat(p.tip_amount || 0)
+        var alreadyRefunded = parseFloat(p.refunded_amount || 0)
+        var refundableLeft = totalCharged - alreadyRefunded
+        if (refundableLeft <= 0.001) {
+            alert('This payment has already been fully refunded.')
+            return
+        }
+
+        // Ask: full refund or partial?
+        var input = window.prompt(
+            'Refund amount (in dollars). Max refundable: $' + refundableLeft.toFixed(2) + '\n\n' +
+            'Leave blank or enter ' + refundableLeft.toFixed(2) + ' for a full refund.',
+            refundableLeft.toFixed(2)
+        )
+        if (input === null) return  // user hit Cancel
+        var refundAmount = parseFloat(input)
+        if (isNaN(refundAmount) || refundAmount <= 0) {
+            alert('Refund amount must be a positive number.')
+            return
+        }
+        if (refundAmount > refundableLeft + 0.001) {
+            alert('Refund amount exceeds the refundable balance ($' + refundableLeft.toFixed(2) + ').')
+            return
+        }
+        if (!window.confirm('Refund $' + refundAmount.toFixed(2) + ' to the customer? This goes through Stripe and credits their card.')) return
+
+        try {
+            var { data, error: invokeError } = await supabase.functions.invoke('stripe-refund-charge', {
+                body: { payment_id: p.id, amount: refundAmount }
+            })
+            // Surface the actual error message from non-2xx responses
+            if (invokeError) {
+                var realMsg = invokeError.message || 'Refund failed'
+                try {
+                    if (invokeError.context && typeof invokeError.context.json === 'function') {
+                        var body = await invokeError.context.json()
+                        if (body && body.error) realMsg = body.error
+                    }
+                } catch { /* ignore parse errors */ }
+                throw new Error(realMsg)
+            }
+            if (data && data.error) throw new Error(data.error)
+
+            // Reload the payment list so the row shows refunded status
+            if (selectedAppt) {
+                var { data: refreshed } = await supabase
+                    .from('payments')
+                    .select('*')
+                    .eq('appointment_id', selectedAppt.id)
+                    .order('created_at', { ascending: true })
+                setApptPayments(refreshed || [])
+            }
+            fetchData()
+            alert('Refunded $' + refundAmount.toFixed(2) + ' successfully.')
+        } catch (err) {
+            console.error('Refund error:', err)
+            alert('Refund failed: ' + (err.message || err))
+        }
+    }
+
     const updateApptStatus = async (apptId, newStatus) => {
         try {
             const updates = { status: newStatus }
@@ -3398,24 +3465,72 @@ export default function Calendar() {
                                                                 )}
                                                             </div>
                                                             {p.notes && <div className="appt-payment-notes">"{p.notes}"</div>}
-                                                            {/* Edit + Delete — for tip-added-later or typo corrections */}
+                                                            {/* Refunded status banner — shown when any portion has been refunded */}
+                                                            {parseFloat(p.refunded_amount || 0) > 0 && (
+                                                                <div style={{
+                                                                    marginTop: '6px',
+                                                                    padding: '6px 10px',
+                                                                    background: '#fef3c7',
+                                                                    border: '1px solid #fcd34d',
+                                                                    borderRadius: '6px',
+                                                                    fontSize: '12px',
+                                                                    fontWeight: 600,
+                                                                    color: '#78350f',
+                                                                }}>
+                                                                    ↩️ Refunded ${parseFloat(p.refunded_amount).toFixed(2)}
+                                                                    {p.refunded_at && ' on ' + new Date(p.refunded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                                                </div>
+                                                            )}
+                                                            {/* Action buttons — Refund for Stripe charges, Edit/Delete for manual */}
                                                             <div className="appt-payment-actions">
-                                                                <button
-                                                                    type="button"
-                                                                    className="appt-payment-edit-btn"
-                                                                    onClick={function () { openEditPayment(p) }}
-                                                                    title="Edit this payment"
-                                                                >
-                                                                    ✏️ Edit
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    className="appt-payment-delete-btn"
-                                                                    onClick={function () { handleDeletePayment(p) }}
-                                                                    title="Delete this payment"
-                                                                >
-                                                                    🗑️ Delete
-                                                                </button>
+                                                                {p.stripe_payment_intent_id ? (
+                                                                    // Stripe-paid charge: show Refund (or disable if fully refunded)
+                                                                    (() => {
+                                                                        var totalCharged = parseFloat(p.amount || 0) + parseFloat(p.tip_amount || 0)
+                                                                        var alreadyRefunded = parseFloat(p.refunded_amount || 0)
+                                                                        var fullyRefunded = (totalCharged - alreadyRefunded) <= 0.001
+                                                                        return (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={function () { handleRefundPayment(p) }}
+                                                                                disabled={fullyRefunded}
+                                                                                title={fullyRefunded ? 'Already fully refunded' : 'Refund this Stripe charge'}
+                                                                                style={{
+                                                                                    padding: '6px 12px',
+                                                                                    background: fullyRefunded ? '#f3f4f6' : '#fff',
+                                                                                    color: fullyRefunded ? '#9ca3af' : '#dc2626',
+                                                                                    border: '1px solid ' + (fullyRefunded ? '#e5e7eb' : '#fca5a5'),
+                                                                                    borderRadius: '6px',
+                                                                                    fontSize: '12px',
+                                                                                    fontWeight: 600,
+                                                                                    cursor: fullyRefunded ? 'not-allowed' : 'pointer',
+                                                                                }}
+                                                                            >
+                                                                                {fullyRefunded ? '✓ Refunded' : '↩️ Refund'}
+                                                                            </button>
+                                                                        )
+                                                                    })()
+                                                                ) : (
+                                                                    // Manual payment (cash/zelle/venmo): allow Edit + Delete
+                                                                    <>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="appt-payment-edit-btn"
+                                                                            onClick={function () { openEditPayment(p) }}
+                                                                            title="Edit this payment"
+                                                                        >
+                                                                            ✏️ Edit
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="appt-payment-delete-btn"
+                                                                            onClick={function () { handleDeletePayment(p) }}
+                                                                            title="Delete this payment"
+                                                                        >
+                                                                            🗑️ Delete
+                                                                        </button>
+                                                                    </>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     ))}
