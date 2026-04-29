@@ -103,6 +103,10 @@ export default function BoardingCalendar() {
     // the groomer from having to reopen the kennel card to add the service.
     grooming_at_end_service_id: '',
     items_brought: '',
+    // Per-night rate — when set, total_price auto-calculates as rate × nights.
+    // Groomer thinks in per-night rates ("$50/night"), not totals, so this
+    // matches their mental model and updates instantly when dates change.
+    per_night_rate: '',
     // Total price for the stay — drives the kennel card balance + payment flow
     total_price: ''
   })
@@ -2965,19 +2969,37 @@ export default function BoardingCalendar() {
                 </div>
               )}
 
-              {/* Dates */}
+              {/* Dates — when either date changes AND per_night_rate is set,
+                  we auto-bump total_price to rate × nights so the groomer
+                  doesn't have to re-do math. */}
               <div className="boarding-field-row" style={{ marginTop: '12px' }}>
                 <div className="boarding-field">
                   <label className="boarding-label">Check-In Date *</label>
                   <input type="date" className="boarding-input"
                     value={newRes.start_date}
-                    onChange={e => setNewRes(prev => ({ ...prev, start_date: e.target.value }))} />
+                    onChange={e => setNewRes(prev => {
+                      const next = { ...prev, start_date: e.target.value }
+                      const rate = parseFloat(prev.per_night_rate || 0)
+                      const nights = getNightsBetween(next.start_date, next.end_date)
+                      if (rate > 0 && nights >= 0) {
+                        next.total_price = (rate * nights).toFixed(2)
+                      }
+                      return next
+                    })} />
                 </div>
                 <div className="boarding-field">
                   <label className="boarding-label">Check-Out Date *</label>
                   <input type="date" className="boarding-input"
                     value={newRes.end_date}
-                    onChange={e => setNewRes(prev => ({ ...prev, end_date: e.target.value }))} />
+                    onChange={e => setNewRes(prev => {
+                      const next = { ...prev, end_date: e.target.value }
+                      const rate = parseFloat(prev.per_night_rate || 0)
+                      const nights = getNightsBetween(next.start_date, next.end_date)
+                      if (rate > 0 && nights >= 0) {
+                        next.total_price = (rate * nights).toFixed(2)
+                      }
+                      return next
+                    })} />
                 </div>
               </div>
 
@@ -2996,27 +3018,59 @@ export default function BoardingCalendar() {
                 </div>
               </div>
 
-              {/* Total Price — drives the kennel card balance + payment flow.
-                  Suggested calc: nights × your nightly rate. Editable for deposits
-                  / friend discounts / bundle deals. */}
-              <div className="boarding-field" style={{ marginTop: '12px' }}>
-                <label className="boarding-label">
-                  Total Price *
-                  {newRes.start_date && newRes.end_date && newRes.end_date >= newRes.start_date && (
-                    <span style={{ color: '#6b7280', fontWeight: 400, marginLeft: 8, fontSize: 12 }}>
-                      ({getNightsBetween(newRes.start_date, newRes.end_date)} night{getNightsBetween(newRes.start_date, newRes.end_date) === 1 ? '' : 's'})
-                    </span>
-                  )}
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="boarding-input"
-                  value={newRes.total_price}
-                  onChange={e => setNewRes(prev => ({ ...prev, total_price: e.target.value }))}
-                  placeholder="e.g. 200.00"
-                />
+              {/* Per-Night Rate — what the groomer charges per night. When set,
+                  Total Price below auto-fills to rate × nights. Optional —
+                  groomers can skip this and just type a flat total below. */}
+              <div className="boarding-field-row" style={{ marginTop: '12px' }}>
+                <div className="boarding-field">
+                  <label className="boarding-label">
+                    Per-Night Rate
+                    <span style={{ color: '#6b7280', fontWeight: 400, marginLeft: 6, fontSize: 11 }}>(auto-calcs total)</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="boarding-input"
+                    value={newRes.per_night_rate}
+                    onChange={e => setNewRes(prev => {
+                      const rate = parseFloat(e.target.value || 0)
+                      const nights = getNightsBetween(prev.start_date, prev.end_date)
+                      const next = { ...prev, per_night_rate: e.target.value }
+                      // If we have valid dates + rate, auto-fill the total.
+                      if (rate > 0 && nights >= 0) {
+                        next.total_price = (rate * nights).toFixed(2)
+                      }
+                      return next
+                    })}
+                    placeholder="e.g. 50.00"
+                  />
+                </div>
+                <div className="boarding-field">
+                  <label className="boarding-label">
+                    Total Price *
+                    {newRes.start_date && newRes.end_date && newRes.end_date >= newRes.start_date && (
+                      <span style={{ color: '#6b7280', fontWeight: 400, marginLeft: 6, fontSize: 11 }}>
+                        ({getNightsBetween(newRes.start_date, newRes.end_date)} night{getNightsBetween(newRes.start_date, newRes.end_date) === 1 ? '' : 's'})
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="boarding-input"
+                    value={newRes.total_price}
+                    onChange={e => setNewRes(prev => ({ ...prev, total_price: e.target.value }))}
+                    placeholder="e.g. 200.00"
+                  />
+                </div>
               </div>
+              {/* Helper text under the row — tells the groomer the math is happening */}
+              {parseFloat(newRes.per_night_rate || 0) > 0 && newRes.start_date && newRes.end_date && newRes.end_date >= newRes.start_date && (
+                <div style={{ fontSize: '12px', color: '#16a34a', marginTop: '4px' }}>
+                  ✓ ${parseFloat(newRes.per_night_rate).toFixed(2)} × {getNightsBetween(newRes.start_date, newRes.end_date)} night{getNightsBetween(newRes.start_date, newRes.end_date) === 1 ? '' : 's'} = ${(parseFloat(newRes.per_night_rate) * getNightsBetween(newRes.start_date, newRes.end_date)).toFixed(2)} (you can override the total above for deposits or discounts)
+                </div>
+              )}
 
               {/* Status */}
               <div className="boarding-field" style={{ marginTop: '12px' }}>
