@@ -141,34 +141,32 @@ serve(async (req: Request) => {
 
     const subject = `Receipt from ${shopName} — $${total.toFixed(2)}`
 
-    // 6. Send via SendGrid
-    const sgKey = Deno.env.get('SENDGRID_API_KEY')
-    if (!sgKey) {
-      console.error('[stripe-send-receipt] SENDGRID_API_KEY not configured')
+    // 6. Send via Resend (https://resend.com/docs/api-reference/emails/send-email)
+    const resendKey = Deno.env.get('RESEND_API_KEY')
+    if (!resendKey) {
+      console.error('[stripe-send-receipt] RESEND_API_KEY not configured')
       return jsonError('Email service not configured', 500)
     }
 
-    const sgRes = await fetch('https://api.sendgrid.com/v3/mail/send', {
+    const resendRes = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${sgKey}`,
+        'Authorization': `Bearer ${resendKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        personalizations: [{
-          to: [{ email: client.email, name: clientName }],
-          subject,
-        }],
-        from: { email: FROM_EMAIL, name: shopName },
-        reply_to: shopEmail ? { email: shopEmail, name: shopName } : undefined,
-        content: [{ type: 'text/html', value: html }],
+        from: `${shopName} <${FROM_EMAIL}>`,  // e.g. "Pampered Little Paws <nicole@trypetpro.com>"
+        to: [client.email],
+        subject,
+        html,
+        reply_to: shopEmail || undefined,
       })
     })
 
-    if (!sgRes.ok) {
-      const errBody = await sgRes.text().catch(() => '')
-      console.error('[stripe-send-receipt] SendGrid error:', sgRes.status, errBody)
-      return jsonError(`SendGrid returned ${sgRes.status}`, 502)
+    if (!resendRes.ok) {
+      const errBody = await resendRes.text().catch(() => '')
+      console.error('[stripe-send-receipt] Resend error:', resendRes.status, errBody)
+      return jsonError(`Resend returned ${resendRes.status}: ${errBody}`, 502)
     }
 
     return ok({ sent: true, to: client.email })
