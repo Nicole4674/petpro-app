@@ -12,6 +12,7 @@ import { supabase } from '../lib/supabase'
 import { getBreedDefaults } from '../lib/breedDefaults'
 import EnableNotifications from '../components/EnableNotifications'
 import ReportCardModal from '../components/ReportCardModal'
+import ClientPaymentModal from '../components/ClientPaymentModal'
 import BreedPicker from '../components/BreedPicker'
 import { DOG_BREEDS, CAT_BREEDS } from '../lib/breeds'
 import { formatPhone, formatPhoneOnInput } from '../lib/phone'
@@ -102,6 +103,10 @@ export default function ClientPortalDashboard() {
   // "On waitlist" instead of the Notify button)
   var [waitlistedApptIds, setWaitlistedApptIds] = useState([])
   var [waitlistSavingId, setWaitlistSavingId] = useState(null)
+
+  // Pay-now modal state — null when closed, the appointment object when open
+  var [payingAppointment, setPayingAppointment] = useState(null)
+  var [payingBalance, setPayingBalance] = useState(0)
 
   // History tabs state
   var [pastGrooming, setPastGrooming] = useState([])
@@ -1444,6 +1449,54 @@ export default function ClientPortalDashboard() {
                               {appt.service_notes && (
                                 <div className="cp-history-notes">📝 {appt.service_notes}</div>
                               )}
+                              {/* Pay Now — only show if there's a balance owed on this appointment */}
+                              {(function () {
+                                var total = parseFloat(appt.total_price || 0)
+                                if (!total || total <= 0) return null
+                                var paid = (clientPayments || [])
+                                  .filter(function (p) { return p.appointment_id === appt.id })
+                                  .reduce(function (sum, p) { return sum + parseFloat(p.amount || 0) }, 0)
+                                var bal = total - paid
+                                if (bal <= 0.001) {
+                                  return (
+                                    <div style={{
+                                      marginTop: 10,
+                                      padding: '8px 12px',
+                                      background: '#dcfce7',
+                                      border: '1px solid #86efac',
+                                      borderRadius: 8,
+                                      color: '#166534',
+                                      fontSize: 13,
+                                      fontWeight: 700
+                                    }}>
+                                      ✓ Paid in full
+                                    </div>
+                                  )
+                                }
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={function () {
+                                      setPayingAppointment(appt)
+                                      setPayingBalance(bal)
+                                    }}
+                                    style={{
+                                      marginTop: 10,
+                                      marginRight: 8,
+                                      padding: '8px 14px',
+                                      background: '#10b981',
+                                      color: '#fff',
+                                      border: 'none',
+                                      borderRadius: 8,
+                                      fontSize: 13,
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    💳 Pay ${bal.toFixed(2)}
+                                  </button>
+                                )
+                              })()}
                               {/* Waitlist: notify me if an earlier slot opens */}
                               {!isOverdue && (
                                 waitlistedApptIds.indexOf(appt.id) >= 0 ? (
@@ -2422,6 +2475,24 @@ export default function ClientPortalDashboard() {
           />
         )
       })()}
+
+      {/* Pay-now modal — opens when a client clicks "Pay $X" on an upcoming appt */}
+      {payingAppointment && (
+        <ClientPaymentModal
+          appointment={payingAppointment}
+          balance={payingBalance}
+          onClose={function () {
+            setPayingAppointment(null)
+            setPayingBalance(0)
+          }}
+          onSuccess={function () {
+            setPayingAppointment(null)
+            setPayingBalance(0)
+            // Reload everything so balances + payment history reflect the new charge
+            loadPortalData()
+          }}
+        />
+      )}
     </div>
   )
 }
