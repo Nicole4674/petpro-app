@@ -55,6 +55,14 @@ export default function ShopSettings() {
   var [connectError, setConnectError] = useState('')
   var [refreshingStripe, setRefreshingStripe] = useState(false)
 
+  // ─── Per-shop payment policy toggles (Phase 5) ───────────────────────
+  // require_prepay_to_book: client must pay card before booking is confirmed
+  // no_show_fee_amount: dollar amount auto-charged when appt marked no-show
+  // pass_fees_to_client: ~3% Stripe fee added to client's bill (MoeGo style)
+  var [requirePrepay, setRequirePrepay] = useState(false)
+  var [noShowFeeAmount, setNoShowFeeAmount] = useState('')
+  var [passFeesToClient, setPassFeesToClient] = useState(false)
+
   useEffect(function () {
     loadSettings()
   }, [])
@@ -159,6 +167,10 @@ export default function ShopSettings() {
         // AI toggles — default to ON if the column is missing or null (existing behavior)
         setGroomerAiEnabled(data.groomer_ai_enabled !== false)
         setClientAiBookingEnabled(data.client_ai_booking_enabled !== false)
+        // Payment policy toggles (Phase 5)
+        setRequirePrepay(data.require_prepay_to_book === true)
+        setNoShowFeeAmount(data.no_show_fee_amount ? String(data.no_show_fee_amount) : '')
+        setPassFeesToClient(data.pass_fees_to_client === true)
       }
 
       // Smart Nudges + Stripe Connect status — both live on the groomers
@@ -275,6 +287,10 @@ export default function ShopSettings() {
         hours: hours || null,
         groomer_ai_enabled: groomerAiEnabled,
         client_ai_booking_enabled: clientAiBookingEnabled,
+        // Payment policy toggles (Phase 5)
+        require_prepay_to_book: requirePrepay,
+        no_show_fee_amount: parseFloat(noShowFeeAmount) || 0,
+        pass_fees_to_client: passFeesToClient,
       }
 
       var { error: upsertError } = await supabase
@@ -643,6 +659,81 @@ export default function ShopSettings() {
             {connectError}
           </div>
         )}
+
+        {/* ─── Payment Policy Toggles (Phase 5) ─────────────────────────── */}
+        <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #e5e7eb' }}>
+          <div style={{ fontSize: '13px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '14px' }}>
+            Payment Policies
+          </div>
+
+          {/* Require prepay */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px 0', borderBottom: '1px solid #f3f4f6' }}>
+            <label style={{ position: 'relative', display: 'inline-block', width: '46px', height: '24px', flexShrink: 0, marginTop: '2px' }}>
+              <input type="checkbox" checked={requirePrepay} onChange={e => setRequirePrepay(e.target.checked)}
+                style={{ opacity: 0, width: 0, height: 0 }} />
+              <span style={{
+                position: 'absolute', cursor: 'pointer', inset: 0,
+                background: requirePrepay ? '#10b981' : '#d1d5db',
+                borderRadius: '24px', transition: '0.2s',
+              }}>
+                <span style={{
+                  position: 'absolute', height: '18px', width: '18px',
+                  left: requirePrepay ? '25px' : '3px', top: '3px',
+                  background: '#fff', borderRadius: '50%', transition: '0.2s',
+                }}/>
+              </span>
+            </label>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#1f2937' }}>🔒 Require pre-payment to book</div>
+              <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '2px' }}>
+                Clients must pay through their portal before a booking is confirmed. Helps eliminate no-shows.
+              </div>
+            </div>
+          </div>
+
+          {/* No-show fee amount */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px 0', borderBottom: '1px solid #f3f4f6' }}>
+            <div style={{ width: '46px', flexShrink: 0, marginTop: '2px', fontSize: '20px', textAlign: 'center' }}>💸</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#1f2937' }}>No-show fee</div>
+              <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '2px', marginBottom: '6px' }}>
+                When you mark an appointment as no-show, this amount auto-charges to the client's saved card. Set to $0 to disable.
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', maxWidth: '160px' }}>
+                <span style={{ fontSize: '14px', color: '#6b7280' }}>$</span>
+                <input type="number" step="0.01" min="0" value={noShowFeeAmount}
+                  onChange={e => setNoShowFeeAmount(e.target.value)}
+                  placeholder="0.00"
+                  style={{ flex: 1, padding: '8px 10px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px' }} />
+              </div>
+            </div>
+          </div>
+
+          {/* Pass fees to client */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px 0' }}>
+            <label style={{ position: 'relative', display: 'inline-block', width: '46px', height: '24px', flexShrink: 0, marginTop: '2px' }}>
+              <input type="checkbox" checked={passFeesToClient} onChange={e => setPassFeesToClient(e.target.checked)}
+                style={{ opacity: 0, width: 0, height: 0 }} />
+              <span style={{
+                position: 'absolute', cursor: 'pointer', inset: 0,
+                background: passFeesToClient ? '#10b981' : '#d1d5db',
+                borderRadius: '24px', transition: '0.2s',
+              }}>
+                <span style={{
+                  position: 'absolute', height: '18px', width: '18px',
+                  left: passFeesToClient ? '25px' : '3px', top: '3px',
+                  background: '#fff', borderRadius: '50%', transition: '0.2s',
+                }}/>
+              </span>
+            </label>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#1f2937' }}>💯 Pass card fees to client</div>
+              <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '2px' }}>
+                Adds the ~3% Stripe processing fee to your client's bill so you keep 100% of the service price. Service shows as "$X service · $Y card fee · $Z total" at checkout.
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Logo upload */}
