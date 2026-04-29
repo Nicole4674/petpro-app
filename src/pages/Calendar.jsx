@@ -1580,7 +1580,12 @@ export default function Calendar() {
             servicePrice = parseFloat(appt.final_price || appt.quoted_price || 0)
         }
         const existingDiscount = parseFloat(appt.discount_amount || 0)
-        const totalPaid = (payments || []).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0)
+        // Net paid = amount minus any refund, clamped >=0 per row
+        const totalPaid = (payments || []).reduce((sum, p) => {
+            const paidAmt = parseFloat(p.amount || 0)
+            const refunded = parseFloat(p.refunded_amount || 0)
+            return sum + Math.max(0, paidAmt - refunded)
+        }, 0)
         const balance = servicePrice - existingDiscount - totalPaid
 
         setPaymentAmount(balance > 0 ? balance.toFixed(2) : '0.00')
@@ -4093,7 +4098,12 @@ export default function Calendar() {
                     servicePrice = parseFloat(paymentAppt.final_price || paymentAppt.quoted_price || 0)
                 }
                 const discount = parseFloat(discountAmount || 0)
-                const totalPaid = existingPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0)
+                // Subtract refunded amounts so refunded charges flip back to unpaid
+                const totalPaid = existingPayments.reduce((sum, p) => {
+                    const paidAmt = parseFloat(p.amount || 0)
+                    const refunded = parseFloat(p.refunded_amount || 0)
+                    return sum + Math.max(0, paidAmt - refunded)
+                }, 0)
                 const amountDue = Math.max(0, servicePrice - discount)
                 const balance = Math.max(0, amountDue - totalPaid)
                 const thisPayment = parseFloat(paymentAmount || 0)
@@ -4195,17 +4205,26 @@ export default function Calendar() {
                                             <div className="payment-receipt-divider"></div>
                                             <div className="payment-receipt-priors">
                                                 <div className="payment-receipt-priors-label">Prior payments:</div>
-                                                {existingPayments.map(p => (
-                                                    <div key={p.id} className="payment-receipt-row payment-receipt-prior">
-                                                        <span>
-                                                            {new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                                            {' · '}
-                                                            <strong>{p.method.toUpperCase()}</strong>
-                                                            {parseFloat(p.tip_amount) > 0 && ` (+ $${parseFloat(p.tip_amount).toFixed(2)} tip)`}
-                                                        </span>
-                                                        <span>${parseFloat(p.amount).toFixed(2)}</span>
-                                                    </div>
-                                                ))}
+                                                {existingPayments.map(p => {
+                                                    const refunded = parseFloat(p.refunded_amount || 0)
+                                                    const isFullyRefunded = refunded > 0 && refunded >= parseFloat(p.amount || 0) - 0.001
+                                                    return (
+                                                        <div key={p.id} className="payment-receipt-row payment-receipt-prior" style={isFullyRefunded ? { opacity: 0.6, textDecoration: 'line-through' } : {}}>
+                                                            <span>
+                                                                {new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                                                {' · '}
+                                                                <strong>{p.method.toUpperCase()}</strong>
+                                                                {parseFloat(p.tip_amount) > 0 && ` (+ $${parseFloat(p.tip_amount).toFixed(2)} tip)`}
+                                                                {refunded > 0 && (
+                                                                    <span style={{ marginLeft: '6px', fontSize: '11px', color: '#92400e', background: '#fef3c7', padding: '1px 6px', borderRadius: '8px', textDecoration: 'none', fontWeight: 600 }}>
+                                                                        ↩ Refunded ${refunded.toFixed(2)}
+                                                                    </span>
+                                                                )}
+                                                            </span>
+                                                            <span>${parseFloat(p.amount).toFixed(2)}</span>
+                                                        </div>
+                                                    )
+                                                })}
                                             </div>
                                         </>
                                     )}
