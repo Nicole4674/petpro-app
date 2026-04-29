@@ -748,10 +748,27 @@ export default function BoardingCalendar() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not signed in')
 
-      // ─── STRIPE PATH ───
-      // Card method + a saved card selected → real Stripe charge.
-      const useStripe = payMethod === 'card' && !!selectedSavedCardId
-      if (useStripe) {
+      // Debug log so we can see exactly what state is at click time
+      console.log('[BoardingPayment]', {
+        payMethod,
+        selectedSavedCardId,
+        groomerSavedCardsCount: groomerSavedCards.length,
+        loadingSavedCards,
+      })
+
+      // If user picked Card method, we MUST go through Stripe — don't silently
+      // fall back to manual logging. If there's no card on file or selection,
+      // surface a hard error so the bug isn't hidden.
+      if (payMethod === 'card') {
+        if (loadingSavedCards) {
+          throw new Error('Saved cards are still loading. Please wait a moment and try again.')
+        }
+        if (!selectedSavedCardId) {
+          throw new Error(
+            'No card on file for this client. To record card payment as cash/Zelle/Venmo, click a different method. To charge a saved card, the client must first add one in their portal.'
+          )
+        }
+        // ─── STRIPE PATH ───
         const { data, error: invokeError } = await supabase.functions.invoke('stripe-groomer-charge-boarding', {
           body: {
             boarding_reservation_id: payingRes.id,
@@ -775,7 +792,7 @@ export default function BoardingCalendar() {
         // stripe-groomer-charge-boarding already wrote the payment row + sent receipt.
       } else {
         // ─── MANUAL PATH ───
-        // Cash/Zelle/Venmo/Other OR card with no saved card on file.
+        // Cash/Zelle/Venmo/Other only.
         const { error } = await supabase.from('payments').insert({
           boarding_reservation_id: payingRes.id,
           client_id: payingRes.client_id,
