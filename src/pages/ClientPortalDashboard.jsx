@@ -170,12 +170,14 @@ export default function ClientPortalDashboard() {
       if (shopData) setShopSettings(shopData)
 
       // 5. Load upcoming grooming appointments (mirrors ClientDetail filter)
+      // Note: we pull `price` on appointment_pets services so multi-pet
+      // bookings can compute total properly for the Pay-Now button.
       // "Open" = not checked out AND status not in closed-out set
       // Includes appointment_pets so multi-pet recurring bookings show all pets,
       // not just the primary one.
       var { data: apptsData } = await supabase
         .from('appointments')
-        .select('*, pets(id, name, breed), services(id, service_name, price, time_block_minutes), appointment_pets(id, pets:pet_id(id, name, breed), services:service_id(id, service_name))')
+        .select('*, pets(id, name, breed), services(id, service_name, price, time_block_minutes), appointment_pets(id, pets:pet_id(id, name, breed), services:service_id(id, service_name, price))')
         .eq('client_id', clientData.id)
         .is('checked_out_at', null)
         .order('appointment_date', { ascending: true })
@@ -216,7 +218,7 @@ export default function ClientPortalDashboard() {
       // Pulls appointment_pets so multi-pet bookings show all pets
       var { data: pastApptsData } = await supabase
         .from('appointments')
-        .select('*, pets(id, name, breed), services(id, service_name, price, time_block_minutes), appointment_pets(id, pets:pet_id(id, name, breed), services:service_id(id, service_name))')
+        .select('*, pets(id, name, breed), services(id, service_name, price, time_block_minutes), appointment_pets(id, pets:pet_id(id, name, breed), services:service_id(id, service_name, price))')
         .eq('client_id', clientData.id)
         .not('checked_out_at', 'is', null)
         .order('appointment_date', { ascending: false })
@@ -1451,7 +1453,19 @@ export default function ClientPortalDashboard() {
                               )}
                               {/* Pay Now — only show if there's a balance owed on this appointment */}
                               {(function () {
+                                // Compute the appointment total from whatever pricing data is available:
+                                //   1. Explicit total_price column (newer multi-pet bookings)
+                                //   2. Sum of service prices across appointment_pets (multi-pet)
+                                //   3. The legacy single service.price (one pet, one service)
                                 var total = parseFloat(appt.total_price || 0)
+                                if (!total && appt.appointment_pets && appt.appointment_pets.length > 0) {
+                                  total = appt.appointment_pets.reduce(function (sum, ap) {
+                                    return sum + parseFloat((ap.services && ap.services.price) || 0)
+                                  }, 0)
+                                }
+                                if (!total && appt.services && appt.services.price) {
+                                  total = parseFloat(appt.services.price)
+                                }
                                 if (!total || total <= 0) return null
                                 var paid = (clientPayments || [])
                                   .filter(function (p) { return p.appointment_id === appt.id })
