@@ -37,11 +37,16 @@ export default function Signup() {
     setLoading(true)
     setError(null)
 
-    // Sign up with Supabase auth
+    // Sign up with Supabase auth.
+    // emailRedirectTo overrides Supabase's default Site URL (which is set to
+    // /portal/login for the CLIENT portal) so groomer confirmation links
+    // land on the groomer login page instead. After login they'll get routed
+    // to the dashboard (or /plans if their subscription isn't active yet).
     const { data, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
       options: {
+        emailRedirectTo: window.location.origin + '/login',
         data: {
           full_name: fullName,
           business_name: businessName,
