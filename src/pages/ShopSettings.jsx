@@ -73,6 +73,10 @@ export default function ShopSettings() {
   var [requirePrepay, setRequirePrepay] = useState(false)
   var [noShowFeeAmount, setNoShowFeeAmount] = useState('')
   var [passFeesToClient, setPassFeesToClient] = useState(false)
+  // Auto-cancel unpaid bookings — only applies when require_prepay is on.
+  // Lets each shop pick if/when to auto-cancel pending unpaid bookings.
+  var [autoCancelUnpaid, setAutoCancelUnpaid] = useState(false)
+  var [autoCancelMinutes, setAutoCancelMinutes] = useState('15')
 
   useEffect(function () {
     loadSettings()
@@ -183,6 +187,8 @@ export default function ShopSettings() {
         setRequirePrepay(data.require_prepay_to_book === true)
         setNoShowFeeAmount(data.no_show_fee_amount ? String(data.no_show_fee_amount) : '')
         setPassFeesToClient(data.pass_fees_to_client === true)
+        setAutoCancelUnpaid(data.auto_cancel_unpaid_bookings === true)
+        setAutoCancelMinutes(data.auto_cancel_unpaid_minutes != null ? String(data.auto_cancel_unpaid_minutes) : '15')
       }
 
       // Smart Nudges + Stripe Connect status — both live on the groomers
@@ -303,6 +309,8 @@ export default function ShopSettings() {
         require_prepay_to_book: requirePrepay,
         no_show_fee_amount: parseFloat(noShowFeeAmount) || 0,
         pass_fees_to_client: passFeesToClient,
+        auto_cancel_unpaid_bookings: autoCancelUnpaid,
+        auto_cancel_unpaid_minutes: parseInt(autoCancelMinutes) || 15,
       }
 
       var { error: upsertError } = await supabase
@@ -741,7 +749,7 @@ export default function ShopSettings() {
           </div>
 
           {/* Pass fees to client */}
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px 0' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px 0', borderBottom: requirePrepay ? '1px solid #f3f4f6' : 'none' }}>
             <label style={{ position: 'relative', display: 'inline-block', width: '46px', height: '24px', flexShrink: 0, marginTop: '2px' }}>
               <input type="checkbox" checked={passFeesToClient} onChange={e => setPassFeesToClient(e.target.checked)}
                 style={{ opacity: 0, width: 0, height: 0 }} />
@@ -764,6 +772,53 @@ export default function ShopSettings() {
               </div>
             </div>
           </div>
+
+          {/* Auto-cancel unpaid bookings — only shown when require_prepay is on */}
+          {requirePrepay && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px 0' }}>
+              <label style={{ position: 'relative', display: 'inline-block', width: '46px', height: '24px', flexShrink: 0, marginTop: '2px' }}>
+                <input type="checkbox" checked={autoCancelUnpaid} onChange={e => setAutoCancelUnpaid(e.target.checked)}
+                  style={{ opacity: 0, width: 0, height: 0 }} />
+                <span style={{
+                  position: 'absolute', cursor: 'pointer', inset: 0,
+                  background: autoCancelUnpaid ? '#10b981' : '#d1d5db',
+                  borderRadius: '24px', transition: '0.2s',
+                }}>
+                  <span style={{
+                    position: 'absolute', height: '18px', width: '18px',
+                    left: autoCancelUnpaid ? '25px' : '3px', top: '3px',
+                    background: '#fff', borderRadius: '50%', transition: '0.2s',
+                  }}/>
+                </span>
+              </label>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: '#1f2937' }}>⏱️ Auto-cancel unpaid bookings</div>
+                <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '2px', marginBottom: autoCancelUnpaid ? '8px' : '0' }}>
+                  When ON, pending bookings auto-cancel if the client hasn't paid within the time limit below. Frees up the slot for someone else. Leave OFF if you're flexible about late payments.
+                </div>
+                {autoCancelUnpaid && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                    <span style={{ fontSize: '13px', color: '#374151' }}>Cancel after</span>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={autoCancelMinutes}
+                      onChange={e => setAutoCancelMinutes(e.target.value)}
+                      placeholder="15"
+                      style={{ width: '80px', padding: '8px 10px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px' }}
+                    />
+                    <span style={{ fontSize: '13px', color: '#374151' }}>minutes</span>
+                  </div>
+                )}
+                {autoCancelUnpaid && (
+                  <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '6px' }}>
+                    Tip: 15 min works for busy shops. 60 min or longer for shops where clients often pay later in the day. Use 1440 (24 hours) for very flexible policies.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
       )}

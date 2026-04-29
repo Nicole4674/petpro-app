@@ -1451,6 +1451,42 @@ export default function ClientPortalDashboard() {
                               {appt.service_notes && (
                                 <div className="cp-history-notes">📝 {appt.service_notes}</div>
                               )}
+                              {/* Awaiting Payment banner — when booking is pending and balance is owed,
+                                   this is a require-prepay shop. Tell client they need to pay to confirm. */}
+                              {appt.status === 'pending' && (function () {
+                                var totalPrice = parseFloat(appt.total_price || 0)
+                                if (!totalPrice && appt.appointment_pets && appt.appointment_pets.length > 0) {
+                                  totalPrice = appt.appointment_pets.reduce(function (sum, ap) {
+                                    return sum + parseFloat((ap.services && ap.services.price) || 0)
+                                  }, 0)
+                                }
+                                if (!totalPrice && appt.services && appt.services.price) {
+                                  totalPrice = parseFloat(appt.services.price)
+                                }
+                                var paidAmt = (clientPayments || [])
+                                  .filter(function (p) { return p.appointment_id === appt.id })
+                                  .reduce(function (sum, p) {
+                                    var paid = parseFloat(p.amount || 0)
+                                    var refunded = parseFloat(p.refunded_amount || 0)
+                                    return sum + Math.max(0, paid - refunded)
+                                  }, 0)
+                                if (totalPrice <= 0 || paidAmt >= totalPrice - 0.01) return null
+                                return (
+                                  <div style={{
+                                    marginTop: '10px',
+                                    padding: '10px 14px',
+                                    background: '#fef3c7',
+                                    border: '1px solid #fcd34d',
+                                    borderRadius: 8,
+                                    color: '#78350f',
+                                    fontSize: 13,
+                                    fontWeight: 700,
+                                  }}>
+                                    ⏰ Booking awaiting payment — please pay now to confirm
+                                  </div>
+                                )
+                              })()}
+
                               {/* Pay Now — only show if there's a balance owed on this appointment */}
                               {(function () {
                                 // Compute the appointment total from whatever pricing data is available:
