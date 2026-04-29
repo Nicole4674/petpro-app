@@ -198,7 +198,7 @@ serve(async (req: Request) => {
     const amountToChargeCents = Math.round(amountToChargeDollars * 100)
 
     // 9. Init Stripe + create PaymentIntent on connected account
-    const stripe = new Stripe(Deno.env.get('STRIPE_TEST_SECRET_KEY') ?? '', {
+    const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') ?? '', {
       apiVersion: '2024-04-10',
     })
     const stripeAccountOpts = { stripeAccount: groomer.stripe_connect_account_id }

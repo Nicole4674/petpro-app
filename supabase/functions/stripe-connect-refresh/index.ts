@@ -82,7 +82,7 @@ serve(async (req: Request) => {
     }
 
     // 5. Ask Stripe for current account state
-    const stripe = new Stripe(Deno.env.get('STRIPE_TEST_SECRET_KEY') ?? '', {
+    const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') ?? '', {
       apiVersion: '2024-04-10',
     })
 

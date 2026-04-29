@@ -60,7 +60,7 @@ serve(async (req: Request) => {
 
     // 2. Init Stripe with the TEST secret key (sandbox mode)
     //    To go live: change STRIPE_TEST_SECRET_KEY → STRIPE_SECRET_KEY
-    const stripe = new Stripe(Deno.env.get('STRIPE_TEST_SECRET_KEY') ?? '', {
+    const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') ?? '', {
       apiVersion: '2024-04-10',
     })
 
