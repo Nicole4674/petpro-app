@@ -18,7 +18,14 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
-export default function ClientPaymentModal({ appointment, balance, onClose, onSuccess }) {
+// Accepts either an `appointment` or a `boardingReservation`. Internally it
+// figures out which kind of charge it is and calls the matching edge function.
+// This way the same modal/UI works for both grooming + boarding payments.
+export default function ClientPaymentModal({ appointment, boardingReservation, balance, onClose, onSuccess }) {
+  // Pick whichever item was passed in. UI strings adapt to "Appointment" vs "Boarding Stay".
+  const isBoarding = !!boardingReservation
+  const item = appointment || boardingReservation
+  const headerLabel = isBoarding ? 'Pay for Boarding Stay' : 'Pay for Appointment'
   const [cards, setCards] = useState([])
   const [loadingCards, setLoadingCards] = useState(true)
   const [selectedCardId, setSelectedCardId] = useState(null)
@@ -70,12 +77,22 @@ export default function ClientPaymentModal({ appointment, balance, onClose, onSu
     }
     setPaying(true)
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke('stripe-charge-card', {
-        body: {
-          appointment_id: appointment.id,
-          payment_method_id: selectedCardId,
-          tip_amount: tipDollars,
-        }
+      // Branch: boarding goes to stripe-charge-boarding with boarding_reservation_id;
+      // grooming goes to stripe-charge-card with appointment_id.
+      const fnName = isBoarding ? 'stripe-charge-boarding' : 'stripe-charge-card'
+      const payload = isBoarding
+        ? {
+            boarding_reservation_id: item.id,
+            payment_method_id: selectedCardId,
+            tip_amount: tipDollars,
+          }
+        : {
+            appointment_id: item.id,
+            payment_method_id: selectedCardId,
+            tip_amount: tipDollars,
+          }
+      const { data, error: invokeError } = await supabase.functions.invoke(fnName, {
+        body: payload
       })
       // Extract the real error message from non-2xx responses. Supabase-js
       // wraps the actual function error inside invokeError.context, which is
@@ -106,7 +123,7 @@ export default function ClientPaymentModal({ appointment, balance, onClose, onSu
       <div style={styles.modal} onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div style={styles.header}>
-          <h2 style={styles.title}>💳 Pay for Appointment</h2>
+          <h2 style={styles.title}>💳 {headerLabel}</h2>
           <button onClick={onClose} disabled={paying} style={styles.closeBtn}>✕</button>
         </div>
 
@@ -116,10 +133,10 @@ export default function ClientPaymentModal({ appointment, balance, onClose, onSu
               appointment (newer multi-pet bookings); for legacy single-service
               appointments we just show the balance. */}
           <div style={styles.summary}>
-            {parseFloat(appointment.total_price) > 0 && (
+            {parseFloat(item.total_price) > 0 && (
               <div style={styles.summaryRow}>
-                <span style={styles.summaryLabel}>Service Total</span>
-                <span style={styles.summaryValue}>${parseFloat(appointment.total_price).toFixed(2)}</span>
+                <span style={styles.summaryLabel}>{isBoarding ? 'Stay Total' : 'Service Total'}</span>
+                <span style={styles.summaryValue}>${parseFloat(item.total_price).toFixed(2)}</span>
               </div>
             )}
             <div style={styles.summaryRow}>

@@ -107,6 +107,8 @@ export default function ClientPortalDashboard() {
   // Pay-now modal state — null when closed, the appointment object when open
   var [payingAppointment, setPayingAppointment] = useState(null)
   var [payingBalance, setPayingBalance] = useState(0)
+  // Same modal, but for boarding stays. Either appointment OR boarding will be set.
+  var [payingBoarding, setPayingBoarding] = useState(null)
 
   // History tabs state
   var [pastGrooming, setPastGrooming] = useState([])
@@ -1629,6 +1631,59 @@ export default function ClientPortalDashboard() {
                               {res.special_instructions && (
                                 <div className="cp-history-notes">📝 {res.special_instructions}</div>
                               )}
+
+                              {/* Pay Now — boarding version. Only shows if there's a balance owed. */}
+                              {(function () {
+                                var total = parseFloat(res.total_price || 0)
+                                if (!total || total <= 0) return null
+                                // Sum of (amount - refunded) for all payments tied to THIS reservation.
+                                var paid = (clientPayments || [])
+                                  .filter(function (p) { return p.boarding_reservation_id === res.id })
+                                  .reduce(function (sum, p) {
+                                    var paidAmt = parseFloat(p.amount || 0)
+                                    var refunded = parseFloat(p.refunded_amount || 0)
+                                    return sum + Math.max(0, paidAmt - refunded)
+                                  }, 0)
+                                var bal = total - paid
+                                if (bal <= 0.001) {
+                                  return (
+                                    <div style={{
+                                      marginTop: 10,
+                                      padding: '8px 12px',
+                                      background: '#dcfce7',
+                                      border: '1px solid #86efac',
+                                      borderRadius: 8,
+                                      color: '#166534',
+                                      fontSize: 13,
+                                      fontWeight: 700
+                                    }}>
+                                      ✓ Paid in full
+                                    </div>
+                                  )
+                                }
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={function () {
+                                      setPayingBoarding(res)
+                                      setPayingBalance(bal)
+                                    }}
+                                    style={{
+                                      marginTop: 10,
+                                      padding: '8px 14px',
+                                      background: '#10b981',
+                                      color: '#fff',
+                                      border: 'none',
+                                      borderRadius: 8,
+                                      fontSize: 13,
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    💳 Pay ${bal.toFixed(2)}
+                                  </button>
+                                )
+                              })()}
                             </div>
                           </div>
                         )
@@ -2549,6 +2604,23 @@ export default function ClientPortalDashboard() {
             setPayingAppointment(null)
             setPayingBalance(0)
             // Reload everything so balances + payment history reflect the new charge
+            loadPortalData()
+          }}
+        />
+      )}
+
+      {/* Pay-now modal — same component, but for an upcoming boarding stay */}
+      {payingBoarding && (
+        <ClientPaymentModal
+          boardingReservation={payingBoarding}
+          balance={payingBalance}
+          onClose={function () {
+            setPayingBoarding(null)
+            setPayingBalance(0)
+          }}
+          onSuccess={function () {
+            setPayingBoarding(null)
+            setPayingBalance(0)
             loadPortalData()
           }}
         />

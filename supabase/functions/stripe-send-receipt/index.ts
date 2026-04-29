@@ -48,10 +48,11 @@ serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // 1. Look up the payment + related rows
+    // 1. Look up the payment + related rows. We pull both appointment_id and
+    //    boarding_reservation_id so we can render the right context section.
     const { data: payment } = await supabase
       .from('payments')
-      .select('id, amount, tip_amount, method, created_at, stripe_payment_intent_id, client_id, groomer_id, appointment_id')
+      .select('id, amount, tip_amount, method, created_at, stripe_payment_intent_id, client_id, groomer_id, appointment_id, boarding_reservation_id')
       .eq('id', paymentId)
       .maybeSingle()
 
@@ -91,10 +92,33 @@ serve(async (req: Request) => {
     const shopEmail = (shop && shop.email) || (groomer && groomer.email) || null
     const brandColor = (shop && shop.primary_color) || '#7c3aed'
 
-    // 4. Optional: appointment context (date + service for nicer receipt)
+    // 4. Optional: context line for the receipt body. For grooming payments we
+    //    show appt date + services. For boarding we show check-in → check-out
+    //    dates. isBoarding controls which header label gets used too.
+    const isBoarding = !!payment.boarding_reservation_id
     let apptDate: string | null = null
     let apptServices: string[] = []
-    if (payment.appointment_id) {
+    let boardingStartDate: string | null = null
+    let boardingEndDate: string | null = null
+
+    if (isBoarding) {
+      const { data: res } = await supabase
+        .from('boarding_reservations')
+        .select('start_date, end_date, boarding_reservation_pets(pets:pet_id(name))')
+        .eq('id', payment.boarding_reservation_id)
+        .maybeSingle()
+      if (res) {
+        boardingStartDate = res.start_date || null
+        boardingEndDate = res.end_date || null
+        // Reuse apptServices array as a generic "label" list — pet names here
+        if (res.boarding_reservation_pets && res.boarding_reservation_pets.length > 0) {
+          res.boarding_reservation_pets.forEach((bp: any) => {
+            const n = bp.pets && bp.pets.name
+            if (n && apptServices.indexOf(n) === -1) apptServices.push(n)
+          })
+        }
+      }
+    } else if (payment.appointment_id) {
       const { data: appt } = await supabase
         .from('appointments')
         .select('appointment_date, start_time, service_id, services:service_id(service_name), appointment_pets(services:service_id(service_name))')
@@ -136,6 +160,9 @@ serve(async (req: Request) => {
       dateStr,
       apptDate,
       apptServices,
+      isBoarding,
+      boardingStartDate,
+      boardingEndDate,
       paymentIntentId: payment.stripe_payment_intent_id,
     })
 
@@ -179,9 +206,17 @@ serve(async (req: Request) => {
 
 function buildReceiptHtml(d: any): string {
   const brand = d.brandColor || '#7c3aed'
-  const apptLine = d.apptDate
-    ? `<div style="font-size:13px;color:#6b7280;margin-top:6px;">Appointment: ${formatApptDate(d.apptDate)}${d.apptServices.length ? ' · ' + d.apptServices.join(', ') : ''}</div>`
-    : ''
+  // Context line: boarding shows date range + pets; grooming shows date + services.
+  let apptLine = ''
+  if (d.isBoarding && (d.boardingStartDate || d.boardingEndDate)) {
+    const start = d.boardingStartDate ? formatApptDate(d.boardingStartDate) : ''
+    const end = d.boardingEndDate ? formatApptDate(d.boardingEndDate) : ''
+    const range = start && end ? `${start} → ${end}` : (start || end)
+    const petList = d.apptServices && d.apptServices.length ? ' · ' + d.apptServices.join(', ') : ''
+    apptLine = `<div style="font-size:13px;color:#6b7280;margin-top:6px;">Boarding stay: ${range}${petList}</div>`
+  } else if (d.apptDate) {
+    apptLine = `<div style="font-size:13px;color:#6b7280;margin-top:6px;">Appointment: ${formatApptDate(d.apptDate)}${d.apptServices.length ? ' · ' + d.apptServices.join(', ') : ''}</div>`
+  }
   const tipRow = d.tip > 0
     ? `<tr><td style="padding:8px 0;color:#6b7280;">Tip</td><td style="padding:8px 0;text-align:right;color:#1f2937;">$${d.tip.toFixed(2)}</td></tr>`
     : ''
@@ -209,7 +244,7 @@ function buildReceiptHtml(d: any): string {
           ${apptLine}
 
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:20px;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;font-size:14px;">
-            <tr><td style="padding:8px 0;color:#6b7280;">Service</td><td style="padding:8px 0;text-align:right;color:#1f2937;">$${d.amount.toFixed(2)}</td></tr>
+            <tr><td style="padding:8px 0;color:#6b7280;">${d.isBoarding ? 'Boarding stay' : 'Service'}</td><td style="padding:8px 0;text-align:right;color:#1f2937;">$${d.amount.toFixed(2)}</td></tr>
             ${tipRow}
             <tr><td style="padding:10px 0;font-weight:800;color:#1f2937;border-top:1px solid #e5e7eb;">Total Charged</td><td style="padding:10px 0;text-align:right;font-weight:800;color:${brand};font-size:16px;border-top:1px solid #e5e7eb;">$${d.total.toFixed(2)}</td></tr>
           </table>
