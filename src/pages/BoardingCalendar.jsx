@@ -1794,6 +1794,10 @@ export default function BoardingCalendar() {
                   const paid = (resPayments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0)
                   const balance = total - paid
                   const balanceColor = balance <= 0 ? '#16a34a' : '#dc2626'
+                  // If the booking has no total set (e.g. nights = 0 or price not entered),
+                  // we hide the misleading "Paid in full" badge and show a neutral
+                  // "No price set" pill instead. Prevents the "$0 paid in full" confusion.
+                  const hasNoPrice = total <= 0
                   return (
                     <>
                       <div className="kc-stay-item" style={{ background: '#f9fafb' }}>
@@ -1804,14 +1808,23 @@ export default function BoardingCalendar() {
                         <span className="kc-stay-label" style={{ color: '#166534' }}>✓ Paid</span>
                         <span className="kc-stay-value" style={{ color: '#16a34a', fontWeight: 700 }}>${paid.toFixed(2)}</span>
                       </div>
-                      <div className="kc-stay-item" style={{ background: balance <= 0 ? '#dcfce7' : '#fef2f2', borderLeft: '3px solid ' + balanceColor }}>
-                        <span className="kc-stay-label" style={{ color: balance <= 0 ? '#166534' : '#991b1b' }}>
-                          {balance <= 0 ? '🎉 Paid in full' : '⚠️ Balance Due'}
-                        </span>
-                        <span className="kc-stay-value" style={{ color: balanceColor, fontWeight: 800, fontSize: '15px' }}>
-                          ${Math.max(0, balance).toFixed(2)}
-                        </span>
-                      </div>
+                      {hasNoPrice ? (
+                        <div className="kc-stay-item" style={{ background: '#fef9c3', borderLeft: '3px solid #ca8a04' }}>
+                          <span className="kc-stay-label" style={{ color: '#854d0e' }}>💡 No price set</span>
+                          <span className="kc-stay-value" style={{ color: '#854d0e', fontWeight: 600, fontSize: '12px' }}>
+                            Click Edit Booking to add total
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="kc-stay-item" style={{ background: balance <= 0 ? '#dcfce7' : '#fef2f2', borderLeft: '3px solid ' + balanceColor }}>
+                          <span className="kc-stay-label" style={{ color: balance <= 0 ? '#166534' : '#991b1b' }}>
+                            {balance <= 0 ? '🎉 Paid in full' : '⚠️ Balance Due'}
+                          </span>
+                          <span className="kc-stay-value" style={{ color: balanceColor, fontWeight: 800, fontSize: '15px' }}>
+                            ${Math.max(0, balance).toFixed(2)}
+                          </span>
+                        </div>
+                      )}
                     </>
                   )
                 })()}
