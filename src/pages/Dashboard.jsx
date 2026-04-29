@@ -47,6 +47,8 @@ export default function Dashboard() {
   var [waitlistCount, setWaitlistCount] = useState(0)
   var [owedSummary, setOwedSummary] = useState({ total: 0, clientCount: 0, top3: [] })
   var [unreadSummary, setUnreadSummary] = useState({ total: 0, top3: [] })
+  // Stripe payouts widget — net amount processed via Stripe today + this week
+  var [stripeSummary, setStripeSummary] = useState({ todayNet: 0, todayCount: 0, weekNet: 0, weekCount: 0 })
 
   useEffect(function() {
     fetchAll()
@@ -167,7 +169,52 @@ export default function Dashboard() {
     // Fetch unread messages summary (Phase 5)
     await fetchUnreadSummary(user.id)
 
+    // Fetch Stripe payouts summary (Phase 4c) — net charges processed today + this week
+    await fetchStripeSummary(user.id)
+
     setLoading(false)
+  }
+
+  // Sums all Stripe-processed payments for this groomer for "today" and
+  // "this week" (Sunday → Saturday). Subtracts refunds so the figure
+  // reflects net money in.
+  async function fetchStripeSummary(userId) {
+    var now = new Date()
+
+    var startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+
+    // Start of week = most recent Sunday at 00:00 local time
+    var dayOfWeek = now.getDay() // 0 = Sun
+    var startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek)
+
+    var { data: payments } = await supabase
+      .from('payments')
+      .select('amount, refunded_amount, created_at, stripe_payment_intent_id')
+      .eq('groomer_id', userId)
+      .not('stripe_payment_intent_id', 'is', null)
+      .gte('created_at', startOfWeek.toISOString())
+
+    if (!payments) {
+      setStripeSummary({ todayNet: 0, todayCount: 0, weekNet: 0, weekCount: 0 })
+      return
+    }
+
+    var todayNet = 0, todayCount = 0, weekNet = 0, weekCount = 0
+    payments.forEach(function (p) {
+      var paid = parseFloat(p.amount || 0)
+      var refunded = parseFloat(p.refunded_amount || 0)
+      var net = Math.max(0, paid - refunded)
+      var when = new Date(p.created_at)
+      // Always counts toward the week (we already filtered week range)
+      weekNet += net
+      weekCount += 1
+      if (when >= startOfToday) {
+        todayNet += net
+        todayCount += 1
+      }
+    })
+
+    setStripeSummary({ todayNet: todayNet, todayCount: todayCount, weekNet: weekNet, weekCount: weekCount })
   }
 
   async function fetchOwedSummary(userId) {
@@ -623,6 +670,46 @@ export default function Dashboard() {
                 </div>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Stripe Payouts Widget (Phase 4c) — only renders when there's
+          actual Stripe activity to show, avoids noise on day 1 */}
+      {stripeSummary.weekCount > 0 && (
+        <div className="db-balances-widget">
+          <div className="db-balances-widget-header">
+            <div className="db-balances-widget-title">
+              <span className="db-balances-widget-icon">💳</span>
+              Stripe Payouts
+            </div>
+            <span style={{ fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>
+              Daily payouts to your bank
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', padding: '12px 16px' }}>
+            <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '10px', padding: '12px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+                Today
+              </div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: '#15803d' }}>
+                ${stripeSummary.todayNet.toFixed(2)}
+              </div>
+              <div style={{ fontSize: '12px', color: '#166534', marginTop: '2px' }}>
+                {stripeSummary.todayCount} {stripeSummary.todayCount === 1 ? 'charge' : 'charges'}
+              </div>
+            </div>
+            <div style={{ background: '#f5f3ff', border: '1px solid #c4b5fd', borderRadius: '10px', padding: '12px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: '#5b21b6', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+                This Week
+              </div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: '#7c3aed' }}>
+                ${stripeSummary.weekNet.toFixed(2)}
+              </div>
+              <div style={{ fontSize: '12px', color: '#5b21b6', marginTop: '2px' }}>
+                {stripeSummary.weekCount} {stripeSummary.weekCount === 1 ? 'charge' : 'charges'}
+              </div>
+            </div>
           </div>
         </div>
       )}
