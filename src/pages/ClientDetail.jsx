@@ -175,7 +175,9 @@ export default function ClientDetail() {
   const fetchClientPayments = async () => {
     setLoadingTab(true)
     try {
-      // 1. Get payment history
+      // 1. Get payment history. Joins both appointments AND boarding_reservations
+      // so the row label can say "Full Groom · bella" for grooming OR
+      // "🏠 Boarding 4/27 → 4/28 · bella" for boarding stays.
       const { data: payData, error } = await supabase
         .from('payments')
         .select(`
@@ -187,6 +189,12 @@ export default function ClientDetail() {
             quoted_price,
             pets:pet_id ( name ),
             services:service_id ( service_name )
+          ),
+          boarding_reservations:boarding_reservation_id (
+            id,
+            start_date,
+            end_date,
+            boarding_reservation_pets ( pets:pet_id ( name ) )
           )
         `)
         .eq('client_id', id)
@@ -1673,13 +1681,39 @@ export default function ClientDetail() {
                               </span>
                             </div>
                             <div className="cp-real-payment-sub">
+                              {/* Grooming row */}
                               {p.appointments?.services?.service_name && (
                                 <span>✂️ {p.appointments.services.service_name}</span>
                               )}
                               {p.appointments?.pets?.name && (
                                 <span>🐾 {p.appointments.pets.name}</span>
                               )}
-                              {!p.appointments && <span className="cp-real-payment-orphan">Payment (no appointment link)</span>}
+                              {/* Boarding row — show date range + pet names */}
+                              {!p.appointments && p.boarding_reservations && (() => {
+                                const br = p.boarding_reservations
+                                const fmt = (d) => {
+                                  if (!d) return ''
+                                  const dd = new Date(d + 'T00:00:00')
+                                  return (dd.getMonth() + 1) + '/' + dd.getDate()
+                                }
+                                const range = (br.start_date || br.end_date)
+                                  ? fmt(br.start_date) + (br.end_date ? ' → ' + fmt(br.end_date) : '')
+                                  : ''
+                                const pets = (br.boarding_reservation_pets || [])
+                                  .map(bp => bp.pets && bp.pets.name)
+                                  .filter(Boolean)
+                                  .join(', ')
+                                return (
+                                  <>
+                                    <span>🏠 Boarding {range}</span>
+                                    {pets && <span>🐾 {pets}</span>}
+                                  </>
+                                )
+                              })()}
+                              {/* Truly orphan — neither appointment nor boarding */}
+                              {!p.appointments && !p.boarding_reservations && (
+                                <span className="cp-real-payment-orphan">Payment (no appointment link)</span>
+                              )}
                             </div>
                             {p.notes && <div className="cp-real-payment-notes">"{p.notes}"</div>}
                           </div>
