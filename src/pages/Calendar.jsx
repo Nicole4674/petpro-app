@@ -1679,6 +1679,36 @@ export default function Calendar() {
         // Card method + a saved card selected + NOT manual entry mode →
         // route through stripe-groomer-charge to actually charge the card.
         const useStripe = paymentMethod === 'card' && !useManualCardEntry && selectedSavedCardId
+
+        // Debug log so we can see exactly what state is at click time
+        console.log('[GroomingPayment]', {
+            paymentMethod,
+            selectedSavedCardId,
+            useManualCardEntry,
+            loadingSavedCards,
+            groomerSavedCardsCount: groomerSavedCards.length,
+        })
+
+        // Hard-fail when method=card but the card path can't be used. Without
+        // this we silently fall to manual logging, which is what was breaking
+        // live charges (charge appeared to "work" but never hit Stripe).
+        if (paymentMethod === 'card' && !useManualCardEntry && (amt > 0 || tip > 0)) {
+            if (loadingSavedCards) {
+                alert('Saved cards are still loading. Please wait a moment and click Pay again.')
+                setRecordingPayment(false)
+                return
+            }
+            if (!selectedSavedCardId) {
+                alert(
+                    'No card on file for this client. Either: (a) ask the client to add a card in their portal, ' +
+                    '(b) toggle "Manual card entry" if you swiped a card on a separate terminal, or ' +
+                    '(c) pick Cash/Zelle/Venmo if they paid that way.'
+                )
+                setRecordingPayment(false)
+                return
+            }
+        }
+
         if (useStripe && (amt > 0 || tip > 0)) {
             try {
                 const { data, error: invokeError } = await supabase.functions.invoke('stripe-groomer-charge', {
