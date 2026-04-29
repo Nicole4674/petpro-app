@@ -1819,7 +1819,12 @@ export default function ClientPortalDashboard() {
         {activeTab === 'payments' && (
           <div>
             {(function () {
-              var totalPaid = clientPayments.reduce(function (sum, p) { return sum + parseFloat(p.amount || 0) }, 0)
+              // Subtract refunded amounts so refunded charges don't inflate the total
+              var totalPaid = clientPayments.reduce(function (sum, p) {
+                var paidAmt = parseFloat(p.amount || 0)
+                var refunded = parseFloat(p.refunded_amount || 0)
+                return sum + Math.max(0, paidAmt - refunded)
+              }, 0)
               var totalTips = clientPayments.reduce(function (sum, p) { return sum + parseFloat(p.tip_amount || 0) }, 0)
 
               if (clientPayments.length === 0) {
