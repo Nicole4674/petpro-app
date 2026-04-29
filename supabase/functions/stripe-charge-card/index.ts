@@ -208,11 +208,13 @@ serve(async (req: Request) => {
       )
     }
 
-    // 10. Write payment row to our DB
+    // 10. Write payment row to our DB. Note: client_id is required so the
+    //     client portal can see this payment (its query filters by client_id).
     const { data: paymentRow, error: paymentErr } = await supabase
       .from('payments')
       .insert({
         groomer_id: groomer.id,
+        client_id: client.id,
         appointment_id: appointmentId,
         amount: balance,            // service amount only
         tip_amount: tipAmount,      // tip recorded separately
