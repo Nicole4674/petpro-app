@@ -90,6 +90,7 @@ function RootRedirect({ session }) {
 import ClientPortalDashboard from './pages/ClientPortalDashboard'
 import ClientPortalMessages from './pages/ClientPortalMessages'
 import ClientPortalThread from './pages/ClientPortalThread'
+import ClientPortalCards from './pages/ClientPortalCards'
 import AIChatWidget from './components/AIChatWidget'
 import ClientChatWidget from './components/ClientChatWidget'
 import Sidebar from './components/Sidebar'
@@ -186,6 +187,7 @@ function App() {
                     <Route path="/portal" element={session ? <ClientPortalDashboard /> : <Navigate to="/portal/login" />} />
                     <Route path="/portal/messages" element={session ? <ClientPortalMessages /> : <Navigate to="/portal/login" />} />
                     <Route path="/portal/messages/:threadId" element={session ? <ClientPortalThread /> : <Navigate to="/portal/login" />} />
+                    <Route path="/portal/cards" element={session ? <ClientPortalCards /> : <Navigate to="/portal/login" />} />
                     <Route path="/" element={<RootRedirect session={session} />} />
                     <Route path="/clients" element={gate(session, <Clients />)} />
                     <Route path="/clients/new" element={gate(session, <AddClient />)} />

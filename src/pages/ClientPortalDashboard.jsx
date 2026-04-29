@@ -22,7 +22,8 @@ const TABS = [
   { key: 'grooming', label: '✂️ Past Grooming' },
   { key: 'boarding', label: '🏠 Past Boarding' },
   { key: 'vaccinations', label: '💉 Vaccinations' },
-  { key: 'payments', label: '💳 Payments' },
+  { key: 'payments', label: '🧾 Payments' },
+  { key: 'cards', label: '💳 My Cards' },
   { key: 'messages', label: '💬 Messages' },
 ]
 
@@ -783,6 +784,8 @@ export default function ClientPortalDashboard() {
               onClick={function () {
                 if (tab.key === 'messages') {
                   navigate('/portal/messages')
+                } else if (tab.key === 'cards') {
+                  navigate('/portal/cards')
                 } else {
                   setActiveTab(tab.key)
                 }
