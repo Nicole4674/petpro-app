@@ -75,11 +75,11 @@ serve(async (req: Request) => {
     if (!client.stripe_customer_id) return jsonError('No Stripe customer on file — add a card first', 400)
 
     // 5. Look up the appointment with just the core fields. Separate
-    //    queries below pull pricing data — keeps joins simple and avoids
-    //    any Supabase relationship-detection issues.
+    //    queries below pull pricing data. Note: appointments table has
+    //    NO total_price column — pricing comes from services + appointment_pets.
     const { data: appointment, error: apptErr } = await supabase
       .from('appointments')
-      .select('id, client_id, groomer_id, total_price, service_id, status')
+      .select('id, client_id, groomer_id, service_id, status')
       .eq('id', appointmentId)
       .maybeSingle()
 
@@ -91,38 +91,34 @@ serve(async (req: Request) => {
     if (appointment.client_id !== client.id) return jsonError('This appointment does not belong to you', 403)
 
     // 6. Compute total — fallback chain:
-    //    a. Explicit total_price column
-    //    b. Sum of service prices across appointment_pets (multi-pet)
-    //    c. Legacy single service.price
-    let totalPrice = parseFloat(appointment.total_price || 0)
+    //    a. Sum of service prices across appointment_pets (multi-pet)
+    //    b. Legacy single service.price
+    let totalPrice = 0
 
-    if (!totalPrice) {
-      // Try multi-pet bookings: query appointment_pets, then services
-      const { data: apptPets } = await supabase
-        .from('appointment_pets')
-        .select('service_id')
-        .eq('appointment_id', appointmentId)
+    // Try multi-pet bookings first
+    const { data: apptPets } = await supabase
+      .from('appointment_pets')
+      .select('service_id')
+      .eq('appointment_id', appointmentId)
 
-      if (apptPets && apptPets.length > 0) {
-        const serviceIds = apptPets.map(ap => ap.service_id).filter(Boolean)
-        if (serviceIds.length > 0) {
-          const { data: petServices } = await supabase
-            .from('services')
-            .select('id, price')
-            .in('id', serviceIds)
-          if (petServices && petServices.length > 0) {
-            // Sum every appointment_pet's service price
-            totalPrice = apptPets.reduce((sum: number, ap: any) => {
-              const svc = petServices.find(s => s.id === ap.service_id)
-              return sum + parseFloat((svc && svc.price) || 0)
-            }, 0)
-          }
+    if (apptPets && apptPets.length > 0) {
+      const serviceIds = apptPets.map(ap => ap.service_id).filter(Boolean)
+      if (serviceIds.length > 0) {
+        const { data: petServices } = await supabase
+          .from('services')
+          .select('id, price')
+          .in('id', serviceIds)
+        if (petServices && petServices.length > 0) {
+          totalPrice = apptPets.reduce((sum: number, ap: any) => {
+            const svc = petServices.find(s => s.id === ap.service_id)
+            return sum + parseFloat((svc && svc.price) || 0)
+          }, 0)
         }
       }
     }
 
+    // Fallback: legacy single-service appointment
     if (!totalPrice && appointment.service_id) {
-      // Legacy single-service path
       const { data: svc } = await supabase
         .from('services')
         .select('price')
