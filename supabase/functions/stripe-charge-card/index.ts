@@ -133,6 +133,17 @@ serve(async (req: Request) => {
       return jsonError('This appointment has no price set — please contact the shop', 400)
     }
 
+    // 6.5. Look up shop settings to see if "pass card fees to client" is on.
+    //      If so, we'll add a surcharge to cover Stripe's processing fee
+    //      so the groomer nets the full service price.
+    const { data: shopSettings } = await supabase
+      .from('shop_settings')
+      .select('pass_fees_to_client')
+      .eq('groomer_id', groomer.id)
+      .maybeSingle()
+
+    const passFeesToClient = shopSettings && shopSettings.pass_fees_to_client === true
+
     const { data: existingPayments } = await supabase
       .from('payments')
       .select('amount')
@@ -145,7 +156,19 @@ serve(async (req: Request) => {
       return jsonError('This appointment is already paid in full', 400)
     }
 
-    const amountToChargeDollars = balance + tipAmount
+    // Compute card fee surcharge if "pass fees to client" is on. We invert
+    // Stripe's standard rate (2.9% + $0.30) so the groomer nets exactly
+    // the service + tip amount after Stripe takes their cut.
+    //   gross = (net + 0.30) / (1 - 0.029)
+    //   surcharge = gross - net
+    let cardFeeSurcharge = 0
+    if (passFeesToClient) {
+      const netNeeded = balance + tipAmount
+      const gross = (netNeeded + 0.30) / (1 - 0.029)
+      cardFeeSurcharge = Math.ceil((gross - netNeeded) * 100) / 100  // round up to cents
+    }
+
+    const amountToChargeDollars = balance + tipAmount + cardFeeSurcharge
     const amountToChargeCents = Math.round(amountToChargeDollars * 100)
 
     // 7. Look up groomer's Stripe Connect account
@@ -219,7 +242,9 @@ serve(async (req: Request) => {
         amount: balance,            // service amount only
         tip_amount: tipAmount,      // tip recorded separately
         method: 'card',
-        notes: 'Paid via client portal (Stripe)',
+        notes: cardFeeSurcharge > 0
+          ? `Paid via client portal (Stripe) — incl. $${cardFeeSurcharge.toFixed(2)} card fee`
+          : 'Paid via client portal (Stripe)',
         stripe_payment_intent_id: paymentIntent.id,
       })
       .select()
@@ -258,6 +283,7 @@ serve(async (req: Request) => {
       amount_charged: amountToChargeDollars,
       service_amount: balance,
       tip_amount: tipAmount,
+      card_fee: cardFeeSurcharge,
     }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }

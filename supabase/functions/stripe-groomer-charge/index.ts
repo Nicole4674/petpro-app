@@ -178,7 +178,23 @@ serve(async (req: Request) => {
       return jsonError('This appointment is already paid in full', 400)
     }
 
-    const amountToChargeDollars = balance + tipAmount
+    // Look up shop settings for the "pass card fees to client" toggle.
+    const { data: shopSettings } = await supabase
+      .from('shop_settings')
+      .select('pass_fees_to_client')
+      .eq('groomer_id', groomer.id)
+      .maybeSingle()
+    const passFeesToClient = shopSettings && shopSettings.pass_fees_to_client === true
+
+    // Compute card fee surcharge so the groomer nets the full service + tip
+    let cardFeeSurcharge = 0
+    if (passFeesToClient) {
+      const netNeeded = balance + tipAmount
+      const gross = (netNeeded + 0.30) / (1 - 0.029)
+      cardFeeSurcharge = Math.ceil((gross - netNeeded) * 100) / 100
+    }
+
+    const amountToChargeDollars = balance + tipAmount + cardFeeSurcharge
     const amountToChargeCents = Math.round(amountToChargeDollars * 100)
 
     // 9. Init Stripe + create PaymentIntent on connected account
@@ -241,7 +257,9 @@ serve(async (req: Request) => {
         amount: balance,
         tip_amount: tipAmount,
         method: 'card',
-        notes: 'Charged saved card on file (Stripe)',
+        notes: cardFeeSurcharge > 0
+          ? `Charged saved card on file (Stripe) — incl. $${cardFeeSurcharge.toFixed(2)} card fee`
+          : 'Charged saved card on file (Stripe)',
         stripe_payment_intent_id: paymentIntent.id,
       })
       .select()
