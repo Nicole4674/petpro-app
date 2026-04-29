@@ -100,12 +100,16 @@ export default function ClientPaymentModal({ appointment, balance, onClose, onSu
 
         {/* Body */}
         <div style={styles.body}>
-          {/* Summary */}
+          {/* Summary — show service total only when explicitly set on the
+              appointment (newer multi-pet bookings); for legacy single-service
+              appointments we just show the balance. */}
           <div style={styles.summary}>
-            <div style={styles.summaryRow}>
-              <span style={styles.summaryLabel}>Service Total</span>
-              <span style={styles.summaryValue}>${(parseFloat(appointment.total_price) || 0).toFixed(2)}</span>
-            </div>
+            {parseFloat(appointment.total_price) > 0 && (
+              <div style={styles.summaryRow}>
+                <span style={styles.summaryLabel}>Service Total</span>
+                <span style={styles.summaryValue}>${parseFloat(appointment.total_price).toFixed(2)}</span>
+              </div>
+            )}
             <div style={styles.summaryRow}>
               <span style={styles.summaryLabel}>Balance Due</span>
               <span style={{ ...styles.summaryValue, color: '#dc2626', fontWeight: 700 }}>${balance.toFixed(2)}</span>

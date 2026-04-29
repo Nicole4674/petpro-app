@@ -74,20 +74,33 @@ serve(async (req: Request) => {
     if (!client) return jsonError('Client record not found', 404)
     if (!client.stripe_customer_id) return jsonError('No Stripe customer on file — add a card first', 400)
 
-    // 5. Look up the appointment + verify it's THIS client's
+    // 5. Look up the appointment + verify it's THIS client's. Also pull
+    //    service price + multi-pet appointment_pets so we can compute total
+    //    when total_price isn't explicitly set on the row.
     const { data: appointment } = await supabase
       .from('appointments')
-      .select('id, client_id, groomer_id, total_price, status')
+      .select('id, client_id, groomer_id, total_price, status, services(price), appointment_pets(services:service_id(price))')
       .eq('id', appointmentId)
       .maybeSingle()
 
     if (!appointment) return jsonError('Appointment not found', 404)
     if (appointment.client_id !== client.id) return jsonError('This appointment does not belong to you', 403)
 
-    // 6. Compute balance owed = total_price - sum(payments.amount)
-    const totalPrice = parseFloat(appointment.total_price || 0)
+    // 6. Compute total — same fallback logic as the frontend uses:
+    //    a. Explicit total_price column
+    //    b. Sum of service prices across appointment_pets (multi-pet)
+    //    c. Legacy single service.price
+    let totalPrice = parseFloat(appointment.total_price || 0)
+    if (!totalPrice && appointment.appointment_pets && appointment.appointment_pets.length > 0) {
+      totalPrice = appointment.appointment_pets.reduce((sum: number, ap: any) => {
+        return sum + parseFloat((ap.services && ap.services.price) || 0)
+      }, 0)
+    }
+    if (!totalPrice && appointment.services && (appointment.services as any).price) {
+      totalPrice = parseFloat((appointment.services as any).price) || 0
+    }
     if (!totalPrice || totalPrice <= 0) {
-      return jsonError('This appointment has no balance to pay', 400)
+      return jsonError('This appointment has no price set — please contact the shop', 400)
     }
 
     const { data: existingPayments } = await supabase
