@@ -77,6 +77,8 @@ serve(async (req: Request) => {
     // 5. Look up the appointment with just the core fields. Separate
     //    queries below pull pricing data. Note: appointments table has
     //    NO total_price column — pricing comes from services + appointment_pets.
+    //    We also pull `status` so we can flip pending → confirmed after payment
+    //    (Phase 5d auto-confirm flow).
     const { data: appointment, error: apptErr } = await supabase
       .from('appointments')
       .select('id, client_id, groomer_id, service_id, status')
@@ -133,16 +135,16 @@ serve(async (req: Request) => {
       return jsonError('This appointment has no price set — please contact the shop', 400)
     }
 
-    // 6.5. Look up shop settings to see if "pass card fees to client" is on.
-    //      If so, we'll add a surcharge to cover Stripe's processing fee
-    //      so the groomer nets the full service price.
+    // 6.5. Look up shop settings to see if "pass card fees to client" is on
+    //      AND if pre-payment is required (for the auto-confirm flow).
     const { data: shopSettings } = await supabase
       .from('shop_settings')
-      .select('pass_fees_to_client')
+      .select('pass_fees_to_client, require_prepay_to_book')
       .eq('groomer_id', groomer.id)
       .maybeSingle()
 
     const passFeesToClient = shopSettings && shopSettings.pass_fees_to_client === true
+    const requirePrepay = shopSettings && shopSettings.require_prepay_to_book === true
 
     const { data: existingPayments } = await supabase
       .from('payments')
@@ -265,7 +267,20 @@ serve(async (req: Request) => {
       })
     }
 
-    // 11. Fire-and-forget receipt email (don't block on it). If it fails,
+    // 11. Auto-flip pending → confirmed if shop requires prepay (Phase 5d)
+    //     Booking was created as 'pending' by the database trigger when
+    //     require_prepay is on. Now that the client has paid, flip it.
+    if (requirePrepay && appointment.status === 'pending') {
+      const { error: flipErr } = await supabase
+        .from('appointments')
+        .update({ status: 'confirmed' })
+        .eq('id', appointmentId)
+      if (flipErr) {
+        console.warn('[stripe-charge-card] Could not auto-confirm pending booking:', flipErr.message)
+      }
+    }
+
+    // 12. Fire-and-forget receipt email (don't block on it). If it fails,
     //     the charge still succeeded — we just log and move on.
     try {
       await supabase.functions.invoke('stripe-send-receipt', {
