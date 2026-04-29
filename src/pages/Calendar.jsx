@@ -1879,19 +1879,76 @@ export default function Calendar() {
         if (amt === 0 && tip === 0) { alert('Enter an amount or a tip.'); return }
         if (!addPayMethod) { alert('Pick a payment method.'); return }
 
+        // Debug log so we can see exactly what state is at click time
+        console.log('[AddPayment]', {
+            addPayMethod,
+            selectedSavedCardId,
+            useManualCardEntry,
+            loadingSavedCards,
+            groomerSavedCardsCount: groomerSavedCards.length,
+        })
+
+        // If method=card, force Stripe path. Hard-error rather than silent
+        // fallback so live charges actually go through Stripe.
+        if (addPayMethod === 'card' && !useManualCardEntry) {
+            if (loadingSavedCards) {
+                alert('Saved cards are still loading. Please wait a moment and click Add Payment again.')
+                return
+            }
+            if (!selectedSavedCardId) {
+                alert(
+                    'No card on file for this client. Either: (a) ask the client to add a card in their portal, ' +
+                    '(b) toggle "Manual card entry" if you swiped a card on a separate terminal, or ' +
+                    '(c) pick Cash/Zelle/Venmo if they paid that way.'
+                )
+                return
+            }
+        }
+
         setSavingAddPayment(true)
         try {
             var { data: { user } } = await supabase.auth.getUser()
-            var { error } = await supabase.from('payments').insert({
-                appointment_id: selectedAppt.id,
-                client_id: selectedAppt.client_id,
-                groomer_id: user.id,
-                amount: amt,
-                tip_amount: tip,
-                method: addPayMethod,
-                notes: addPayNotes || null,
-            })
-            if (error) throw error
+
+            // ─── STRIPE PATH ───
+            // Card method + a saved card selected → real Stripe charge via
+            // stripe-groomer-charge. The function writes the payment row + fires receipt.
+            const useStripe = addPayMethod === 'card' && !useManualCardEntry && !!selectedSavedCardId
+            if (useStripe) {
+                const { data, error: invokeError } = await supabase.functions.invoke('stripe-groomer-charge', {
+                    body: {
+                        appointment_id: selectedAppt.id,
+                        payment_method_id: selectedSavedCardId,
+                        tip_amount: tip,
+                    }
+                })
+                // Surface the real error message from non-2xx responses
+                if (invokeError) {
+                    let realMsg = invokeError.message || 'Charge failed'
+                    try {
+                        if (invokeError.context && typeof invokeError.context.json === 'function') {
+                            const ebody = await invokeError.context.json()
+                            if (ebody && ebody.error) realMsg = ebody.error
+                        }
+                    } catch { /* ignore */ }
+                    throw new Error(realMsg)
+                }
+                if (data && data.error) throw new Error(data.error)
+                if (!data || !data.success) throw new Error('Charge did not succeed')
+                // stripe-groomer-charge already wrote the payment row.
+            } else {
+                // ─── MANUAL PATH ───
+                // Cash/Zelle/Venmo/Check, OR card with manual entry mode toggled on.
+                var { error } = await supabase.from('payments').insert({
+                    appointment_id: selectedAppt.id,
+                    client_id: selectedAppt.client_id,
+                    groomer_id: user.id,
+                    amount: amt,
+                    tip_amount: tip,
+                    method: addPayMethod,
+                    notes: addPayNotes || null,
+                })
+                if (error) throw error
+            }
 
             // Refresh the payment history list in the popup
             var { data: refreshed } = await supabase
@@ -4062,7 +4119,18 @@ export default function Calendar() {
                                             <button
                                                 key={m.id}
                                                 type="button"
-                                                onClick={function () { setAddPayMethod(m.id) }}
+                                                onClick={function () {
+                                                    setAddPayMethod(m.id)
+                                                    // When user picks Card, load the client's saved cards so we can charge via Stripe
+                                                    if (m.id === 'card') {
+                                                        if (selectedAppt && typeof loadGroomerSavedCards === 'function') {
+                                                            loadGroomerSavedCards(selectedAppt)
+                                                        }
+                                                    } else {
+                                                        setGroomerSavedCards([])
+                                                        setSelectedSavedCardId(null)
+                                                    }
+                                                }}
                                                 disabled={savingAddPayment}
                                                 style={{ flex: '1 0 auto', minWidth: '72px', padding: '8px 10px', border: '1px solid ' + (active ? '#7c3aed' : '#d1d5db'), background: active ? '#ede9fe' : '#fff', color: active ? '#6d28d9' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '12px' }}
                                             >
@@ -4072,6 +4140,40 @@ export default function Calendar() {
                                     })}
                                 </div>
                             </div>
+
+                            {/* Saved cards list — only when method=card. Picks default card automatically. */}
+                            {addPayMethod === 'card' && (
+                                <div style={{ marginBottom: '12px', padding: '10px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
+                                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Card on file</div>
+                                    {loadingSavedCards ? (
+                                        <div style={{ fontSize: '12px', color: '#6b7280' }}>Loading saved cards…</div>
+                                    ) : groomerSavedCards.length === 0 ? (
+                                        <div style={{ fontSize: '12px', color: '#92400e', padding: '6px 8px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '6px' }}>
+                                            ⚠️ No card on file for this client. Either ask them to add a card in their portal, or pick a different method.
+                                        </div>
+                                    ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                            {groomerSavedCards.map(function (card) {
+                                                var sel = selectedSavedCardId === card.id
+                                                return (
+                                                    <label key={card.id} style={{ display: 'flex', alignItems: 'center', padding: '8px 10px', border: '2px solid ' + (sel ? '#7c3aed' : '#e5e7eb'), background: sel ? '#f5f3ff' : '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}>
+                                                        <input type="radio" name="addPayCard" checked={sel} onChange={function () { setSelectedSavedCardId(card.id) }} style={{ marginRight: '8px' }} />
+                                                        <span style={{ flex: 1, fontWeight: 700 }}>
+                                                            {(card.brand || 'Card').charAt(0).toUpperCase() + (card.brand || '').slice(1)} •••• {card.last4}
+                                                        </span>
+                                                        {card.is_default && (
+                                                            <span style={{ fontSize: '10px', background: '#dcfce7', color: '#166534', padding: '1px 5px', borderRadius: '8px', marginRight: '4px' }}>Default</span>
+                                                        )}
+                                                    </label>
+                                                )
+                                            })}
+                                            <div style={{ fontSize: '11px', color: '#16a34a', marginTop: '2px' }}>
+                                                💳 This will charge the selected card via Stripe and email a receipt.
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                             <div style={{ marginBottom: '12px' }}>
                                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Notes (optional)</label>
                                 <input
