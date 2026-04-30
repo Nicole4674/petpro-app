@@ -529,15 +529,17 @@ export default function ClientPortalDashboard() {
     }))
   }
 
-  // ─── Hard delete pet (true removal) ───────────────────────────────────
-  // Permanently removes the pet. Foreign key constraints from past
-  // appointments etc. may cause this to fail — we surface the error and
-  // suggest "Mark as Passed Away" as an alternative.
+  // ─── Remove pet (sold / rehomed / no longer with client) ─────────────
+  // Two-step strategy:
+  //   1. Try hard delete first. If pet has no history, the row goes away.
+  //   2. If FK constraint blocks delete, fall back to is_archived=true.
+  //      Pet then disappears from every view (active list, memorial,
+  //      booking dropdowns) but past appointments stay valid in the DB.
   async function handleClientHardDeletePet(pet) {
     if (!pet) return
-    var msg = '🗑️ Permanently remove ' + pet.name + '?\n\n' +
-      'This deletes ' + pet.name + ' from your profile forever.\n\n' +
-      'If you want to keep visit history, choose "Mark as Passed Away" instead.\n\n' +
+    var msg = '🗑️ Remove ' + pet.name + '?\n\n' +
+      'This hides ' + pet.name + ' from your profile completely.\n\n' +
+      'If you want a memorial section for ' + pet.name + ', choose "Mark as Passed Away" instead.\n\n' +
       'Type DELETE to confirm:'
     var typed = window.prompt(msg)
     if (typed !== 'DELETE') {
@@ -545,17 +547,28 @@ export default function ClientPortalDashboard() {
       return
     }
 
+    // 1) Try true hard delete
     var { error } = await supabase.from('pets').delete().eq('id', pet.id)
-    if (error) {
-      window.alert(
-        'Could not delete ' + pet.name + ':\n\n' +
-        error.message + '\n\n' +
-        'Tip: this usually means ' + pet.name + ' has past appointments or boarding records. ' +
-        'Use "Mark as Passed Away" to keep records, or contact the shop to remove them.'
-      )
+
+    if (!error) {
+      // Pet had no history → fully gone. Update local state.
+      setPets(pets.filter(function (p) { return p.id !== pet.id }))
       return
     }
-    // Remove from local state
+
+    // 2) FK constraint blocked the delete → archive the pet instead so it
+    //    vanishes from every visible list while past appointments stay intact.
+    var { error: archErr } = await supabase
+      .from('pets')
+      .update({ is_archived: true, updated_at: new Date().toISOString() })
+      .eq('id', pet.id)
+
+    if (archErr) {
+      window.alert('Could not remove ' + pet.name + ': ' + archErr.message)
+      return
+    }
+
+    // Archive succeeded → remove from local state so it disappears from view.
     setPets(pets.filter(function (p) { return p.id !== pet.id }))
   }
 
@@ -1302,7 +1315,7 @@ export default function ClientPortalDashboard() {
             {/* Pets */}
             <div className="cp-card">
               <div className="cp-card-title-row">
-                <h3 className="cp-card-title">🐾 My Pets ({pets.filter(function (p) { return !p.is_memorial }).length})</h3>
+                <h3 className="cp-card-title">🐾 My Pets ({pets.filter(function (p) { return !p.is_memorial && !p.is_archived }).length})</h3>
                 <button
                   onClick={handleOpenAddPet}
                   className="cp-btn-add"
@@ -1311,11 +1324,11 @@ export default function ClientPortalDashboard() {
                   + Add Pet
                 </button>
               </div>
-              {pets.filter(function (p) { return !p.is_memorial }).length === 0 ? (
+              {pets.filter(function (p) { return !p.is_memorial && !p.is_archived }).length === 0 ? (
                 <div className="cp-empty">No pets added yet. Add your first pet!</div>
               ) : (
                 <div className="cp-pets-grid">
-                  {pets.filter(function (p) { return !p.is_memorial }).map(function (pet) {
+                  {pets.filter(function (p) { return !p.is_memorial && !p.is_archived }).map(function (pet) {
                     var hasHealthInfo = pet.allergies || pet.medications || pet.vaccination_expiry || pet.vet_name || pet.vet_phone
                     return (
                       <div key={pet.id} className="cp-pet-card" style={{ cursor: 'default' }}>
@@ -1399,16 +1412,16 @@ export default function ClientPortalDashboard() {
             {/* ─── 🌈 Pets We Remember — memorial section ──────────────────
                 Only renders if there's at least one memorial pet. Shows
                 with softer styling — these are pets who passed away. */}
-            {pets.filter(function (p) { return p.is_memorial }).length > 0 && (
+            {pets.filter(function (p) { return p.is_memorial && !p.is_archived }).length > 0 && (
               <div className="cp-card" style={{ background: '#faf5ff', border: '1px solid #e9d5ff' }}>
                 <h3 className="cp-card-title" style={{ color: '#6b21a8' }}>
-                  🌈 Pets We Remember ({pets.filter(function (p) { return p.is_memorial }).length})
+                  🌈 Pets We Remember ({pets.filter(function (p) { return p.is_memorial && !p.is_archived }).length})
                 </h3>
                 <p style={{ margin: '0 0 14px', fontSize: '13px', color: '#6b7280', fontStyle: 'italic' }}>
                   Always loved. Their photos and visit history are kept here.
                 </p>
                 <div className="cp-pets-grid">
-                  {pets.filter(function (p) { return p.is_memorial }).map(function (pet) {
+                  {pets.filter(function (p) { return p.is_memorial && !p.is_archived }).map(function (pet) {
                     return (
                       <div key={pet.id} className="cp-pet-card" style={{ cursor: 'default', opacity: 0.85 }}>
                         <div className="cp-pet-card-top">

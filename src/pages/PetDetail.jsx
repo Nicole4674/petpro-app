@@ -651,17 +651,21 @@ export default function PetDetail() {
     }))
   }
 
-  // ─── Hard delete pet (true removal) ───────────────────────────────────
-  // Permanently removes the pet from the database. Foreign key references
-  // in appointments / payments / boarding will fail unless the schema has
-  // ON DELETE SET NULL or the rows are removed first. We catch any FK
-  // error and show a helpful message pointing the user to "Mark as Passed
-  // Away" if they want to keep records.
+  // ─── Remove pet ───────────────────────────────────────────────────────
+  // Two-step strategy:
+  //   1. Try hard delete first. If pet has zero history (no appointments,
+  //      no boarding, no payments) the row goes away cleanly.
+  //   2. If FK constraint blocks the delete (pet has visit history),
+  //      fall back to setting is_archived=true. Pet is then hidden from
+  //      every view — active lists, memorial section, booking dropdowns,
+  //      everywhere. Past appointments still work in the DB.
+  // Either way, the user just sees "Removed" — no scary FK error.
   async function handleHardDeletePet() {
     if (!pet || !client) return
-    var msg = '🗑️ Permanently remove ' + pet.name + '?\n\n' +
-      'This deletes ' + pet.name + ' from the database forever. Past appointments will lose the pet reference.\n\n' +
-      'If you want to keep visit history, use "Mark as Passed Away" instead.\n\n' +
+    var msg = '🗑️ Remove ' + pet.name + '?\n\n' +
+      'This hides ' + pet.name + ' from your active pets, booking dropdowns, ' +
+      'and the client portal. Past appointment history stays intact in the database.\n\n' +
+      'Use "Mark as Passed Away" instead if you want a memorial section for grieving clients.\n\n' +
       'Type DELETE to confirm:'
     var typed = window.prompt(msg)
     if (typed !== 'DELETE') {
@@ -669,20 +673,29 @@ export default function PetDetail() {
       return
     }
 
+    // 1) Try true hard delete
     var { error } = await supabase.from('pets').delete().eq('id', pet.id)
-    if (error) {
-      // Most common cause: foreign key constraint from appointments etc.
-      alert(
-        'Could not delete ' + pet.name + ':\n\n' +
-        error.message + '\n\n' +
-        'Tip: this usually means ' + pet.name + ' has past appointments or boarding records that reference them. ' +
-        'Use "Mark as Passed Away" to keep records, or contact support to fully remove.'
-      )
+
+    if (!error) {
+      // Pet had no history → fully gone. Bounce back to client profile.
+      navigate('/clients/' + client.id)
       return
     }
 
-    // Success — kick the user back to the client profile so they don't
-    // sit on a dead URL.
+    // 2) FK constraint blocked the delete (pet has appointments/boarding etc.)
+    //    Fall back to archiving the pet so it disappears from all views.
+    var { error: archErr } = await supabase
+      .from('pets')
+      .update({ is_archived: true, updated_at: new Date().toISOString() })
+      .eq('id', pet.id)
+
+    if (archErr) {
+      // Both delete + archive failed — surface the original error.
+      alert('Could not remove ' + pet.name + ': ' + archErr.message)
+      return
+    }
+
+    // Archive succeeded → pet is hidden everywhere. Bounce back.
     navigate('/clients/' + client.id)
   }
 

@@ -160,8 +160,8 @@ export default function Waitlist() {
     setLoading(false)
   }
 
-  // Active pets only — memorial pets shouldn't show in booking dropdowns
-  var filteredPets = pets.filter(function(p) { return p.client_id === newEntry.client_id && !p.is_memorial })
+  // Active pets only — memorial + archived pets are filtered out of booking dropdowns
+  var filteredPets = pets.filter(function(p) { return p.client_id === newEntry.client_id && !p.is_memorial && !p.is_archived })
 
   async function handleAdd(e) {
     e.preventDefault()
