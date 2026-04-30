@@ -1149,18 +1149,19 @@ export default function ClientDetail() {
               )}
             </div>
 
-            {/* Pets Section */}
+            {/* Pets Section — active only. Memorial pets show in their own
+                "🌈 Pets We Remember" card below this one. */}
             <div className="cp-card">
               <div className="cp-card-title-row">
-                <h3 className="cp-card-title">🐾 Pets ({pets.length})</h3>
+                <h3 className="cp-card-title">🐾 Pets ({pets.filter(p => !p.is_memorial).length})</h3>
                 <Link to={`/clients/${id}/pets/new`} className="cp-btn-add">+ Add Pet</Link>
               </div>
 
-              {pets.length === 0 ? (
+              {pets.filter(p => !p.is_memorial).length === 0 ? (
                 <div className="cp-empty">No pets added yet. Add this client's first pet!</div>
               ) : (
                 <div className="cp-pets-grid">
-                  {pets.map(pet => {
+                  {pets.filter(p => !p.is_memorial).map(pet => {
                     const vaxStatus = getVaxStatus(pet.vaccination_expiry)
                     return (
                       <Link to={`/pets/${pet.id}`} key={pet.id} className="cp-pet-card">
@@ -1239,6 +1240,41 @@ export default function ClientDetail() {
                 </div>
               )}
             </div>
+
+            {/* 🌈 Pets We Remember — memorial section.
+                Read-only display — to mark/restore memorial status the
+                groomer clicks into the pet's profile (PetDetail.jsx)
+                and uses the Danger Zone buttons there. */}
+            {pets.filter(p => p.is_memorial).length > 0 && (
+              <div className="cp-card" style={{ background: '#faf5ff', border: '1px solid #e9d5ff' }}>
+                <h3 className="cp-card-title" style={{ color: '#6b21a8' }}>
+                  🌈 Pets We Remember ({pets.filter(p => p.is_memorial).length})
+                </h3>
+                <p style={{ margin: '0 0 14px', fontSize: '13px', color: '#6b7280', fontStyle: 'italic' }}>
+                  Always loved. Click any pet to view their memorial page.
+                </p>
+                <div className="cp-pets-grid">
+                  {pets.filter(p => p.is_memorial).map(pet => (
+                    <Link to={`/pets/${pet.id}`} key={pet.id} className="cp-pet-card" style={{ opacity: 0.85 }}>
+                      <div className="cp-pet-card-top">
+                        <div className="cp-pet-avatar" style={{ background: getPetAvatar(pet), filter: 'grayscale(0.3)' }}>
+                          {pet.name?.[0]}
+                        </div>
+                        <div className="cp-pet-info">
+                          <h4 className="cp-pet-name">{pet.name} 🌈</h4>
+                          <p className="cp-pet-breed">{pet.breed} · {pet.weight}lbs</p>
+                          {pet.memorial_date && (
+                            <p className="cp-pet-details" style={{ fontStyle: 'italic', color: '#6b21a8' }}>
+                              Passed {new Date(pet.memorial_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

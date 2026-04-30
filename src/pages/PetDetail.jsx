@@ -616,6 +616,76 @@ export default function PetDetail() {
     }
   }
 
+  // ─── Mark pet as passed away (memorial) ───────────────────────────────
+  // Sets is_memorial=true and memorial_date=now. Pet stays in DB with all
+  // history intact, but gets hidden from active lists and shown in the
+  // "🌈 Pets We Remember" section on the client profile.
+  async function handleMarkMemorial() {
+    if (!pet) return
+    var msg = pet.is_memorial
+      ? 'Restore ' + pet.name + ' as an active pet?'
+      : 'Mark ' + pet.name + ' as passed away? 🌈\n\n' +
+        pet.name + ' will move to the memorial section on ' +
+        (client ? client.first_name : 'the owner') +
+        '\'s profile. All photos and visit history will be preserved.\n\n' +
+        'You can restore them later if needed.'
+    if (!confirm(msg)) return
+
+    var nowIso = new Date().toISOString()
+    var { error } = await supabase
+      .from('pets')
+      .update({
+        is_memorial: !pet.is_memorial,
+        memorial_date: pet.is_memorial ? null : nowIso,
+        updated_at: nowIso,
+      })
+      .eq('id', pet.id)
+    if (error) {
+      alert('Could not update: ' + error.message)
+      return
+    }
+    // Refresh the local pet state so the banner + buttons update immediately
+    setPet(Object.assign({}, pet, {
+      is_memorial: !pet.is_memorial,
+      memorial_date: pet.is_memorial ? null : nowIso,
+    }))
+  }
+
+  // ─── Hard delete pet (true removal) ───────────────────────────────────
+  // Permanently removes the pet from the database. Foreign key references
+  // in appointments / payments / boarding will fail unless the schema has
+  // ON DELETE SET NULL or the rows are removed first. We catch any FK
+  // error and show a helpful message pointing the user to "Mark as Passed
+  // Away" if they want to keep records.
+  async function handleHardDeletePet() {
+    if (!pet || !client) return
+    var msg = '🗑️ Permanently remove ' + pet.name + '?\n\n' +
+      'This deletes ' + pet.name + ' from the database forever. Past appointments will lose the pet reference.\n\n' +
+      'If you want to keep visit history, use "Mark as Passed Away" instead.\n\n' +
+      'Type DELETE to confirm:'
+    var typed = window.prompt(msg)
+    if (typed !== 'DELETE') {
+      if (typed !== null) alert('Cancelled — you must type DELETE exactly to confirm.')
+      return
+    }
+
+    var { error } = await supabase.from('pets').delete().eq('id', pet.id)
+    if (error) {
+      // Most common cause: foreign key constraint from appointments etc.
+      alert(
+        'Could not delete ' + pet.name + ':\n\n' +
+        error.message + '\n\n' +
+        'Tip: this usually means ' + pet.name + ' has past appointments or boarding records that reference them. ' +
+        'Use "Mark as Passed Away" to keep records, or contact support to fully remove.'
+      )
+      return
+    }
+
+    // Success — kick the user back to the client profile so they don't
+    // sit on a dead URL.
+    navigate('/clients/' + client.id)
+  }
+
   // Cert photo viewer: bucket is private, so we generate a short-lived signed URL on click.
   async function viewCertificate(path) {
     if (!path) return
@@ -1335,6 +1405,69 @@ export default function PetDetail() {
                 </>
               )
             )}
+          </div>
+        )}
+      </div>
+
+      {/* ─── Danger Zone — Memorial + Remove ─────────────────────────────
+          Two emotionally-distinct ways to take a pet off active lists:
+          memorial preserves history, remove is permanent. */}
+      <div style={{
+        marginTop: '32px',
+        padding: '16px',
+        border: '1px solid #fecaca',
+        background: '#fef2f2',
+        borderRadius: '10px',
+      }}>
+        <div style={{ fontSize: '12px', fontWeight: 700, color: '#991b1b', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          Danger Zone
+        </div>
+        <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '12px' }}>
+          Use these only if {pet.name} is no longer in {client ? client.first_name + '\'s' : 'the owner\'s'} care.
+        </div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {/* Mark as Passed Away — toggle: same button restores if already memorial */}
+          <button
+            type="button"
+            onClick={handleMarkMemorial}
+            style={{
+              padding: '10px 14px',
+              background: pet.is_memorial ? '#10b981' : '#fff',
+              color: pet.is_memorial ? '#fff' : '#7c3aed',
+              border: '1px solid ' + (pet.is_memorial ? '#10b981' : '#7c3aed'),
+              borderRadius: '8px',
+              fontWeight: 700,
+              fontSize: '13px',
+              cursor: 'pointer',
+            }}
+          >
+            {pet.is_memorial ? '↩️ Restore as Active' : '🌈 Mark as Passed Away'}
+          </button>
+
+          {/* Hard delete — true removal. Hidden when pet is already memorial
+              so groomers don't accidentally delete a memorial record. */}
+          {!pet.is_memorial && (
+            <button
+              type="button"
+              onClick={handleHardDeletePet}
+              style={{
+                padding: '10px 14px',
+                background: '#fff',
+                color: '#dc2626',
+                border: '1px solid #dc2626',
+                borderRadius: '8px',
+                fontWeight: 700,
+                fontSize: '13px',
+                cursor: 'pointer',
+              }}
+            >
+              🗑️ Remove Pet
+            </button>
+          )}
+        </div>
+        {pet.is_memorial && pet.memorial_date && (
+          <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '10px', fontStyle: 'italic' }}>
+            🌈 Marked as passed away on {new Date(pet.memorial_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
           </div>
         )}
       </div>

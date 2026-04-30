@@ -417,8 +417,8 @@ export default function Dashboard() {
     return sum + (parseFloat(a.final_price) || parseFloat(a.quoted_price) || 0)
   }, 0)
 
-  // Quick add
-  var filteredPets = pets.filter(function(p) { return p.client_id === quickForm.client_id })
+  // Quick add — active pets only (memorial pets filtered out of dropdowns)
+  var filteredPets = pets.filter(function(p) { return p.client_id === quickForm.client_id && !p.is_memorial })
 
   async function handleQuickAdd(e) {
     e.preventDefault()

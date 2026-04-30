@@ -393,7 +393,8 @@ export default function BoardingCalendar() {
   }
 
   function getPetsForClient(clientId) {
-    return pets.filter(p => p.client_id === clientId)
+    // Active pets only — memorial pets filtered out of booking dropdowns
+    return pets.filter(p => p.client_id === clientId && !p.is_memorial)
   }
 
   async function saveReservation() {

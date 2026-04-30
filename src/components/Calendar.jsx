@@ -437,7 +437,8 @@ function AddAppointmentModal({ date, time, clients, pets, services, onClose, onS
 
     useEffect(() => {
         if (form.client_id) {
-            setFilteredPets(pets.filter((p) => p.client_id === form.client_id))
+            // Active pets only — memorial pets are filtered out of booking dropdowns
+            setFilteredPets(pets.filter((p) => p.client_id === form.client_id && !p.is_memorial))
         } else {
             setFilteredPets([])
         }

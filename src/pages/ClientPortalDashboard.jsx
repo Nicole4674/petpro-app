@@ -493,6 +493,72 @@ export default function ClientPortalDashboard() {
     setShowAddPet(false)
   }
 
+  // ─── Mark pet as passed away (memorial) ───────────────────────────────
+  // Toggles is_memorial. Memorial pets show in the "🌈 Pets We Remember"
+  // section and get filtered out of active lists + booking dropdowns.
+  async function handleClientMarkMemorial(pet) {
+    if (!pet) return
+    var msg = pet.is_memorial
+      ? 'Restore ' + pet.name + ' to your active pets?'
+      : 'Mark ' + pet.name + ' as passed away? 🌈\n\n' +
+        pet.name + ' will move to your memorial section. ' +
+        'All photos and visit history will be preserved.\n\n' +
+        'You can restore them later if needed.'
+    if (!window.confirm(msg)) return
+
+    var nowIso = new Date().toISOString()
+    var { error } = await supabase
+      .from('pets')
+      .update({
+        is_memorial: !pet.is_memorial,
+        memorial_date: pet.is_memorial ? null : nowIso,
+        updated_at: nowIso,
+      })
+      .eq('id', pet.id)
+    if (error) {
+      window.alert('Could not update: ' + error.message)
+      return
+    }
+    // Update local state so the UI re-renders immediately
+    setPets(pets.map(function (p) {
+      if (p.id !== pet.id) return p
+      return Object.assign({}, p, {
+        is_memorial: !pet.is_memorial,
+        memorial_date: pet.is_memorial ? null : nowIso,
+      })
+    }))
+  }
+
+  // ─── Hard delete pet (true removal) ───────────────────────────────────
+  // Permanently removes the pet. Foreign key constraints from past
+  // appointments etc. may cause this to fail — we surface the error and
+  // suggest "Mark as Passed Away" as an alternative.
+  async function handleClientHardDeletePet(pet) {
+    if (!pet) return
+    var msg = '🗑️ Permanently remove ' + pet.name + '?\n\n' +
+      'This deletes ' + pet.name + ' from your profile forever.\n\n' +
+      'If you want to keep visit history, choose "Mark as Passed Away" instead.\n\n' +
+      'Type DELETE to confirm:'
+    var typed = window.prompt(msg)
+    if (typed !== 'DELETE') {
+      if (typed !== null) window.alert('Cancelled — you must type DELETE exactly to confirm.')
+      return
+    }
+
+    var { error } = await supabase.from('pets').delete().eq('id', pet.id)
+    if (error) {
+      window.alert(
+        'Could not delete ' + pet.name + ':\n\n' +
+        error.message + '\n\n' +
+        'Tip: this usually means ' + pet.name + ' has past appointments or boarding records. ' +
+        'Use "Mark as Passed Away" to keep records, or contact the shop to remove them.'
+      )
+      return
+    }
+    // Remove from local state
+    setPets(pets.filter(function (p) { return p.id !== pet.id }))
+  }
+
   async function handleSaveNewPet() {
     setAddPetError('')
 
@@ -1236,7 +1302,7 @@ export default function ClientPortalDashboard() {
             {/* Pets */}
             <div className="cp-card">
               <div className="cp-card-title-row">
-                <h3 className="cp-card-title">🐾 My Pets ({pets.length})</h3>
+                <h3 className="cp-card-title">🐾 My Pets ({pets.filter(function (p) { return !p.is_memorial }).length})</h3>
                 <button
                   onClick={handleOpenAddPet}
                   className="cp-btn-add"
@@ -1245,11 +1311,11 @@ export default function ClientPortalDashboard() {
                   + Add Pet
                 </button>
               </div>
-              {pets.length === 0 ? (
+              {pets.filter(function (p) { return !p.is_memorial }).length === 0 ? (
                 <div className="cp-empty">No pets added yet. Add your first pet!</div>
               ) : (
                 <div className="cp-pets-grid">
-                  {pets.map(function (pet) {
+                  {pets.filter(function (p) { return !p.is_memorial }).map(function (pet) {
                     var hasHealthInfo = pet.allergies || pet.medications || pet.vaccination_expiry || pet.vet_name || pet.vet_phone
                     return (
                       <div key={pet.id} className="cp-pet-card" style={{ cursor: 'default' }}>
@@ -1285,12 +1351,107 @@ export default function ClientPortalDashboard() {
                         >
                           🏥 {hasHealthInfo ? 'Edit Health & Vet Info' : 'Add Health & Vet Info'}
                         </button>
+
+                        {/* Memorial + Remove — small slim buttons under health */}
+                        <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                          <button
+                            onClick={function () { handleClientMarkMemorial(pet) }}
+                            title="Mark as passed away (preserves history)"
+                            style={{
+                              flex: 1,
+                              padding: '6px 8px',
+                              background: '#fff',
+                              color: '#7c3aed',
+                              border: '1px solid #ddd6fe',
+                              borderRadius: '6px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            🌈 Passed Away
+                          </button>
+                          <button
+                            onClick={function () { handleClientHardDeletePet(pet) }}
+                            title="Permanently remove pet"
+                            style={{
+                              flex: 1,
+                              padding: '6px 8px',
+                              background: '#fff',
+                              color: '#dc2626',
+                              border: '1px solid #fecaca',
+                              borderRadius: '6px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            🗑️ Remove
+                          </button>
+                        </div>
                       </div>
                     )
                   })}
                 </div>
               )}
             </div>
+
+            {/* ─── 🌈 Pets We Remember — memorial section ──────────────────
+                Only renders if there's at least one memorial pet. Shows
+                with softer styling — these are pets who passed away. */}
+            {pets.filter(function (p) { return p.is_memorial }).length > 0 && (
+              <div className="cp-card" style={{ background: '#faf5ff', border: '1px solid #e9d5ff' }}>
+                <h3 className="cp-card-title" style={{ color: '#6b21a8' }}>
+                  🌈 Pets We Remember ({pets.filter(function (p) { return p.is_memorial }).length})
+                </h3>
+                <p style={{ margin: '0 0 14px', fontSize: '13px', color: '#6b7280', fontStyle: 'italic' }}>
+                  Always loved. Their photos and visit history are kept here.
+                </p>
+                <div className="cp-pets-grid">
+                  {pets.filter(function (p) { return p.is_memorial }).map(function (pet) {
+                    return (
+                      <div key={pet.id} className="cp-pet-card" style={{ cursor: 'default', opacity: 0.85 }}>
+                        <div className="cp-pet-card-top">
+                          <div className="cp-pet-avatar" style={{ background: getPetAvatar(pet), filter: 'grayscale(0.3)' }}>
+                            {(pet.name || '?').charAt(0).toUpperCase()}
+                          </div>
+                          <div className="cp-pet-info">
+                            <h4 className="cp-pet-name">{pet.name} 🌈</h4>
+                            <p className="cp-pet-breed">
+                              {pet.breed || 'Breed not set'}
+                              {pet.weight ? ' · ' + pet.weight + 'lbs' : ''}
+                            </p>
+                            {pet.memorial_date && (
+                              <p className="cp-pet-details" style={{ fontStyle: 'italic', color: '#6b21a8' }}>
+                                Passed {new Date(pet.memorial_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={function () { handleClientMarkMemorial(pet) }}
+                          title="Restore as active pet"
+                          style={{
+                            marginTop: '10px',
+                            width: '100%',
+                            padding: '6px 8px',
+                            background: '#fff',
+                            color: '#10b981',
+                            border: '1px solid #a7f3d0',
+                            borderRadius: '6px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ↩️ Restore as Active
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* ─── Recent Report Cards (groomer/boarding pickup recap) ─── */}
             {reportCards.length > 0 && (

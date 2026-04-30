@@ -3942,7 +3942,7 @@ export default function Calendar() {
             {/* + Add Pet to existing appointment modal (multi-pet — for client adding 2nd dog later) */}
             {showAddPetToApptModal && selectedAppt && (
                 <AddPetToBookingModal
-                    filteredPets={pets.filter(function (p) { return p.client_id === selectedAppt.client_id })}
+                    filteredPets={pets.filter(function (p) { return p.client_id === selectedAppt.client_id && !p.is_memorial })}
                     services={services}
                     petsAlreadyAdded={(selectedAppt.appointment_pets || []).map(function (ap) { return { pet_id: ap.pet_id } })}
                     onClose={function () { setShowAddPetToApptModal(false) }}
@@ -5475,7 +5475,8 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
 
     useEffect(() => {
         if (form.client_id) {
-            setFilteredPets(pets.filter((p) => p.client_id === form.client_id))
+            // Active pets only — memorial pets are filtered out of booking dropdowns
+            setFilteredPets(pets.filter((p) => p.client_id === form.client_id && !p.is_memorial))
         } else {
             setFilteredPets([])
         }
