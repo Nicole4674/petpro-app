@@ -255,9 +255,13 @@ function buildReceiptHtml(d: any): string {
           ${piRow}
         </td></tr>
 
-        <tr><td style="padding:18px 28px 24px;background:#f9fafb;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;line-height:1.6;">
+        <tr><td style="padding:18px 28px 18px;background:#f9fafb;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;line-height:1.6;">
           Questions? ${contactLines.length ? 'Reach us at ' + escapeHtml(contactLines.join(' or ')) + '.' : 'Reply to this email.'}
           <br/>Thanks again — see you next time! 🐾
+        </td></tr>
+
+        <tr><td style="padding:14px 28px 20px;background:#f9fafb;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center;line-height:1.5;">
+          💌 Don't see our emails? Check your spam folder and mark us as <strong>"Not Spam"</strong> so future receipts and reminders land in your inbox.
         </td></tr>
 
       </table>

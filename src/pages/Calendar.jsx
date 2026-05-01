@@ -7,6 +7,7 @@ import { BehaviorTagsRow } from '../components/BehaviorTags'
 import { resolveHighPriorityTags } from '../lib/behaviorTags'
 import { printDailySheet } from '../lib/printDailySheet'
 import ReportCardModal from '../components/ReportCardModal'
+import MobileDriveTimeWarning from '../components/MobileDriveTimeWarning'
 import { formatPhone } from '../lib/phone'
 import { mapsUrl, telUrl } from '../lib/maps'
 
@@ -6426,6 +6427,26 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                         </div>
                     </div>
 
+                    {/* Mobile-aware drive-time check (Phase 11) — renders ONLY for
+                        mobile groomers (gated by shop_settings.is_mobile inside the
+                        component). Storefront shops see nothing. Auto-buffer button
+                        slides start_time later if drive time is too tight. The
+                        end_time auto-calc useEffect above re-pads end automatically. */}
+                    <MobileDriveTimeWarning
+                        clientId={form.client_id}
+                        appointmentDate={form.appointment_date}
+                        startTime={form.start_time}
+                        endTime={form.end_time}
+                        onApplyBuffer={function (newStart, newEnd) {
+                            setForm(function (prev) {
+                                return Object.assign({}, prev, {
+                                    start_time: newStart,
+                                    end_time: newEnd,
+                                })
+                            })
+                        }}
+                    />
+
                     <div className="form-group">
                         <label>Notes</label>
                         <textarea name="service_notes" value={form.service_notes} onChange={handleChange} rows={2} placeholder="Any notes for this appointment..." />
@@ -7537,180 +7558,4 @@ function SlotChooserModal({ slot, staff, onBook, onBlock, onClose }) {
     )
 }
 
-// =====================================================================
-// Task #38 — BlockTimeModal
-// Create or edit a gray BLOCKED slot. Fields: staff, date, start, end, note.
-// Edit mode also shows a Delete button.
-// =====================================================================
-function BlockTimeModal({ modal, staff, saving, onSave, onDelete, onClose }) {
-    const isEdit = modal && modal.mode === 'edit'
-    const existing = (modal && modal.block) || null
-
-    // Initial values — use existing block in edit mode, or slot values in create mode
-    var initStaff = isEdit
-        ? (existing.staff_id || '')
-        : (modal.staffId || '')
-    var initDate = isEdit ? existing.block_date : modal.date
-    var initStart = isEdit
-        ? existing.start_time.slice(0, 5)
-        : `${String(modal.hour).padStart(2, '0')}:00`
-    var initEnd = isEdit
-        ? existing.end_time.slice(0, 5)
-        : `${String(modal.hour + 1).padStart(2, '0')}:00`
-    var initNote = isEdit ? (existing.note || '') : ''
-
-    var [staffId, setStaffId] = useState(initStaff)
-    var [blockDate, setBlockDate] = useState(initDate)
-    var [startTime, setStartTime] = useState(initStart)
-    var [endTime, setEndTime] = useState(initEnd)
-    var [note, setNote] = useState(initNote)
-    var [err, setErr] = useState('')
-
-    var handleSubmit = function (e) {
-        e.preventDefault()
-        setErr('')
-        if (!blockDate) { setErr('Pick a date'); return }
-        if (!startTime || !endTime) { setErr('Set a start and end time'); return }
-        if (endTime <= startTime) { setErr('End time must be after start time'); return }
-        onSave({
-            staff_id: staffId || null,
-            block_date: blockDate,
-            start_time: startTime,
-            end_time: endTime,
-            note: note.trim(),
-        })
-    }
-
-    // Styles
-    var overlay = {
-        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-        background: 'rgba(0,0,0,0.5)', display: 'flex',
-        alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-    }
-    var card = {
-        background: '#fff', borderRadius: '12px', padding: '28px',
-        width: '100%', maxWidth: '460px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
-        maxHeight: '90vh', overflowY: 'auto',
-    }
-    var title = { margin: '0 0 4px', fontSize: '20px', fontWeight: 700, color: '#1f2937' }
-    var sub = { margin: '0 0 20px', fontSize: '13px', color: '#6b7280' }
-    var label = {
-        display: 'block', fontSize: '13px', fontWeight: 600,
-        color: '#374151', marginBottom: '6px', marginTop: '14px',
-    }
-    var input = {
-        width: '100%', padding: '10px 12px', fontSize: '14px',
-        border: '1px solid #d1d5db', borderRadius: '8px',
-        background: '#fff', color: '#1f2937', boxSizing: 'border-box',
-    }
-    var errBox = {
-        marginTop: '12px', padding: '10px 12px', background: '#fef2f2',
-        border: '1px solid #fecaca', borderRadius: '8px', color: '#991b1b', fontSize: '13px',
-    }
-    var btnRow = { display: 'flex', gap: '10px', marginTop: '22px' }
-    var saveBtn = {
-        flex: 1, padding: '12px', background: '#7c3aed', color: '#fff',
-        border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: 600,
-        cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
-    }
-    var cancelBtn = {
-        padding: '12px 16px', background: '#fff', color: '#374151',
-        border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '15px',
-        fontWeight: 600, cursor: 'pointer',
-    }
-    var deleteBtn = {
-        marginTop: '10px', width: '100%', padding: '12px', background: '#fff',
-        color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '8px',
-        fontSize: '14px', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer',
-    }
-
-    return (
-        <div style={overlay} onClick={onClose}>
-            <div style={card} onClick={(e) => e.stopPropagation()}>
-                <h3 style={title}>{isEdit ? '🚫 Edit Blocked Time' : '🚫 Block Time'}</h3>
-                <p style={sub}>
-                    Blocked time stays on your calendar and prevents PetPro AI from auto-booking over it.
-                </p>
-
-                <form onSubmit={handleSubmit}>
-                    <label style={label}>Staff member</label>
-                    <select
-                        style={input}
-                        value={staffId}
-                        onChange={function (e) { setStaffId(e.target.value) }}
-                    >
-                        <option value="">— My time (owner) —</option>
-                        {(staff || []).map(function (s) {
-                            return (
-                                <option key={s.id} value={s.id}>
-                                    {s.first_name} {s.last_name || ''}
-                                </option>
-                            )
-                        })}
-                    </select>
-
-                    <label style={label}>Date</label>
-                    <input
-                        type="date"
-                        style={input}
-                        value={blockDate}
-                        onChange={function (e) { setBlockDate(e.target.value) }}
-                    />
-
-                    <div style={{ display: 'flex', gap: '12px' }}>
-                        <div style={{ flex: 1 }}>
-                            <label style={label}>Start</label>
-                            <input
-                                type="time"
-                                style={input}
-                                value={startTime}
-                                onChange={function (e) { setStartTime(e.target.value) }}
-                            />
-                        </div>
-                        <div style={{ flex: 1 }}>
-                            <label style={label}>End</label>
-                            <input
-                                type="time"
-                                style={input}
-                                value={endTime}
-                                onChange={function (e) { setEndTime(e.target.value) }}
-                            />
-                        </div>
-                    </div>
-
-                    <label style={label}>Note (optional)</label>
-                    <input
-                        type="text"
-                        style={input}
-                        value={note}
-                        onChange={function (e) { setNote(e.target.value) }}
-                        placeholder="e.g. Lunch, Vet appt, School pickup"
-                        maxLength={200}
-                    />
-
-                    {err && <div style={errBox}>{err}</div>}
-
-                    <div style={btnRow}>
-                        <button type="button" style={cancelBtn} onClick={onClose} disabled={saving}>
-                            Cancel
-                        </button>
-                        <button type="submit" style={saveBtn} disabled={saving}>
-                            {saving ? 'Saving...' : (isEdit ? 'Save Changes' : 'Block This Time')}
-                        </button>
-                    </div>
-
-                    {isEdit && (
-                        <button
-                            type="button"
-                            style={deleteBtn}
-                            onClick={onDelete}
-                            disabled={saving}
-                        >
-                            🗑 Remove Block
-                        </button>
-                    )}
-                </form>
-            </div>
-        </div>
-    )
-}
+// ================================================================

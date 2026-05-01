@@ -175,10 +175,28 @@ export default function ClientSignup() {
           <h1 style={{ margin: '0 0 12px', fontSize: '24px', fontWeight: '800', color: '#111827' }}>
             Check your email!
           </h1>
-          <p style={{ margin: '0 0 24px', color: '#6b7280', fontSize: '15px', lineHeight: '1.6' }}>
+          <p style={{ margin: '0 0 16px', color: '#6b7280', fontSize: '15px', lineHeight: '1.6' }}>
             We sent a verification link to <strong>{email}</strong>.<br />
             Click it to activate your account, then come back and log in.
           </p>
+
+          {/* Spam-folder reminder — critical here because if they miss the
+              verification email, they can't activate their account at all.
+              Yellow callout grabs the eye without looking like an error. */}
+          <div style={{
+            margin: '0 0 24px',
+            padding: '12px 14px',
+            background: '#fef9c3',
+            border: '1px solid #fde047',
+            borderRadius: '8px',
+            color: '#854d0e',
+            fontSize: '13px',
+            lineHeight: '1.5',
+            textAlign: 'left',
+          }}>
+            <strong>📬 Don't see it?</strong> Check your spam or junk folder. If it's there, mark it as <strong>"Not Spam"</strong> so future appointment reminders and receipts land in your inbox.
+          </div>
+
           <Link
             to="/portal/login"
             style={{
@@ -260,6 +278,18 @@ export default function ClientSignup() {
             </div>
           </div>
           <FormField label="Email" value={email} onChange={setEmail} placeholder="you@example.com" type="email" />
+          {/* Quick spam-folder heads-up — sets expectations BEFORE the verification
+              email gets buried. Tiny font keeps it from feeling alarmist. */}
+          <div style={{
+            marginTop: '-8px',
+            marginBottom: '14px',
+            fontSize: '11px',
+            color: '#6b7280',
+            lineHeight: '1.5',
+            paddingLeft: '2px',
+          }}>
+            💌 We'll email appointment reminders + receipts here. <strong>Add us to your contacts</strong> so they don't go to spam.
+          </div>
           <FormField label="Phone" value={phone} onChange={(v) => setPhone(formatPhoneOnInput(v))} placeholder="713-098-3746" type="tel" />
           <FormField label="Password" value={password} onChange={setPassword} placeholder="Create a strong password" type="password" />
 
