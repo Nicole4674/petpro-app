@@ -152,7 +152,7 @@ export default function Calendar() {
     const [reschedulingAppt, setReschedulingAppt] = useState(null)
     const [cancellingAppt, setCancellingAppt] = useState(null) // Task #19 — recurring cancel flow
     const [showRecurringDates, setShowRecurringDates] = useState(false) // Task #77 — toggles "View all dates" list in popup
-    const [view, setView] = useState('week')
+    const [view, setView] = useState('day')   // default to day view (was 'week')
     const [currentDate, setCurrentDate] = useState(new Date())
     // Sidebar collapse toggle — persists across sessions so groomers don't
     // have to re-collapse every login. Especially useful on mobile.
@@ -4943,7 +4943,7 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
     }, [])
 
     return (
-        <div className="time-grid">
+        <div className={'time-grid' + (isDayView ? '' : ' time-grid-week')}>
             {/* Column Headers */}
             <div className="time-grid-header">
                 <div className="time-gutter-header"></div>

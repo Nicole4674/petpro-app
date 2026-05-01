@@ -1313,13 +1313,23 @@
 
 .calendar-grid-container {
     flex: 1;
-    overflow-y: auto;
+    /* Both directions: vertical for time slots, horizontal for week view's
+       3-day-at-a-time scroll (matches MoeGo). */
+    overflow: auto;
     padding: 0;
 }
 
 /* Time Grid (Day/Week View) */
 .time-grid {
     min-width: 100%;
+}
+
+/* WEEK VIEW: only show ~3 days at a time with horizontal scroll for the rest.
+   Each day column gets a min-width so they don't squish when 7 days try to fit
+   on a phone or tablet. The .calendar-grid-container above handles the scroll. */
+.time-grid-week .time-col-header,
+.time-grid-week .time-cell {
+    min-width: 280px;
 }
 
 .time-grid-header {
