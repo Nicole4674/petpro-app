@@ -3,8 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>petpro-app</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>PetPro — Pet Grooming & Boarding</title>
+
+    <!-- ============================================================
+         PWA — Add to Home Screen support (Phase 14)
+         Tells phones this site can be installed like a native app:
+         - manifest.json provides the app's identity (name, icons, etc.)
+         - theme-color sets the browser address bar color on Android
+         - apple-touch-icon + apple-mobile-web-app-* tags handle iOS Safari
+         ============================================================ -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#7c3aed" />
+
+    <!-- iOS Safari "Add to Home Screen" support -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Both meta names (old apple-* + new mobile-web-app-capable) so it works
+         on iOS Safari and silences Chrome's deprecation warning. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="PetPro" />
+
+    <!-- Description for app stores + share previews -->
+    <meta name="description" content="AI-powered pet grooming and boarding management. Smart booking, mobile route optimizer, and groomer-first design." />
 
     <!-- Google tag (gtag.js) — Google Ads conversion tracking -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=AW-18122010108"></script>

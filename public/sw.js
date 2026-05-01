@@ -1,26 +1,48 @@
 // ====================================================================
-// PetPro Service Worker — handles web push notifications
+// PetPro Service Worker — push notifications + PWA install support
 // ====================================================================
 // Lives in /public/sw.js so Vite serves it at the root path (/sw.js),
 // which is REQUIRED for service workers to register correctly.
 //
 // Responsibilities:
-//   1. Listen for incoming push events from our server → show notification
-//   2. Listen for notification clicks → focus existing tab or open new one
+//   1. Push notifications (existing) — listen for push events + clicks
+//   2. PWA install support (Phase 14) — having a fetch handler tells the
+//      browser this site is "app-like" and unlocks the Install prompt on
+//      Chrome / Android / iOS Safari.
 //
-// This file runs in the browser in the background (even when PetPro
-// tab is closed) but has no access to React state, localStorage, etc.
-// Keep it simple.
+// We INTENTIONALLY do not cache assets aggressively. The fetch handler
+// is network-only (pass-through) for now — this keeps deployments fast
+// and avoids stale-content bugs. If we want offline support for the
+// Route page later, we can add cache-first logic for /route specifically.
 // ====================================================================
 
-// Install immediately — no caching strategy needed, we just use this
-// service worker for push notifications.
+// Install immediately — no caching to invalidate on activate.
 self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
+});
+
+// --------------------------------------------------------------------
+// FETCH (PWA install requirement)
+// --------------------------------------------------------------------
+// Browsers consider a site "installable" if its SW has a fetch event
+// LISTENER — even an empty one. We don't call event.respondWith() here
+// because that would intercept every request, which breaks Vite's dev
+// server HMR + causes 'Failed to fetch' errors on /calendar etc.
+//
+// By doing nothing inside this listener, the browser handles each fetch
+// normally (no interception, no caching) AND we still get credit for
+// having a fetch handler so Chrome shows the Install prompt.
+//
+// If we want offline support later, this is where we'd add cache-first
+// logic for /route or static assets. For now: no-op.
+// --------------------------------------------------------------------
+self.addEventListener('fetch', (event) => {
+  // Intentionally empty. Don't call event.respondWith(...) — let the
+  // browser handle every request normally.
 });
 
 // --------------------------------------------------------------------

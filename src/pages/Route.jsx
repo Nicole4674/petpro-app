@@ -16,6 +16,7 @@ import { supabase } from '../lib/supabase'
 import { mapsUrl, telUrl, formatAddress } from '../lib/maps'
 import { formatPhone } from '../lib/phone'
 import RouteMap from '../components/RouteMap'
+import LateDetector from '../components/LateDetector'
 import { optimizeRoute, formatDriveTime } from '../lib/routeOptimizer'
 import { printRouteSheet } from '../lib/printRouteSheet'
 
@@ -103,6 +104,12 @@ export default function Route() {
   // headsUpSent  → { [stopId]: { eta, sentAt } } so the button can show
   //                "✅ Sent" state per-stop after success
   // headsUpError → error message if the send failed
+  // Phase 6 — Late detector. Pulled from shop_settings.late_warnings_enabled
+  // so each shop opts in. lateState is what LateDetector reports back —
+  // we use it to render per-stop badges in the stop list.
+  var [lateWarningsEnabled, setLateWarningsEnabled] = useState(false)
+  var [lateState, setLateState] = useState({ isLate: false, lateStop: null, lateMinutes: 0, mode: null })
+
   var [headsUpStop, setHeadsUpStop] = useState(null)
   var [headsUpEta, setHeadsUpEta] = useState(30)
   var [headsUpEtaIsCustom, setHeadsUpEtaIsCustom] = useState(false)  // toggles custom input
@@ -164,6 +171,27 @@ export default function Route() {
 
   useEffect(function () {
     loadRoute()
+  }, [])
+
+  // Phase 6 — Load the late-warnings toggle from shop_settings once.
+  // We fetch once on mount; if the user changes it in Settings, they need to
+  // refresh the Route page to see the change. Acceptable trade-off (toggle
+  // changes are rare) vs. polling shop_settings every render.
+  useEffect(function () {
+    ;(async () => {
+      try {
+        var { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+        var { data: shop } = await supabase
+          .from('shop_settings')
+          .select('late_warnings_enabled')
+          .eq('groomer_id', user.id)
+          .maybeSingle()
+        setLateWarningsEnabled(!!(shop && shop.late_warnings_enabled))
+      } catch (err) {
+        console.warn('[Route] Could not load late_warnings_enabled:', err)
+      }
+    })()
   }, [])
 
   async function loadRoute() {
@@ -460,6 +488,17 @@ export default function Route() {
         </div>
       </div>
 
+      {/* Phase 6 — Running Late banner. Renders nothing if toggle is off
+          OR if the groomer is on schedule. When late, shows a yellow banner
+          with Email + Call action buttons and exposes lateState so we can
+          render per-stop badges below. */}
+      <LateDetector
+        stops={displayStops}
+        enabled={lateWarningsEnabled}
+        onSendHeadsUp={openHeadsUp}
+        onChange={setLateState}
+      />
+
       {/* Optimizer message banner — savings or "couldn't optimize" reason */}
       {optimizeMsg && (
         <div style={{
@@ -528,6 +567,26 @@ export default function Route() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '14px', fontWeight: 700, color: '#111827' }}>
                       {s.label}
+                      {/* Phase 6 — per-stop late badge. Shows next to the
+                          stop label so the groomer can scan their list and
+                          immediately see WHICH stop they're behind on. */}
+                      {lateState.isLate && lateState.lateStop && lateState.lateStop.id === s.id && (
+                        <span style={{
+                          marginLeft: '8px',
+                          padding: '2px 8px',
+                          background: '#fef3c7',
+                          border: '1px solid #f59e0b',
+                          borderRadius: '6px',
+                          color: '#92400e',
+                          fontSize: '11px',
+                          fontWeight: 800,
+                          verticalAlign: 'middle',
+                        }}>
+                          ⏰ {lateState.lateMinutes >= 60
+                            ? Math.floor(lateState.lateMinutes / 60) + ' hr ' + (lateState.lateMinutes % 60 ? (lateState.lateMinutes % 60) + ' min' : '')
+                            : lateState.lateMinutes + ' min'} late
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
                       {s.timeLabel}

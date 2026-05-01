@@ -47,6 +47,9 @@ export default function ShopSettings() {
   // Mobile groomer toggle — when ON, sidebar shows the Route page and other
   // mobile-only features. When OFF (default), storefront UX is unchanged.
   var [isMobile, setIsMobile] = useState(false)
+  // Late warnings toggle (Phase 6) — opt-in. Most groomers know they're late
+  // and don't want a banner reminding them. Off by default.
+  var [lateWarningsEnabled, setLateWarningsEnabled] = useState(false)
   // AI toggles — tier 1 (manual / "Moe Go Mode") vs tier 2 (full AI brain)
   var [groomerAiEnabled, setGroomerAiEnabled] = useState(true)
   var [clientAiBookingEnabled, setClientAiBookingEnabled] = useState(true)
@@ -185,6 +188,7 @@ export default function ShopSettings() {
         setPrimaryColor(data.primary_color || '#7c3aed')
         setHours(data.hours || '')
         setIsMobile(data.is_mobile === true)
+        setLateWarningsEnabled(data.late_warnings_enabled === true)
         // AI toggles — default to ON if the column is missing or null (existing behavior)
         setGroomerAiEnabled(data.groomer_ai_enabled !== false)
         setClientAiBookingEnabled(data.client_ai_booking_enabled !== false)
@@ -309,6 +313,7 @@ export default function ShopSettings() {
         primary_color: primaryColor || '#7c3aed',
         hours: hours || null,
         is_mobile: isMobile,
+        late_warnings_enabled: lateWarningsEnabled,
         groomer_ai_enabled: groomerAiEnabled,
         client_ai_booking_enabled: clientAiBookingEnabled,
         // Payment policy toggles (Phase 5)
@@ -960,6 +965,31 @@ export default function ShopSettings() {
             </div>
           </label>
         </div>
+
+        {/* Phase 6 — Late warnings toggle. Only shows for mobile groomers because
+            it's a Route-page feature (banner + per-stop "X min late" badges +
+            optional GPS-based ETA prediction). Defaults OFF — most groomers
+            already know when they're late and don't want a banner yelling at them. */}
+        {isMobile && (
+          <div style={{ marginBottom: '14px', padding: '12px 14px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px' }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={lateWarningsEnabled}
+                onChange={(e) => setLateWarningsEnabled(e.target.checked)}
+                style={{ marginTop: '3px', width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+              />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: '#1f2937' }}>
+                  ⏰ Notify me when I'm running late
+                </div>
+                <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px', lineHeight: '1.4' }}>
+                  Shows a banner on the <strong>Route</strong> page when you're behind schedule. Uses GPS + drive-time math to predict arrival and warn you in advance. Tap the warning to email or call the next client. <em>Off by default — flip on if you like the heads-up.</em>
+                </div>
+              </div>
+            </label>
+          </div>
+        )}
 
         <TextArea label="Hours" value={hours} onChange={setHours} placeholder="Mon–Sat 8am–6pm, Closed Sundays" />
       </div>
