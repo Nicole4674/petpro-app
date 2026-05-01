@@ -8,6 +8,7 @@ import { resolveHighPriorityTags } from '../lib/behaviorTags'
 import { printDailySheet } from '../lib/printDailySheet'
 import ReportCardModal from '../components/ReportCardModal'
 import { formatPhone } from '../lib/phone'
+import { mapsUrl, telUrl } from '../lib/maps'
 
 const HOURS = []
 for (let h = 7; h <= 18; h++) {
@@ -3621,8 +3622,42 @@ export default function Calendar() {
                                                 🐾 View Profile
                                             </button>
                                         </div>
-                                        {selectedAppt.clients.phone && <div className="appt-detail-owner-row">📱 {formatPhone(selectedAppt.clients.phone)}</div>}
-                                        {selectedAppt.clients.email && <div className="appt-detail-owner-row">📧 {selectedAppt.clients.email}</div>}
+                                        {selectedAppt.clients.phone && (
+                                            <div className="appt-detail-owner-row">
+                                                <a
+                                                    href={telUrl(selectedAppt.clients.phone)}
+                                                    style={{ color: '#7c3aed', textDecoration: 'none', fontWeight: 600 }}
+                                                    title="Tap to call"
+                                                >
+                                                    📱 {formatPhone(selectedAppt.clients.phone)}
+                                                </a>
+                                            </div>
+                                        )}
+                                        {selectedAppt.clients.email && (
+                                            <div className="appt-detail-owner-row">
+                                                <a
+                                                    href={'mailto:' + selectedAppt.clients.email}
+                                                    style={{ color: '#7c3aed', textDecoration: 'none' }}
+                                                    title="Tap to email"
+                                                >
+                                                    📧 {selectedAppt.clients.email}
+                                                </a>
+                                            </div>
+                                        )}
+                                        {/* Tap-to-nav address — critical for mobile groomers */}
+                                        {selectedAppt.clients.address && (
+                                            <div className="appt-detail-owner-row">
+                                                <a
+                                                    href={mapsUrl(selectedAppt.clients.address)}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    style={{ color: '#7c3aed', textDecoration: 'none', fontWeight: 600 }}
+                                                    title="Tap for directions"
+                                                >
+                                                    🏠 {selectedAppt.clients.address}
+                                                </a>
+                                            </div>
+                                        )}
                                         {selectedAppt.clients.preferred_contact && (
                                             <span className="appt-tag appt-tag-purple">Prefers: {selectedAppt.clients.preferred_contact}</span>
                                         )}

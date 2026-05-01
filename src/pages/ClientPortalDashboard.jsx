@@ -16,6 +16,7 @@ import ClientPaymentModal from '../components/ClientPaymentModal'
 import BreedPicker from '../components/BreedPicker'
 import { DOG_BREEDS, CAT_BREEDS } from '../lib/breeds'
 import { formatPhone, formatPhoneOnInput } from '../lib/phone'
+import { mapsUrl, telUrl } from '../lib/maps'
 
 const TABS = [
   { key: 'overview', label: '🐾 Overview' },
@@ -803,18 +804,29 @@ export default function ClientPortalDashboard() {
             {shopSettings && shopSettings.tagline && (
               <div style={{ fontSize: '11px', opacity: 0.9 }}>{shopSettings.tagline}</div>
             )}
-            {/* Shop address + Get Directions — helps every-3-months clients who forget where to go */}
-            {shopSettings && shopSettings.address && (
-              <div style={{ fontSize: '11px', opacity: 0.9, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <span>📍 {shopSettings.address}</span>
-                <a
-                  href={'https://maps.google.com/?q=' + encodeURIComponent(shopSettings.address)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: '#fff', textDecoration: 'underline', fontWeight: '600' }}
-                >
-                  Get Directions →
-                </a>
+            {/* Shop address + phone — tappable links so phones launch nav / dialer */}
+            {shopSettings && (shopSettings.address || shopSettings.phone) && (
+              <div style={{ fontSize: '11px', opacity: 0.9, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                {shopSettings.address && (
+                  <a
+                    href={mapsUrl(shopSettings.address)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: '#fff', textDecoration: 'none', fontWeight: '600' }}
+                    title="Tap for directions"
+                  >
+                    📍 {shopSettings.address}
+                  </a>
+                )}
+                {shopSettings.phone && (
+                  <a
+                    href={telUrl(shopSettings.phone)}
+                    style={{ color: '#fff', textDecoration: 'none', fontWeight: '600' }}
+                    title="Tap to call shop"
+                  >
+                    📞 {formatPhone(shopSettings.phone)}
+                  </a>
+                )}
               </div>
             )}
           </div>

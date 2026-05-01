@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { formatPhone, formatPhoneOnInput } from '../lib/phone'
+import { mapsUrl, telUrl } from '../lib/maps'
 
 const TABS = [
   { key: 'overview', label: '🐾 Overview' },
@@ -944,11 +945,19 @@ export default function ClientDetail() {
             <div className="cp-quick-stats">
               <span>🐾 {pets.length} Pet{pets.length !== 1 ? 's' : ''}</span>
               <span className="cp-stat-dot">·</span>
-              <span>📞 {formatPhone(client.phone) || 'No phone'}</span>
+              {client.phone ? (
+                <a href={telUrl(client.phone)} style={{ color: 'inherit', textDecoration: 'none' }} title="Tap to call">
+                  📞 {formatPhone(client.phone)}
+                </a>
+              ) : (
+                <span>📞 No phone</span>
+              )}
               {client.email && (
                 <>
                   <span className="cp-stat-dot">·</span>
-                  <span>📧 {client.email}</span>
+                  <a href={'mailto:' + client.email} style={{ color: 'inherit', textDecoration: 'none' }} title="Tap to email">
+                    📧 {client.email}
+                  </a>
                 </>
               )}
               {client.preferred_contact && (
@@ -1014,11 +1023,33 @@ export default function ClientDetail() {
                     </div>
                     <div className="cp-contact-item">
                       <span className="cp-contact-label">Phone</span>
-                      <span className="cp-contact-value">{formatPhone(client.phone) || 'Not provided'}</span>
+                      {client.phone ? (
+                        <a
+                          href={telUrl(client.phone)}
+                          className="cp-contact-value"
+                          style={{ color: '#7c3aed', textDecoration: 'none' }}
+                          title="Tap to call"
+                        >
+                          📞 {formatPhone(client.phone)}
+                        </a>
+                      ) : (
+                        <span className="cp-contact-value">Not provided</span>
+                      )}
                     </div>
                     <div className="cp-contact-item">
                       <span className="cp-contact-label">Email</span>
-                      <span className="cp-contact-value">{client.email || 'Not provided'}</span>
+                      {client.email ? (
+                        <a
+                          href={'mailto:' + client.email}
+                          className="cp-contact-value"
+                          style={{ color: '#7c3aed', textDecoration: 'none' }}
+                          title="Tap to email"
+                        >
+                          ✉️ {client.email}
+                        </a>
+                      ) : (
+                        <span className="cp-contact-value">Not provided</span>
+                      )}
                     </div>
                     <div className="cp-contact-item">
                       <span className="cp-contact-label">Preferred Contact</span>
@@ -1026,7 +1057,20 @@ export default function ClientDetail() {
                     </div>
                     <div className="cp-contact-item">
                       <span className="cp-contact-label">Address</span>
-                      <span className="cp-contact-value">{client.address || 'Not provided'}</span>
+                      {client.address ? (
+                        <a
+                          href={mapsUrl(client.address)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="cp-contact-value"
+                          style={{ color: '#7c3aed', textDecoration: 'none' }}
+                          title="Tap for directions"
+                        >
+                          🏠 {client.address}
+                        </a>
+                      ) : (
+                        <span className="cp-contact-value">Not provided</span>
+                      )}
                     </div>
                   </div>
                   {client.notes && (

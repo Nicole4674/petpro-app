@@ -5,6 +5,7 @@ import { BehaviorTagsRow } from '../components/BehaviorTags'
 import { printDailySheet } from '../lib/printDailySheet'
 import ReportCardModal from '../components/ReportCardModal'
 import { formatPhone } from '../lib/phone'
+import { mapsUrl, telUrl } from '../lib/maps'
 import '../boarding-styles.css'
 
 export default function BoardingCalendar() {
@@ -2393,13 +2394,39 @@ export default function BoardingCalendar() {
                     </div>
                     <div className="kc-owner-details">
                       {selectedReservation.clients.phone && (
-                        <div className="kc-owner-row">📱 {formatPhone(selectedReservation.clients.phone)}</div>
+                        <div className="kc-owner-row">
+                          <a
+                            href={telUrl(selectedReservation.clients.phone)}
+                            style={{ color: '#7c3aed', textDecoration: 'none', fontWeight: 600 }}
+                            title="Tap to call"
+                          >
+                            📱 {formatPhone(selectedReservation.clients.phone)}
+                          </a>
+                        </div>
                       )}
                       {selectedReservation.clients.email && (
-                        <div className="kc-owner-row">📧 {selectedReservation.clients.email}</div>
+                        <div className="kc-owner-row">
+                          <a
+                            href={'mailto:' + selectedReservation.clients.email}
+                            style={{ color: '#7c3aed', textDecoration: 'none' }}
+                            title="Tap to email"
+                          >
+                            📧 {selectedReservation.clients.email}
+                          </a>
+                        </div>
                       )}
                       {selectedReservation.clients.address && (
-                        <div className="kc-owner-row">📍 {selectedReservation.clients.address}</div>
+                        <div className="kc-owner-row">
+                          <a
+                            href={mapsUrl(selectedReservation.clients.address)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: '#7c3aed', textDecoration: 'none', fontWeight: 600 }}
+                            title="Tap for directions"
+                          >
+                            📍 {selectedReservation.clients.address}
+                          </a>
+                        </div>
                       )}
                       {selectedReservation.clients.preferred_contact && (
                         <div className="kc-owner-row">
