@@ -180,6 +180,140 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 
   if (error) throw error
   console.log(`Groomer ${groomerId} subscribed to ${tier} (status: ${subscription.status})`)
+
+  // ─── WELCOME EMAIL — fires ONCE on first subscription ───────────────
+  // Sent right after the groomer's first successful checkout. Tells them
+  // exactly where to log in (app.trypetpro.com/portal/login) so they
+  // don't get stuck looking for the sign-in button on the marketing site.
+  // We don't fail the webhook if email errors — sub is more important
+  // than welcome email; we just log and move on.
+  try {
+    await sendWelcomeEmail(groomerId, tier, subscription.status)
+  } catch (emailErr) {
+    console.error('[stripe-webhook] Welcome email failed (non-fatal):', emailErr)
+  }
+}
+
+// ─── WELCOME EMAIL HELPER ──────────────────────────────────────────────
+// Pulls the groomer's email + name from the database, then sends a clean
+// HTML welcome via Resend with a giant "Sign in to PetPro" button.
+async function sendWelcomeEmail(groomerId: string, tier: string | null, status: string) {
+  // 1. Look up groomer email + name
+  const { data: groomer } = await supabase
+    .from('groomers')
+    .select('email, full_name, business_name')
+    .eq('id', groomerId)
+    .maybeSingle()
+
+  if (!groomer || !groomer.email) {
+    console.warn('[welcome-email] No email for groomer', groomerId, '— skipping')
+    return
+  }
+
+  const resendKey = Deno.env.get('RESEND_API_KEY')
+  if (!resendKey) {
+    console.warn('[welcome-email] RESEND_API_KEY not configured — skipping')
+    return
+  }
+
+  const firstName = (groomer.full_name || '').split(' ')[0] || 'there'
+  const tierLabel = tier
+    ? tier.charAt(0).toUpperCase() + tier.slice(1).replace('_', ' ')
+    : 'PetPro'
+  const isTrialing = status === 'trialing'
+  const subject = isTrialing
+    ? `Welcome to PetPro — your ${tierLabel} trial is active`
+    : `Welcome to PetPro — your ${tierLabel} subscription is active`
+
+  const loginUrl = 'https://app.trypetpro.com/login?welcome=1'
+
+  const html = `<!DOCTYPE html>
+<html><body style="margin:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1f2937;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.04);">
+
+        <tr><td style="padding:32px 28px 16px;background:#7c3aed;color:#fff;text-align:center;">
+          <div style="font-size:48px;line-height:1;">🐾</div>
+          <div style="font-size:22px;font-weight:800;margin-top:10px;">Welcome to PetPro!</div>
+          <div style="font-size:13px;opacity:0.95;margin-top:4px;">${escapeHtmlSafe(tierLabel)} ${isTrialing ? 'trial' : 'plan'} — you're all set</div>
+        </td></tr>
+
+        <tr><td style="padding:24px 28px;">
+          <div style="font-size:16px;color:#1f2937;margin-bottom:12px;">Hi ${escapeHtmlSafe(firstName)},</div>
+          <div style="font-size:14px;color:#4b5563;line-height:1.6;margin-bottom:20px;">
+            Your PetPro account is active and ready. Click below to log in and start setting up your shop, adding clients, and booking appointments.
+          </div>
+
+          <div style="text-align:center;margin:24px 0;">
+            <a href="${loginUrl}" style="display:inline-block;padding:14px 32px;background:#7c3aed;color:#fff;text-decoration:none;border-radius:10px;font-weight:700;font-size:16px;box-shadow:0 2px 6px rgba(124,58,237,0.3);">
+              Sign in to PetPro →
+            </a>
+          </div>
+
+          <div style="font-size:13px;color:#6b7280;text-align:center;margin-top:16px;">
+            Or copy &amp; paste this link into your browser:<br/>
+            <a href="${loginUrl}" style="color:#7c3aed;word-break:break-all;">${loginUrl}</a>
+          </div>
+
+          <div style="margin-top:24px;padding:14px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;font-size:13px;color:#5b21b6;line-height:1.5;">
+            <strong>Quick start:</strong>
+            <ol style="margin:8px 0 0;padding-left:20px;">
+              <li>Sign in with the same email you used at checkout</li>
+              <li>Set your shop name + hours in Shop Settings</li>
+              <li>Add your first client and pet</li>
+              <li>Book your first appointment in the calendar</li>
+            </ol>
+          </div>
+
+          ${isTrialing ? `
+          <div style="margin-top:18px;padding:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;font-size:12px;color:#92400e;">
+            ⏰ <strong>Heads-up:</strong> You're in a free trial right now. Your card will be charged automatically when the trial ends — you can cancel anytime from your Account page.
+          </div>` : ''}
+        </td></tr>
+
+        <tr><td style="padding:14px 28px 22px;background:#f9fafb;border-top:1px solid #e5e7eb;text-align:center;">
+          <div style="font-size:12px;color:#6b7280;line-height:1.5;margin-bottom:6px;">
+            💌 Don't see our emails? Check your spam folder and mark us as <strong>"Not Spam"</strong> so future updates land in your inbox.
+          </div>
+          <div style="font-size:11px;color:#9ca3af;line-height:1.5;">
+            Need help? Reply to this email or visit trypetpro.com.
+          </div>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body></html>`
+
+  const resp = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${resendKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: 'PetPro <nicole@trypetpro.com>',
+      to: [groomer.email],
+      subject,
+      html,
+    }),
+  })
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '')
+    throw new Error(`Resend returned ${resp.status}: ${errText}`)
+  }
+  console.log('[welcome-email] Sent to', groomer.email)
+}
+
+// HTML escape for safety (avoid XSS in welcome email)
+function escapeHtmlSafe(s: string): string {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
 
 // TIER CHANGE / TRIAL END / STATUS CHANGE

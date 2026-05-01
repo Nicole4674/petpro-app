@@ -1,9 +1,16 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 export default function Login() {
   const navigate = useNavigate()
+  // Detect post-checkout redirect from Stripe — when ?welcome=1 is in the URL
+  // (set as the success_url on each Stripe Payment Link), we show a green
+  // "Your account is ready!" banner so the new groomer knows they're in the
+  // right place to log in.
+  const [searchParams] = useSearchParams()
+  const showWelcome = searchParams.get('welcome') === '1'
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -83,6 +90,29 @@ export default function Login() {
       <div className="login-container">
         <h1>PetPro</h1>
         <p>AI-Powered Pet Grooming & Boarding</p>
+
+        {/* Welcome banner — shows ONCE after a fresh Stripe checkout. The
+            Stripe Payment Link's success_url should be:
+              https://app.trypetpro.com/login?welcome=1
+            so this banner reassures the new groomer they're in the right
+            place. The webhook also emails them the same link. */}
+        {showWelcome && (
+          <div style={{
+            margin: '0 0 16px',
+            padding: '14px 16px',
+            background: '#dcfce7',
+            border: '1px solid #86efac',
+            borderRadius: '10px',
+            color: '#166534',
+            fontSize: '14px',
+            lineHeight: '1.5',
+            textAlign: 'left',
+          }}>
+            <div style={{ fontWeight: 800, marginBottom: '4px' }}>🎉 Welcome to PetPro!</div>
+            Your subscription is active. Sign in below with the same email you used at checkout. (We also sent you a welcome email — check your spam folder if you don't see it.)
+          </div>
+        )}
+
         <form onSubmit={handleLogin}>
           <input
             type="email"
