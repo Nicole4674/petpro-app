@@ -1325,11 +1325,13 @@
 }
 
 /* WEEK VIEW: only show ~3 days at a time with horizontal scroll for the rest.
-   Each day column gets a min-width so they don't squish when 7 days try to fit
-   on a phone or tablet. The .calendar-grid-container above handles the scroll. */
-.time-grid-week .time-col-header,
-.time-grid-week .time-cell {
-    min-width: 280px;
+   We size the GRID itself wide enough for 7 days at 280px each + 80px gutter,
+   then let flex: 1 on the cells divide that width evenly. This avoids the
+   visual glitch where individual cell min-widths cause appointment blocks
+   (which use absolute positioning) to misalign on smaller screens.
+   The .calendar-grid-container above handles the horizontal scroll. */
+.time-grid-week {
+    min-width: calc(80px + 7 * 280px);    /* gutter + 7 day columns */
 }
 
 .time-grid-header {
