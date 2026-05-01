@@ -30,6 +30,8 @@ export default function ClientSignup() {
   var [phone, setPhone] = useState('')
   var [password, setPassword] = useState('')
   var [confirmPassword, setConfirmPassword] = useState('')
+  // SMS opt-in (defaults OFF — opt-in only, per Twilio TCR compliance rules)
+  var [smsConsent, setSmsConsent] = useState(false)
 
   useEffect(function () {
     if (!groomerId) {
@@ -97,7 +99,12 @@ export default function ClientSignup() {
     setSubmitting(true)
     try {
       var fullNameCombined = firstName.trim() + ' ' + lastName.trim()
-      var { error: signUpError } = await supabase.auth.signUp({
+      // SMS consent metadata: stored in auth user metadata so the DB trigger
+      // (or a future SQL update) can pick it up when creating the clients row.
+      // We also do a best-effort update on the clients row immediately after
+      // signup so consent is recorded even if the trigger doesn't copy it.
+      var smsConsentTimestamp = smsConsent ? new Date().toISOString() : null
+      var { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: email.trim().toLowerCase(),
         password: password,
         options: {
@@ -106,9 +113,28 @@ export default function ClientSignup() {
             phone: phone.trim(),
             groomer_id: groomerId,
             role: 'client',
+            sms_consent: smsConsent,
+            sms_consent_at: smsConsentTimestamp,
           },
         },
       })
+
+      // Best-effort: stamp the consent on the clients row that the trigger
+      // just created. If RLS blocks this (user not yet verified), the metadata
+      // above still has it for retroactive updates. Either way, no error shown.
+      if (!signUpError && smsConsent) {
+        try {
+          await supabase
+            .from('clients')
+            .update({
+              sms_consent: true,
+              sms_consent_at: smsConsentTimestamp,
+            })
+            .eq('email', email.trim().toLowerCase())
+        } catch (e) {
+          // Silent — consent is in auth metadata as a fallback
+        }
+      }
 
       if (signUpError) {
         var msg = signUpError.message.toLowerCase()
@@ -313,6 +339,38 @@ export default function ClientSignup() {
           </div>
 
           <FormField label="Confirm Password" value={confirmPassword} onChange={setConfirmPassword} placeholder="Re-enter your password" type="password" />
+
+          {/* SMS Consent — TWILIO TCR REQUIREMENT
+              Public, opt-in, defaults OFF. Required for A2P 10DLC campaign
+              approval — TCR reviewers verify this checkbox exists on a
+              publicly accessible signup page (this one). Don't remove without
+              talking to Twilio compliance first. */}
+          <div style={{
+            marginTop: '6px',
+            marginBottom: '14px',
+            padding: '12px 14px',
+            background: '#f9fafb',
+            border: '1px solid #e5e7eb',
+            borderRadius: '8px',
+          }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={smsConsent}
+                onChange={function (e) { setSmsConsent(e.target.checked) }}
+                style={{ marginTop: '3px', flexShrink: 0, cursor: 'pointer' }}
+              />
+              <span style={{ fontSize: '12px', color: '#374151', lineHeight: '1.5' }}>
+                <strong>Yes, send me appointment reminders via text message.</strong>
+                {' '}Message frequency varies based on appointment activity (typically 1-4 messages per appointment).
+                {' '}Message and data rates may apply. Reply <strong>STOP</strong> to opt out at any time, or <strong>HELP</strong> for help.
+                {' '}By checking this, you agree to our{' '}
+                <Link to="/privacy" target="_blank" style={{ color: brandColor, fontWeight: 600 }}>Privacy Policy</Link>
+                {' '}and{' '}
+                <Link to="/terms" target="_blank" style={{ color: brandColor, fontWeight: 600 }}>Terms of Service</Link>.
+              </span>
+            </label>
+          </div>
 
           <button
             type="submit"
