@@ -1100,13 +1100,14 @@ export default function Calendar() {
         }
         setSavingGroomingNote(true)
         try {
-            const { data: { user } } = await supabase.auth.getUser()
+            // client_notes schema: id, pet_id, client_id, note_type, note, created_at
+            // (no groomer_id column — RLS handles access control via the
+            // groomer's auth session)
             const { error } = await supabase
                 .from('client_notes')
                 .insert([{
                     pet_id: petId,
                     client_id: clientId,
-                    groomer_id: user ? user.id : null,
                     note_type: 'grooming',
                     note: text,
                 }])
