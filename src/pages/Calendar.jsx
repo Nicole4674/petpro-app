@@ -702,7 +702,7 @@ export default function Calendar() {
                 .from('appointments')
                 .select(`
                     *,
-                    clients:client_id ( id, first_name, last_name, phone, email, address, preferred_contact, notes ),
+                    clients:client_id ( id, first_name, last_name, phone, email, address, address_notes, preferred_contact, notes ),
                     pets:pet_id ( id, name, breed, weight, age, sex, allergies, medications, vaccination_status, vaccination_expiry, is_spayed_neutered, is_senior, grooming_notes, behavior_tags ),
                     services:service_id ( id, service_name, price, time_block_minutes ),
                     staff_members:staff_id ( id, first_name, last_name, color_code ),
@@ -3656,6 +3656,22 @@ export default function Calendar() {
                                                 >
                                                     🏠 {selectedAppt.clients.address}
                                                 </a>
+                                            </div>
+                                        )}
+                                        {/* Address notes — gate codes, parking tips, etc. Bright
+                                            yellow callout so groomer doesn't miss it pre-visit. */}
+                                        {selectedAppt.clients.address_notes && (
+                                            <div style={{
+                                                marginTop: '6px',
+                                                padding: '6px 10px',
+                                                background: '#fef9c3',
+                                                border: '1px solid #fde047',
+                                                borderRadius: '6px',
+                                                fontSize: '12px',
+                                                color: '#854d0e',
+                                                fontWeight: 500,
+                                            }}>
+                                                📍 {selectedAppt.clients.address_notes}
                                             </div>
                                         )}
                                         {selectedAppt.clients.preferred_contact && (

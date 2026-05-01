@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase'
 import EnableNotifications from '../components/EnableNotifications'
 import AIUsageWidget from '../components/AIUsageWidget'
 import { formatPhoneOnInput } from '../lib/phone'
+import AddressInput from '../components/AddressInput'
 
 export default function ShopSettings() {
   var navigate = useNavigate()
@@ -43,6 +44,9 @@ export default function ShopSettings() {
   var [logoUrl, setLogoUrl] = useState('')
   var [primaryColor, setPrimaryColor] = useState('#7c3aed')
   var [hours, setHours] = useState('')
+  // Mobile groomer toggle — when ON, sidebar shows the Route page and other
+  // mobile-only features. When OFF (default), storefront UX is unchanged.
+  var [isMobile, setIsMobile] = useState(false)
   // AI toggles — tier 1 (manual / "Moe Go Mode") vs tier 2 (full AI brain)
   var [groomerAiEnabled, setGroomerAiEnabled] = useState(true)
   var [clientAiBookingEnabled, setClientAiBookingEnabled] = useState(true)
@@ -180,6 +184,7 @@ export default function ShopSettings() {
         setLogoUrl(data.logo_url || '')
         setPrimaryColor(data.primary_color || '#7c3aed')
         setHours(data.hours || '')
+        setIsMobile(data.is_mobile === true)
         // AI toggles — default to ON if the column is missing or null (existing behavior)
         setGroomerAiEnabled(data.groomer_ai_enabled !== false)
         setClientAiBookingEnabled(data.client_ai_booking_enabled !== false)
@@ -303,6 +308,7 @@ export default function ShopSettings() {
         logo_url: logoUrl || null,
         primary_color: primaryColor || '#7c3aed',
         hours: hours || null,
+        is_mobile: isMobile,
         groomer_ai_enabled: groomerAiEnabled,
         client_ai_booking_enabled: clientAiBookingEnabled,
         // Payment policy toggles (Phase 5)
@@ -916,7 +922,45 @@ export default function ShopSettings() {
         <Field label="Phone" value={phone} onChange={(v) => setPhone(formatPhoneOnInput(v))} placeholder="713-098-3746" />
         <Field label="Email" value={email} onChange={setEmail} placeholder="shop@example.com" type="email" />
         <Field label="Website" value={website} onChange={setWebsite} placeholder="https://yourshop.com" />
-        <TextArea label="Address" value={address} onChange={setAddress} placeholder="123 Main St, City, State 12345" />
+        {/* Shop address — Places Autocomplete so the address that shows in
+            the client portal is always cleanly formatted for tap-to-nav. */}
+        <div style={{ marginBottom: '14px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+            Address
+          </label>
+          <AddressInput
+            value={address}
+            onChange={setAddress}
+            onSelect={({ address: picked }) => setAddress(picked)}
+            placeholder="123 Main St, City, State 12345"
+            style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box' }}
+          />
+          <small style={{ display: 'block', marginTop: '4px', color: '#6b7280', fontSize: '11px' }}>
+            Pick from the dropdown so clients get accurate Get Directions links.
+          </small>
+        </div>
+
+        {/* Mobile groomer toggle — when ON, sidebar shows the Route page
+            and other mobile-specific tools. Storefront groomers leave OFF. */}
+        <div style={{ marginBottom: '14px', padding: '12px 14px', background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '10px' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={isMobile}
+              onChange={(e) => setIsMobile(e.target.checked)}
+              style={{ marginTop: '3px', width: '18px', height: '18px', cursor: 'pointer', accentColor: '#7c3aed' }}
+            />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#1f2937' }}>
+                🚐 I'm a mobile groomer (or have mobile staff)
+              </div>
+              <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px', lineHeight: '1.4' }}>
+                Turns on the <strong>Route</strong> page in your sidebar — daily map of all your stops with one-tap multi-stop nav, address notes, and tap-to-call. Storefront-only shops can leave this off.
+              </div>
+            </div>
+          </label>
+        </div>
+
         <TextArea label="Hours" value={hours} onChange={setHours} placeholder="Mon–Sat 8am–6pm, Closed Sundays" />
       </div>
 

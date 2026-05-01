@@ -143,6 +143,35 @@
 
 ---
 
+## Phase 11 — Mobile-aware booking modal (Nicole's observation)
+**Bigger feature. Multi-day. Touches Calendar booking flow + AI booking rules.**
+
+**The insight:** mobile groomers book differently from shop groomers. A shop picks the open time slot — that's it. A mobile groomer needs to consider drive time to existing stops AND location of the new client. Booking 11 AM at address A and 11 AM at address B 25 min apart = a wasted hour.
+
+**What to build:**
+- [ ] When `shop_settings.is_mobile = true`, the Calendar booking modal shows extra context:
+  - Drive time + distance from previous stop on that day
+  - Drive time + distance to next stop on that day
+  - Suggested time slot if the proposed time creates a long drive ("11 AM works, but 11:30 reduces drive time by 18 min")
+- [ ] "Zone view" mode in Calendar: group appointments by area/zone (Cypress north, Cypress south, etc.) so groomer can think geographically
+- [ ] Soft-warn if user tries to book back-to-back stops > 20 min drive apart with < 15 min buffer
+- [ ] AI booking rules: "Cluster bookings within 5 miles when possible" as a settable rule for mobile shops
+- [ ] When client books via portal, suggest times that fit the groomer's existing route, not just open slots
+
+**Why call this out now (per Nicole):** if this touches a lot of files, it's cheaper to do it WHILE we're in mobile-features territory rather than retrofit later when the booking flow has shifted further away from us.
+
+**Files this will touch:**
+- Calendar.jsx booking modal
+- BoardingCalendar.jsx booking modal
+- ClientPortalDashboard.jsx booking flow (if clients book via portal)
+- BookingRules.jsx (new rule type for mobile clustering)
+- src/lib/maps.js (drive-time helpers)
+- New edge function: `route-distance-check`
+
+**Defer for now** — Phase 1-10 first, then come back here when we've shipped the basics and have user feedback.
+
+---
+
 ## Phase 10 — Mobile groomer toggle in Shop Settings
 **~30 min. Hides Route from storefront groomers.**
 

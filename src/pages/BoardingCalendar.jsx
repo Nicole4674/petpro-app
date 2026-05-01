@@ -525,7 +525,7 @@ export default function BoardingCalendar() {
             pet_id,
             pets:pet_id ( id, name, breed, weight, age, sex, allergies, medications, vaccination_status, vaccination_expiry, is_spayed_neutered, behavior_tags )
           ),
-          clients:client_id ( id, first_name, last_name, phone, email, address, preferred_contact, notes ),
+          clients:client_id ( id, first_name, last_name, phone, email, address, address_notes, preferred_contact, notes ),
           kennels:kennel_id ( name )
         `)
         .eq('id', reservation.id)
@@ -2426,6 +2426,22 @@ export default function BoardingCalendar() {
                           >
                             📍 {selectedReservation.clients.address}
                           </a>
+                        </div>
+                      )}
+                      {/* Address notes — gate codes, parking tips. Yellow callout
+                          to grab attention pre-pickup/dropoff */}
+                      {selectedReservation.clients.address_notes && (
+                        <div style={{
+                          marginTop: '6px',
+                          padding: '6px 10px',
+                          background: '#fef9c3',
+                          border: '1px solid #fde047',
+                          borderRadius: '6px',
+                          fontSize: '12px',
+                          color: '#854d0e',
+                          fontWeight: 500,
+                        }}>
+                          📍 {selectedReservation.clients.address_notes}
                         </div>
                       )}
                       {selectedReservation.clients.preferred_contact && (

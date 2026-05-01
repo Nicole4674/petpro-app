@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { formatPhoneOnInput } from '../lib/phone'
+import AddressInput from '../components/AddressInput'
 
 export default function AddClient() {
   const navigate = useNavigate()
@@ -14,6 +15,11 @@ export default function AddClient() {
     phone: '',
     preferred_contact: 'text',
     address: '',
+    // Coords are filled in when the user picks an address from the
+    // Places Autocomplete dropdown. NULL if they typed it free-form.
+    latitude: null,
+    longitude: null,
+    address_notes: '',
     notes: '',
   })
 
@@ -112,12 +118,33 @@ export default function AddClient() {
 
         <div className="form-group">
           <label>Address</label>
-          <input
-            type="text"
-            name="address"
+          <AddressInput
             value={form.address}
-            onChange={handleChange}
+            onChange={(addr) => setForm({ ...form, address: addr })}
+            onSelect={({ address, latitude, longitude }) => {
+              // Picked from dropdown → save clean address + coords together
+              setForm({ ...form, address, latitude, longitude })
+            }}
+            placeholder="Start typing the address — pick from the dropdown"
           />
+          <small style={{ color: '#6b7280', fontSize: '11px' }}>
+            Pick from the dropdown so the route map can find them later.
+          </small>
+        </div>
+
+        {/* Address notes — gate codes, parking tips, "ring don't knock" */}
+        <div className="form-group">
+          <label>📍 Address Notes (optional)</label>
+          <textarea
+            name="address_notes"
+            value={form.address_notes}
+            onChange={handleChange}
+            rows={2}
+            placeholder='e.g. "Park in driveway · Gate code 4567 · Ring doorbell, sleeping baby"'
+          />
+          <small style={{ color: '#6b7280', fontSize: '11px' }}>
+            Shows on the route map + appointment popups so you don't forget gate codes, parking tips, etc.
+          </small>
         </div>
 
         <div className="form-group">

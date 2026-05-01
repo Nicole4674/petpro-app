@@ -12,6 +12,9 @@ export default function Sidebar({ onToggle }) {
   const [unreadMessages, setUnreadMessages] = useState(0)
   // Classic Mode — if groomer_ai_enabled is off, hide the 🤖 AI sidebar section entirely
   const [groomerAiEnabled, setGroomerAiEnabled] = useState(true)
+  // Mobile groomer mode — when true, show the 📍 Route nav item.
+  // Default false so storefront groomers don't see a feature they don't need.
+  const [isMobile, setIsMobile] = useState(false)
   const [openSections, setOpenSections] = useState({
     grooming: true,
     boarding: true,
@@ -72,12 +75,15 @@ export default function Sidebar({ onToggle }) {
       try {
         var { data: { user } } = await supabase.auth.getUser()
         if (!user) return
+        // Pull both shop flags in one query — cheaper than 2 round trips
         var { data } = await supabase
           .from('shop_settings')
-          .select('groomer_ai_enabled')
+          .select('groomer_ai_enabled, is_mobile')
           .eq('groomer_id', user.id)
           .maybeSingle()
-        if (!cancelled) setGroomerAiEnabled(!data || data.groomer_ai_enabled !== false)
+        if (cancelled) return
+        setGroomerAiEnabled(!data || data.groomer_ai_enabled !== false)
+        setIsMobile(!!(data && data.is_mobile))
       } catch (e) { /* fail open */ }
     }
     loadAiFlag()
@@ -215,6 +221,16 @@ export default function Sidebar({ onToggle }) {
                 onClick={function() { goTo('/calendar') }}
               >
                 Calendar
+              </div>
+              )}
+              {/* Route — only shown when shop_settings.is_mobile = true.
+                  Storefront groomers don't see this nav item at all. */}
+              {isMobile && canAccessAny(['calendar.view_own', 'calendar.view_all']) && (
+              <div
+                className={'sidebar-subitem' + (isActive('/route') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/route') }}
+              >
+                📍 Route
               </div>
               )}
               {canAccess('clients.view_list') && (

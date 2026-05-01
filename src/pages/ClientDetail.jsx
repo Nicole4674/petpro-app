@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { formatPhone, formatPhoneOnInput } from '../lib/phone'
 import { mapsUrl, telUrl } from '../lib/maps'
+import AddressInput from '../components/AddressInput'
 
 const TABS = [
   { key: 'overview', label: '🐾 Overview' },
@@ -485,7 +486,12 @@ export default function ClientDetail() {
       phone: client.phone || '',
       email: client.email || '',
       preferred_contact: client.preferred_contact || 'text',
-      address: client.address || ''
+      address: client.address || '',
+      address_notes: client.address_notes || '',
+      // Coords come from clients table cache. Filled in only when the
+      // user picks a new address from the Places Autocomplete dropdown.
+      latitude: null,
+      longitude: null,
     })
     setEditClientError('')
     setEditingClient(true)
@@ -509,16 +515,27 @@ export default function ClientDetail() {
     }
 
     setSavingClientEdit(true)
+    // Build the update payload. Only include latitude/longitude if the user
+    // picked a new address from the Places dropdown (otherwise the existing
+    // cached coords stay as-is). The address-change DB trigger will auto-
+    // wipe stale coords if the user typed a different address by hand.
+    const updatePayload = {
+      first_name: editClientForm.first_name.trim(),
+      last_name: editClientForm.last_name.trim() || null,
+      phone: editClientForm.phone.trim(),
+      email: editClientForm.email.trim() || null,
+      preferred_contact: editClientForm.preferred_contact,
+      address: editClientForm.address.trim() || null,
+      address_notes: (editClientForm.address_notes || '').trim() || null,
+    }
+    if (editClientForm.latitude != null && editClientForm.longitude != null) {
+      updatePayload.latitude = editClientForm.latitude
+      updatePayload.longitude = editClientForm.longitude
+      updatePayload.coords_geocoded_at = new Date().toISOString()
+    }
     const { error } = await supabase
       .from('clients')
-      .update({
-        first_name: editClientForm.first_name.trim(),
-        last_name: editClientForm.last_name.trim() || null,
-        phone: editClientForm.phone.trim(),
-        email: editClientForm.email.trim() || null,
-        preferred_contact: editClientForm.preferred_contact,
-        address: editClientForm.address.trim() || null,
-      })
+      .update(updatePayload)
       .eq('id', id)
 
     if (error) {
@@ -1149,13 +1166,33 @@ export default function ClientDetail() {
                     </label>
                     <label style={{ ...contactLabelStyle, gridColumn: '1 / -1' }}>
                       Address
-                      <input
-                        type="text"
+                      <AddressInput
                         value={editClientForm.address}
-                        onChange={function (e) { setEditClientForm({ ...editClientForm, address: e.target.value }) }}
-                        placeholder="123 Main St, City, State ZIP"
+                        onChange={(addr) => setEditClientForm({ ...editClientForm, address: addr })}
+                        onSelect={({ address, latitude, longitude }) => {
+                          // Picked from Places dropdown → save clean address + coords together
+                          setEditClientForm({ ...editClientForm, address, latitude, longitude })
+                        }}
+                        placeholder="Start typing — pick from dropdown for best results"
                         style={contactInputStyle}
                       />
+                      <small style={{ display: 'block', marginTop: '4px', color: '#6b7280', fontSize: '11px' }}>
+                        Pick from the dropdown so the route map can find them later.
+                      </small>
+                    </label>
+                    {/* Address notes — gate codes, parking tips, "ring don't knock" */}
+                    <label style={{ ...contactLabelStyle, gridColumn: '1 / -1' }}>
+                      📍 Address Notes
+                      <textarea
+                        value={editClientForm.address_notes || ''}
+                        onChange={function (e) { setEditClientForm({ ...editClientForm, address_notes: e.target.value }) }}
+                        placeholder='e.g. "Park in driveway · Gate code 4567 · Side door"'
+                        rows={2}
+                        style={{ ...contactInputStyle, resize: 'vertical', fontFamily: 'inherit' }}
+                      />
+                      <small style={{ display: 'block', marginTop: '4px', color: '#6b7280', fontSize: '11px' }}>
+                        Shows on route map + appointment popup so you don't forget gate codes / parking tips.
+                      </small>
                     </label>
                   </div>
 

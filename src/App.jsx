@@ -48,6 +48,7 @@ import EmailConfirmed from './pages/EmailConfirmed'
 import Kiosk from './pages/Kiosk'
 import StaffLogin from './pages/StaffLogin'
 import StaffMe from './pages/StaffMe'
+import Route2 from './pages/Route'  // imported as Route2 to avoid clash with react-router-dom Route
 
 // ─────────────────────────────────────────────────────────────────
 // RootRedirect — smart routing at "/" based on user type.
@@ -196,6 +197,8 @@ function App() {
                     <Route path="/pets/:id" element={gate(session, <PetDetail />)} />
                     <Route path="/pricing" element={gate(session, <Pricing />)} />
                     <Route path="/calendar" element={gate(session, <Calendar />)} />
+                    {/* Today's Route — mobile groomer feature (Phase 2) */}
+                    <Route path="/route" element={gate(session, <Route2 />)} />
                     <Route path="/flagged" element={gate(session, <FlaggedBookings />)} />
                     <Route path="/voice" element={gate(session, <VoiceMode />)} />
                     <Route path="/import" element={gate(session, <ImportClients />)} />
