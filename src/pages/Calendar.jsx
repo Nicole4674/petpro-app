@@ -199,6 +199,10 @@ export default function Calendar() {
     // Multi-pet: in-popup "change service" editor — tracks which appointment_pet is being edited + the pending new service_id
     const [editingServiceApptPetId, setEditingServiceApptPetId] = useState(null)
     const [pendingServiceId, setPendingServiceId] = useState('')
+    // Multi-pet: in-popup "edit price" editor — covers the husband-makes-mistakes case
+    // where the price needs adjusting without changing the service (custom quote, etc.)
+    const [editingPriceApptPetId, setEditingPriceApptPetId] = useState(null)
+    const [pendingPrice, setPendingPrice] = useState('')
     // Report card modal state — { petId, clientId, petName, petBreed, appointmentId, existing? }
     const [reportCardModal, setReportCardModal] = useState(null)
     // Map of { appointmentPetKey: existingReportCard } so the popup can show "View" instead of "Create"
@@ -829,10 +833,26 @@ export default function Calendar() {
     }
 
     // Multi-pet: Remove a pet from an existing appointment (sick dog scenario)
-    // Auto-shrinks appointment end_time by the removed pet's service time block
+    // Auto-shrinks appointment end_time by the removed pet's service time block.
+    //
+    // BUG FIX (May 2026): Previously, removing the LAST pet would delete the
+    // appointment_pets row but leave the parent appointments row hanging as a
+    // ghost (visually the pet disappeared but the appointment was still there).
+    // Now: if removing the only pet, we cancel the parent appointment too so
+    // it disappears from the calendar in one action.
     const handleRemovePetFromAppointment = async (apptPetId, petName) => {
         if (!selectedAppt) return
-        if (!window.confirm('Remove ' + petName + ' from this appointment? The end time will auto-shrink.')) return
+
+        // Check if this is the last pet BEFORE the confirmation so we can show
+        // the right message ("just remove this pet" vs "cancel whole appointment")
+        var currentPets = selectedAppt.appointment_pets || []
+        var isLastPet = currentPets.length <= 1
+
+        var confirmMsg = isLastPet
+            ? petName + ' is the only pet on this appointment. Removing them will CANCEL the entire appointment. Continue?'
+            : 'Remove ' + petName + ' from this appointment? The end time will auto-shrink.'
+
+        if (!window.confirm(confirmMsg)) return
 
         try {
             // 1. Delete the appointment_pets row
@@ -843,12 +863,22 @@ export default function Calendar() {
             if (delErr) throw delErr
 
             // 2. Compute remaining pets and new end_time
-            var remainingPets = (selectedAppt.appointment_pets || []).filter(function (ap) {
+            var remainingPets = currentPets.filter(function (ap) {
                 return ap.id !== apptPetId
             })
 
             if (remainingPets.length === 0) {
-                alert('That was the last pet on this appointment. Consider cancelling the appointment.')
+                // LAST PET FIX: cancel the parent appointment so it disappears
+                // from the calendar (we use status='cancelled' instead of hard
+                // delete to preserve history for any payments / refunds tied to
+                // this appointment).
+                const { error: cancelErr } = await supabase
+                    .from('appointments')
+                    .update({ status: 'cancelled' })
+                    .eq('id', selectedAppt.id)
+                if (cancelErr) throw cancelErr
+
+                alert('Appointment cancelled — ' + petName + ' was the only pet on it.')
                 fetchData()
                 setSelectedAppt(null)
                 return
@@ -988,6 +1018,39 @@ export default function Calendar() {
             fetchData()
         } catch (err) {
             alert('Error changing service: ' + (err.message || err))
+        }
+    }
+
+    // Multi-pet: Save a manually-edited price for one pet on an existing appt.
+    // (Husband-makes-mistakes scenario — wrong price entered, custom quote,
+    // discount applied, etc.) Updates appointment_pets.quoted_price for the
+    // single pet, then recalcs appointments.quoted_price total via the
+    // existing recalcAndSaveApptTotal() helper below.
+    const handleSavePetPrice = async (apptPetId) => {
+        if (!selectedAppt) return
+        var newPrice = parseFloat(pendingPrice)
+        if (isNaN(newPrice) || newPrice < 0) {
+            alert('Enter a valid price (0 or greater).')
+            return
+        }
+        try {
+            // 1. Save the new price on the appointment_pets row
+            const { error: updErr } = await supabase
+                .from('appointment_pets')
+                .update({ quoted_price: newPrice })
+                .eq('id', apptPetId)
+            if (updErr) throw updErr
+
+            // 2. Recompute the appointment total (sums all pets + all addons)
+            await recalcAndSaveApptTotal(selectedAppt.id)
+
+            // 3. Close editor + refresh popup + calendar
+            setEditingPriceApptPetId(null)
+            setPendingPrice('')
+            await handleApptClick(selectedAppt, { stopPropagation: function () {} })
+            fetchData()
+        } catch (err) {
+            alert('Error saving price: ' + (err.message || err))
         }
     }
 
@@ -3279,6 +3342,40 @@ export default function Calendar() {
                                                             💡 End time will auto-adjust. Price stays at ${parseFloat(ap.quoted_price || 0).toFixed(2)} — update manually if needed.
                                                         </div>
                                                     </div>
+                                                ) : editingPriceApptPetId === ap.id ? (
+                                                    /* PRICE EDIT MODE — small inline editor for adjusting just the
+                                                       price without touching the service. Husband-mistake-friendly. */
+                                                    <div className="appt-detail-service-card" style={{ marginBottom: '8px' }}>
+                                                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>
+                                                            ✂️ {ap.services.service_name} — set price
+                                                        </div>
+                                                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                                            <span style={{ fontSize: '14px', color: '#6b7280', fontWeight: 700 }}>$</span>
+                                                            <input
+                                                                type="number"
+                                                                step="0.01"
+                                                                min="0"
+                                                                value={pendingPrice}
+                                                                onChange={function (e) { setPendingPrice(e.target.value) }}
+                                                                placeholder="0.00"
+                                                                autoFocus
+                                                                style={{ flex: 1, padding: '8px', fontSize: '14px', borderRadius: '6px', border: '1px solid #d1d5db', background: '#fff' }}
+                                                            />
+                                                        </div>
+                                                        <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                                                            <button
+                                                                onClick={function () { handleSavePetPrice(ap.id) }}
+                                                                style={{ flex: 1, padding: '8px 12px', background: '#10b981', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                                            >✓ Save price</button>
+                                                            <button
+                                                                onClick={function () { setEditingPriceApptPetId(null); setPendingPrice('') }}
+                                                                style={{ flex: 1, padding: '8px 12px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}
+                                                            >Cancel</button>
+                                                        </div>
+                                                        <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '8px', lineHeight: '1.4' }}>
+                                                            💡 Total appointment price will auto-update.
+                                                        </div>
+                                                    </div>
                                                 ) : ap.services ? (
                                                     <div className="appt-detail-service-card" style={{ marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                                                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -3287,6 +3384,13 @@ export default function Calendar() {
                                                                 ${parseFloat(ap.quoted_price || ap.services.price || 0).toFixed(2)} · {ap.services.time_block_minutes} mins
                                                             </div>
                                                         </div>
+                                                        {/* Price edit pencil — quick way to fix a wrong price without
+                                                            having to swap the service. Was the husband's pain point. */}
+                                                        <button
+                                                            onClick={function () { setEditingPriceApptPetId(ap.id); setPendingPrice(String(parseFloat(ap.quoted_price || ap.services.price || 0).toFixed(2))) }}
+                                                            title="Edit just the price (keeps service the same)"
+                                                            style={{ background: '#fff', border: '1px solid #fcd34d', color: '#b45309', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, flexShrink: 0 }}
+                                                        >💵 Price</button>
                                                         <button
                                                             onClick={function () { setEditingServiceApptPetId(ap.id); setPendingServiceId(ap.service_id || '') }}
                                                             title="Change service for this pet (auto-adjusts end time)"
