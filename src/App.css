@@ -1334,6 +1334,39 @@
     min-width: calc(80px + 7 * 280px);    /* gutter + 7 day columns */
 }
 
+/* ─── MOBILE TWEAKS ──────────────────────────────────────────────────────
+   Phones (< 768px) get tighter spacing so more appointments are visible
+   per screen. Without these, week view shows only 1 day and day view's
+   appointment cards take huge vertical space.
+   ────────────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    /* Week view: shrink each column so ~2-3 days fit on a phone (not 1) */
+    .time-grid-week {
+        min-width: calc(50px + 7 * 140px);   /* gutter (50) + 7 day columns @ 140 */
+    }
+
+    /* Slim left time gutter from 80 → 50 so we get more horizontal room */
+    .time-gutter,
+    .time-gutter-header {
+        width: 50px;
+        min-width: 50px;
+        font-size: 11px;
+        padding: 6px 4px;
+    }
+
+    /* Compact appointment blocks (smaller fonts + tighter padding) so
+       Day view and Week view show more without scrolling */
+    .appt-block {
+        padding: 2px 5px;
+        font-size: 10px;
+        gap: 0;
+    }
+
+    .appt-time { font-size: 9px; }
+    .appt-pet  { font-size: 11px; }
+    .appt-client { font-size: 9px; }
+}
+
 .time-grid-header {
     display: flex;
     position: sticky;
