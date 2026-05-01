@@ -207,6 +207,14 @@ export default function Calendar() {
     const [reportCardModal, setReportCardModal] = useState(null)
     // Map of { appointmentPetKey: existingReportCard } so the popup can show "View" instead of "Create"
     const [existingReportCards, setExistingReportCards] = useState({})
+    // Per-pet grooming notes shown inline in the appointment popup so the
+    // groomer doesn't have to dig into PetDetail to see the latest note.
+    // Keyed by pet_id → array of recent grooming notes (newest first).
+    const [groomingNotesByPet, setGroomingNotesByPet] = useState({})
+    // Inline "+ Add note" state — which pet's input is open + the pending text
+    const [addingGroomingNoteForPetId, setAddingGroomingNoteForPetId] = useState(null)
+    const [pendingGroomingNoteText, setPendingGroomingNoteText] = useState('')
+    const [savingGroomingNote, setSavingGroomingNote] = useState(false)
     // Add-on services state — when groomer wants to stack a 2nd/3rd service
     // on a pet (dematting fee, dremel, handling fee, etc.). One pet can have
     // unlimited add-ons stored in appointment_pet_addons.
@@ -769,18 +777,43 @@ export default function Calendar() {
                 fullAppt.recurring_upcoming_count = upcomingCount
             }
 
-            // Also fetch grooming notes from client_notes table
+            // Also fetch grooming notes from client_notes table.
+            // For multi-pet appointments we now pull notes for EVERY pet on
+            // the appointment (not just the legacy first pet), grouped by
+            // pet_id so the popup can show "latest note" inline next to each
+            // pet card. The legacy groomNotes array (first pet only) stays so
+            // the bottom "Past Grooming Notes" section still works.
             let groomNotes = []
-            if (fullAppt?.pet_id) {
+            const groomNotesByPetMap = {}
+
+            // Collect ALL pet_ids on this appointment (multi-pet + legacy first pet)
+            const allPetIds = []
+            if (fullAppt?.pet_id) allPetIds.push(fullAppt.pet_id)
+            if (fullAppt?.appointment_pets && fullAppt.appointment_pets.length > 0) {
+                fullAppt.appointment_pets.forEach(function (ap) {
+                    if (ap.pet_id && allPetIds.indexOf(ap.pet_id) === -1) allPetIds.push(ap.pet_id)
+                })
+            }
+
+            if (allPetIds.length > 0) {
                 const { data: notesData } = await supabase
                     .from('client_notes')
                     .select('*')
-                    .eq('pet_id', fullAppt.pet_id)
+                    .in('pet_id', allPetIds)
                     .eq('note_type', 'grooming')
                     .order('created_at', { ascending: false })
-                    .limit(5)
-                groomNotes = notesData || []
+
+                ;(notesData || []).forEach(function (n) {
+                    if (!groomNotesByPetMap[n.pet_id]) groomNotesByPetMap[n.pet_id] = []
+                    groomNotesByPetMap[n.pet_id].push(n)
+                })
+
+                // Legacy first-pet array — keeps the existing bottom section working
+                if (fullAppt?.pet_id && groomNotesByPetMap[fullAppt.pet_id]) {
+                    groomNotes = groomNotesByPetMap[fullAppt.pet_id].slice(0, 5)
+                }
             }
+            setGroomingNotesByPet(groomNotesByPetMap)
 
             // Also fetch client notes
             let clientNotes = []
@@ -1051,6 +1084,53 @@ export default function Calendar() {
             fetchData()
         } catch (err) {
             alert('Error saving price: ' + (err.message || err))
+        }
+    }
+
+    // Save a new grooming note for a specific pet from the appointment popup.
+    // Writes to client_notes (matches the legacy fetch above so the existing
+    // "Past Grooming Notes" section also picks it up). On success, refreshes
+    // the per-pet map + closes the inline input.
+    const saveGroomingNoteForPet = async (petId, clientId) => {
+        var text = (pendingGroomingNoteText || '').trim()
+        if (!text) {
+            setAddingGroomingNoteForPetId(null)
+            setPendingGroomingNoteText('')
+            return
+        }
+        setSavingGroomingNote(true)
+        try {
+            const { data: { user } } = await supabase.auth.getUser()
+            const { error } = await supabase
+                .from('client_notes')
+                .insert([{
+                    pet_id: petId,
+                    client_id: clientId,
+                    groomer_id: user ? user.id : null,
+                    note_type: 'grooming',
+                    note: text,
+                }])
+            if (error) throw error
+
+            // Re-fetch grooming notes for this pet so the popup updates
+            const { data: refreshed } = await supabase
+                .from('client_notes')
+                .select('*')
+                .eq('pet_id', petId)
+                .eq('note_type', 'grooming')
+                .order('created_at', { ascending: false })
+            setGroomingNotesByPet(function (prev) {
+                const next = Object.assign({}, prev)
+                next[petId] = refreshed || []
+                return next
+            })
+
+            setAddingGroomingNoteForPetId(null)
+            setPendingGroomingNoteText('')
+        } catch (err) {
+            alert('Could not save note: ' + (err.message || err))
+        } finally {
+            setSavingGroomingNote(false)
         }
     }
 
@@ -3578,6 +3658,115 @@ export default function Calendar() {
                                                         {ap.pets.grooming_notes}
                                                     </div>
                                                 )}
+
+                                                {/* ── PER-PET GROOMING NOTES — quick view + inline add ──
+                                                    Shows the LATEST grooming note for this pet so the groomer
+                                                    can scan in seconds without leaving the popup. "+ Add note"
+                                                    expands a small textarea inline so a new note can be saved
+                                                    without navigating to PetDetail. "See all" link opens the
+                                                    pet's full Notes tab when more history is needed. */}
+                                                {(function () {
+                                                    var petNotes = groomingNotesByPet[ap.pet_id] || []
+                                                    var latest = petNotes[0]
+                                                    var isAdding = addingGroomingNoteForPetId === ap.pet_id
+                                                    return (
+                                                        <div style={{
+                                                            marginTop: '10px',
+                                                            padding: '10px 12px',
+                                                            background: '#f0fdf4',
+                                                            border: '1px solid #bbf7d0',
+                                                            borderRadius: '8px',
+                                                        }}>
+                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                                                                <span style={{ fontSize: '11px', fontWeight: 700, color: '#166534', letterSpacing: '0.3px' }}>
+                                                                    📝 GROOMING NOTES
+                                                                </span>
+                                                                {petNotes.length > 1 && (
+                                                                    <Link
+                                                                        to={'/pets/' + ap.pet_id}
+                                                                        style={{ fontSize: '11px', color: '#15803d', textDecoration: 'none', fontWeight: 600 }}
+                                                                    >See all {petNotes.length} →</Link>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Latest note (if any) */}
+                                                            {latest ? (
+                                                                <div style={{ fontSize: '13px', color: '#14532d', lineHeight: 1.4, marginBottom: '6px' }}>
+                                                                    <span style={{ fontSize: '11px', color: '#166534', fontWeight: 600, marginRight: '6px' }}>
+                                                                        {new Date(latest.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}:
+                                                                    </span>
+                                                                    {latest.note}
+                                                                </div>
+                                                            ) : (
+                                                                <div style={{ fontSize: '12px', color: '#15803d', fontStyle: 'italic', marginBottom: '6px' }}>
+                                                                    No notes yet for {ap.pets?.name || 'this pet'}.
+                                                                </div>
+                                                            )}
+
+                                                            {/* Inline add — expands a textarea + Save when "+ Add note" is clicked */}
+                                                            {isAdding ? (
+                                                                <div>
+                                                                    <textarea
+                                                                        value={pendingGroomingNoteText}
+                                                                        onChange={function (e) { setPendingGroomingNoteText(e.target.value) }}
+                                                                        placeholder={'Note for ' + (ap.pets?.name || 'this pet') + '… (e.g. "matted behind ears, lion cut next time")'}
+                                                                        rows={3}
+                                                                        autoFocus
+                                                                        disabled={savingGroomingNote}
+                                                                        style={{
+                                                                            width: '100%',
+                                                                            padding: '8px',
+                                                                            fontSize: '13px',
+                                                                            border: '1px solid #86efac',
+                                                                            borderRadius: '6px',
+                                                                            background: '#fff',
+                                                                            color: '#111827',
+                                                                            resize: 'vertical',
+                                                                            boxSizing: 'border-box',
+                                                                        }}
+                                                                    />
+                                                                    <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                                                                        <button
+                                                                            onClick={function () { saveGroomingNoteForPet(ap.pet_id, selectedAppt.client_id) }}
+                                                                            disabled={savingGroomingNote || !pendingGroomingNoteText.trim()}
+                                                                            style={{
+                                                                                flex: 1,
+                                                                                padding: '7px 10px',
+                                                                                background: pendingGroomingNoteText.trim() && !savingGroomingNote ? '#10b981' : '#d1d5db',
+                                                                                color: '#fff',
+                                                                                border: 'none',
+                                                                                borderRadius: '6px',
+                                                                                fontWeight: 700,
+                                                                                fontSize: '12px',
+                                                                                cursor: pendingGroomingNoteText.trim() && !savingGroomingNote ? 'pointer' : 'not-allowed',
+                                                                            }}
+                                                                        >{savingGroomingNote ? 'Saving…' : '✓ Save note'}</button>
+                                                                        <button
+                                                                            onClick={function () { setAddingGroomingNoteForPetId(null); setPendingGroomingNoteText('') }}
+                                                                            disabled={savingGroomingNote}
+                                                                            style={{ flex: 1, padding: '7px 10px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
+                                                                        >Cancel</button>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <button
+                                                                    onClick={function () { setAddingGroomingNoteForPetId(ap.pet_id); setPendingGroomingNoteText('') }}
+                                                                    style={{
+                                                                        width: '100%',
+                                                                        padding: '6px 10px',
+                                                                        background: '#fff',
+                                                                        border: '1px dashed #86efac',
+                                                                        color: '#166534',
+                                                                        borderRadius: '6px',
+                                                                        fontWeight: 600,
+                                                                        fontSize: '12px',
+                                                                        cursor: 'pointer',
+                                                                    }}
+                                                                >+ Add note</button>
+                                                            )}
+                                                        </div>
+                                                    )
+                                                })()}
 
                                                 {/* Report Card — only enabled after checkout, but visible always so groomer knows it's coming */}
                                                 {(function () {
