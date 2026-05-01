@@ -17,6 +17,7 @@ import { mapsUrl, telUrl, formatAddress } from '../lib/maps'
 import { formatPhone } from '../lib/phone'
 import RouteMap from '../components/RouteMap'
 import { optimizeRoute, formatDriveTime } from '../lib/routeOptimizer'
+import { printRouteSheet } from '../lib/printRouteSheet'
 
 // MUST be defined OUTSIDE the component — useLoadScript expects a stable
 // reference. If we put this inside the component it would be a new array
@@ -407,6 +408,33 @@ export default function Route() {
                optimizing ? '🧠 Optimizing…' :
                optimizedStops ? '↩️ Revert to Time Order' :
                '🧠 Optimize Route'}
+            </button>
+          )}
+
+          {/* Print — paper backup for when phone dies mid-route. Opens a clean
+              print-friendly window with addresses, phones, and gate-code notes. */}
+          {displayStops.length > 0 && (
+            <button
+              onClick={function () {
+                printRouteSheet(displayStops, {
+                  shopName: 'Today\'s Route',
+                  isOptimized: !!optimizedStops,
+                  savedSeconds: savedMin * 60,
+                })
+              }}
+              style={{
+                padding: '12px 16px',
+                background: '#fff',
+                color: '#374151',
+                border: '1px solid #d1d5db',
+                borderRadius: '10px',
+                fontWeight: 700,
+                fontSize: '14px',
+                cursor: 'pointer',
+              }}
+              title="Print a paper backup of today's route"
+            >
+              🖨️ Print
             </button>
           )}
 
