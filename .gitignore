@@ -17,6 +17,10 @@ dist-ssr
 .env.local
 .env.production
 
+# One-time patch scripts that contain secret keys — NEVER commit these
+patch-payment-links.js
+patch-*.js
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
