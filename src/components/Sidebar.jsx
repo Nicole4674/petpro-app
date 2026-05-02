@@ -257,6 +257,15 @@ export default function Sidebar({ onToggle }) {
                 Pricing
               </div>
               )}
+              {/* Phase A — Agreements page (waivers + e-signature) */}
+              {canAccess('pricing.view') && (
+              <div
+                className={'sidebar-subitem' + (isActive('/agreements') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/agreements') }}
+              >
+                Agreements
+              </div>
+              )}
               {canAccessAny(['calendar.view_own', 'calendar.view_all']) && (
               <div
                 className={'sidebar-subitem' + (isActive('/waitlist') ? ' sidebar-subitem-active' : '')}

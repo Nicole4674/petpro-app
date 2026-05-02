@@ -50,6 +50,9 @@ export default function ShopSettings() {
   // Late warnings toggle (Phase 6) — opt-in. Most groomers know they're late
   // and don't want a banner reminding them. Off by default.
   var [lateWarningsEnabled, setLateWarningsEnabled] = useState(false)
+  // Agreements toggle — opt-in. Some groomers (like Nicole) don't use waivers
+  // and don't want clients prompted to sign at portal login. Off by default.
+  var [agreementsEnabled, setAgreementsEnabled] = useState(false)
   // AI toggles — tier 1 (manual / "Moe Go Mode") vs tier 2 (full AI brain)
   var [groomerAiEnabled, setGroomerAiEnabled] = useState(true)
   var [clientAiBookingEnabled, setClientAiBookingEnabled] = useState(true)
@@ -189,6 +192,7 @@ export default function ShopSettings() {
         setHours(data.hours || '')
         setIsMobile(data.is_mobile === true)
         setLateWarningsEnabled(data.late_warnings_enabled === true)
+        setAgreementsEnabled(data.agreements_enabled === true)
         // AI toggles — default to ON if the column is missing or null (existing behavior)
         setGroomerAiEnabled(data.groomer_ai_enabled !== false)
         setClientAiBookingEnabled(data.client_ai_booking_enabled !== false)
@@ -314,6 +318,7 @@ export default function ShopSettings() {
         hours: hours || null,
         is_mobile: isMobile,
         late_warnings_enabled: lateWarningsEnabled,
+        agreements_enabled: agreementsEnabled,
         groomer_ai_enabled: groomerAiEnabled,
         client_ai_booking_enabled: clientAiBookingEnabled,
         // Payment policy toggles (Phase 5)
@@ -990,6 +995,29 @@ export default function ShopSettings() {
             </label>
           </div>
         )}
+
+        {/* Agreements toggle — when ON, new clients are required to sign your
+            grooming + boarding waivers before they can use the portal. Off by
+            default since not all shops use waivers. Edit waiver text in the
+            Agreements page (sidebar). */}
+        <div style={{ marginBottom: '14px', padding: '12px 14px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={agreementsEnabled}
+              onChange={(e) => setAgreementsEnabled(e.target.checked)}
+              style={{ marginTop: '3px', width: '18px', height: '18px', cursor: 'pointer', accentColor: '#2563eb' }}
+            />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#1f2937' }}>
+                📜 Require clients to sign agreements
+              </div>
+              <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px', lineHeight: '1.4' }}>
+                When ON, new clients must sign your <strong>grooming + boarding waivers</strong> at first portal login (covers late fees, matted/pelted dog liability, etc.). Edit the waiver text in the <strong>Agreements</strong> page in your sidebar. <em>Off by default — turn on if you use signed waivers in your shop.</em>
+              </div>
+            </div>
+          </label>
+        </div>
 
         <TextArea label="Hours" value={hours} onChange={setHours} placeholder="Mon–Sat 8am–6pm, Closed Sundays" />
       </div>

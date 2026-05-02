@@ -14,6 +14,7 @@ const TABS = [
   { key: 'vaccinations', label: '💉 Vaccinations' },
   { key: 'payments', label: '💳 Payments' },
   { key: 'notes', label: '📝 Notes' },
+  { key: 'agreements', label: '📜 Agreements' },
 ]
 
 // Freeform relationship suggestions (shown as datalist in the form)
@@ -64,6 +65,9 @@ export default function ClientDetail() {
   const [noteForPet, setNoteForPet] = useState('') // pet_id for grooming notes
   const [savingNote, setSavingNote] = useState(false)
   const [groomingNotes, setGroomingNotes] = useState([]) // per-pet grooming notes
+  // Signed agreements state — list of waivers this client has signed
+  const [signedAgreements, setSignedAgreements] = useState([])
+  const [loadingAgreements, setLoadingAgreements] = useState(false)
   const [clientPayments, setClientPayments] = useState([]) // actual payment records from payments table
   const [clientOutstanding, setClientOutstanding] = useState({ total: 0, appointments: [] })
   const [upcomingAppts, setUpcomingAppts] = useState([])
@@ -171,6 +175,7 @@ export default function ClientDetail() {
     if (activeTab === 'payments') fetchClientPayments()
     if (activeTab === 'upcoming') fetchUpcomingAppointments()
     if (activeTab === 'contacts') fetchContacts()
+    if (activeTab === 'agreements') fetchSignedAgreements()
   }, [activeTab, id])
 
   // Fetch ALL real payments for this client (from payments table)
@@ -446,6 +451,27 @@ export default function ClientDetail() {
     }
     setLoadingTab(false)
   }
+
+  // Fetch the signed agreements for this client (Phase A — Agreements feature).
+  // We pull the linked agreement title + type so we can display "Grooming Waiver
+  // signed Apr 30, 2026" rather than just an opaque id.
+  const fetchSignedAgreements = async () => {
+    setLoadingAgreements(true)
+    try {
+      const { data } = await supabase
+        .from('signed_agreements')
+        .select('id, signed_at, signature_text, signature_image, agreement_content_snapshot, ip_address, user_agent, agreements(id, type, title)')
+        .eq('client_id', id)
+        .order('signed_at', { ascending: false })
+      setSignedAgreements(data || [])
+    } catch (err) {
+      console.error('[ClientDetail] fetchSignedAgreements error:', err)
+      setSignedAgreements([])
+    } finally {
+      setLoadingAgreements(false)
+    }
+  }
+
 
   const saveNote = async () => {
     if (!newNote.trim()) return
@@ -2228,6 +2254,76 @@ export default function ClientDetail() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ═══════ AGREEMENTS TAB ═══════ */}
+        {activeTab === 'agreements' && (
+          <div className="cp-card">
+            <h3 className="cp-card-title">📜 Signed Agreements</h3>
+            {loadingAgreements ? (
+              <div style={{ padding: '20px', color: '#6b7280' }}>Loading…</div>
+            ) : signedAgreements.length === 0 ? (
+              <div style={{ padding: '20px', color: '#6b7280', fontStyle: 'italic' }}>
+                No agreements signed yet. The client will be prompted to sign at first portal login.
+              </div>
+            ) : (
+              signedAgreements.map((sig) => (
+                <div key={sig.id} style={{
+                  background: '#f9fafb',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '10px',
+                  padding: '14px 16px',
+                  marginBottom: '12px',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: 700, color: '#111827' }}>
+                      {sig.agreements?.type === 'grooming' ? '✂️' : '🏠'} {sig.agreements?.title || 'Agreement'}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                      Signed {new Date(sig.signed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {' at '}
+                      {new Date(sig.signed_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                    </div>
+                  </div>
+
+                  {/* Typed signature */}
+                  {sig.signature_text && (
+                    <div style={{ fontSize: '13px', color: '#374151', marginBottom: '6px' }}>
+                      <strong>Typed name:</strong>{' '}
+                      <span style={{ fontFamily: 'cursive', fontSize: '15px', color: '#111827' }}>
+                        {sig.signature_text}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Drawn signature image */}
+                  {sig.signature_image && (
+                    <div style={{ marginTop: '8px' }}>
+                      <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Drawn signature:</div>
+                      <img
+                        src={sig.signature_image}
+                        alt="Drawn signature"
+                        style={{
+                          maxWidth: '300px',
+                          maxHeight: '100px',
+                          background: '#fff',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '6px',
+                          padding: '4px',
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {sig.user_agent && (
+                    <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '8px', fontStyle: 'italic' }}>
+                      Device: {sig.user_agent.slice(0, 80)}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         )}
 

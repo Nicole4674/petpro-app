@@ -9,6 +9,7 @@ import AddClient from './pages/AddClient'
 import ClientDetail from './pages/ClientDetail'
 import AddPet from './pages/AddPet'
 import Pricing from './pages/Pricing'
+import Agreements from './pages/Agreements'
 import Plans from './pages/Plans'
 import Calendar from './pages/Calendar'
 import FlaggedBookings from './pages/FlaggedBookings'
@@ -89,6 +90,7 @@ function RootRedirect({ session }) {
     return <SubscriptionGate><Dashboard /></SubscriptionGate>
 }
 import ClientPortalDashboard from './pages/ClientPortalDashboard'
+import PortalAgreements from './pages/PortalAgreements'
 import ClientPortalMessages from './pages/ClientPortalMessages'
 import ClientPortalThread from './pages/ClientPortalThread'
 import ClientPortalCards from './pages/ClientPortalCards'
@@ -186,6 +188,7 @@ function App() {
                     <Route path="/portal/login" element={<ClientLogin />} />
                     <Route path="/portal/confirmed" element={<EmailConfirmed />} />
                     <Route path="/portal" element={session ? <ClientPortalDashboard /> : <Navigate to="/portal/login" />} />
+                    <Route path="/portal/agreements" element={session ? <PortalAgreements /> : <Navigate to="/portal/login" />} />
                     <Route path="/portal/messages" element={session ? <ClientPortalMessages /> : <Navigate to="/portal/login" />} />
                     <Route path="/portal/messages/:threadId" element={session ? <ClientPortalThread /> : <Navigate to="/portal/login" />} />
                     <Route path="/portal/cards" element={session ? <ClientPortalCards /> : <Navigate to="/portal/login" />} />
@@ -196,6 +199,7 @@ function App() {
                     <Route path="/clients/:clientId/pets/new" element={gate(session, <AddPet />)} />
                     <Route path="/pets/:id" element={gate(session, <PetDetail />)} />
                     <Route path="/pricing" element={gate(session, <Pricing />)} />
+                    <Route path="/agreements" element={gate(session, <Agreements />)} />
                     <Route path="/calendar" element={gate(session, <Calendar />)} />
                     {/* Today's Route — mobile groomer feature (Phase 2) */}
                     <Route path="/route" element={gate(session, <Route2 />)} />

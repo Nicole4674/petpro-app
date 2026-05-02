@@ -150,6 +150,45 @@ export default function ClientPortalDashboard() {
       }
       setClient(clientData)
 
+      // 2a. AGREEMENTS GATE — only enforced if the groomer's shop has
+      //    agreements_enabled = true in shop_settings. Skipped entirely
+      //    for shops that don't use waivers (Nicole's preference).
+      try {
+        const { data: shopAgreementsToggle } = await supabase
+          .from('shop_settings')
+          .select('agreements_enabled')
+          .eq('groomer_id', clientData.groomer_id)
+          .maybeSingle()
+
+        const agreementsRequired = !!(shopAgreementsToggle && shopAgreementsToggle.agreements_enabled)
+
+        if (agreementsRequired) {
+          const { data: activeAgs } = await supabase
+            .from('agreements')
+            .select('id')
+            .eq('groomer_id', clientData.groomer_id)
+            .eq('is_active', true)
+
+          if (activeAgs && activeAgs.length > 0) {
+            const { data: signedAgs } = await supabase
+              .from('signed_agreements')
+              .select('agreement_id')
+              .eq('client_id', clientData.id)
+            const signedIds = new Set((signedAgs || []).map(s => s.agreement_id))
+            const hasUnsigned = activeAgs.some(a => !signedIds.has(a.id))
+            if (hasUnsigned) {
+              navigate('/portal/agreements', { replace: true })
+              return
+            }
+          }
+        }
+      } catch (gateErr) {
+        // Non-blocking — if the agreements check fails for any reason
+        // (table doesn't exist yet, RLS issue), we let them through to the
+        // dashboard rather than locking them out entirely.
+        console.warn('[ClientPortal] Agreements gate skipped:', gateErr)
+      }
+
       // 2b. Load their extra contacts (pickup people, emergency, etc.)
       fetchMyContacts(clientData.id)
 
