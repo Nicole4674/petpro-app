@@ -8,6 +8,7 @@ import { resolveHighPriorityTags } from '../lib/behaviorTags'
 import { printDailySheet } from '../lib/printDailySheet'
 import ReportCardModal from '../components/ReportCardModal'
 import MobileDriveTimeWarning from '../components/MobileDriveTimeWarning'
+import SmartBookModal from '../components/SmartBookModal'
 import { formatPhone } from '../lib/phone'
 import { mapsUrl, telUrl } from '../lib/maps'
 
@@ -148,6 +149,10 @@ export default function Calendar() {
     const location = useLocation()
     // Pre-fill values from URL params (used by "Book Again" flow on client profile)
     const [preFillBooking, setPreFillBooking] = useState(null)
+    // Smart Book modal — opens a separate modal that asks PetPro AI to pick
+    // the top 3 best slots for a pet. When user picks one, we close this and
+    // open the existing AddAppointmentModal pre-filled with the picked slot.
+    const [showSmartBook, setShowSmartBook] = useState(false)
     // Reschedule modal — holds the appointment being rescheduled
     const [reschedulingAppt, setReschedulingAppt] = useState(null)
     const [cancellingAppt, setCancellingAppt] = useState(null) // Task #19 — recurring cancel flow
@@ -2473,10 +2478,54 @@ export default function Calendar() {
                     >
                         + New Appointment
                     </button>
+                    {/* 🪄 Smart Book — opens AI-driven slot picker. */}
+                    <button
+                        style={{
+                            width: '100%',
+                            marginTop: '8px',
+                            padding: '10px 14px',
+                            background: '#fff',
+                            color: '#7c3aed',
+                            border: '2px solid #7c3aed',
+                            borderRadius: '8px',
+                            fontWeight: 700,
+                            fontSize: '14px',
+                            cursor: 'pointer',
+                        }}
+                        onClick={() => setShowSmartBook(true)}
+                        title="Let PetPro AI pick the 3 best slots for any pet"
+                    >
+                        🪄 Smart Book
+                    </button>
                         </>
                     )}
                 </div>
             </div>
+
+            {/* 🪄 Smart Book Modal — AI picks top 3 slots, then we hand off to AddAppointmentModal */}
+            {showSmartBook && (
+                <SmartBookModal
+                    clients={clients}
+                    pets={pets}
+                    services={services}
+                    staffMembers={staffMembers}
+                    onClose={() => setShowSmartBook(false)}
+                    onSlotPicked={(picked) => {
+                        // Picked slot from PetPro AI → close Smart Book + open
+                        // existing AddAppointmentModal pre-filled with everything
+                        setShowSmartBook(false)
+                        setSelectedDate(picked.date)
+                        setSelectedTime(picked.start_time)
+                        setPreFillBooking({
+                            client_id: picked.client_id,
+                            pet_id: picked.pet_id,
+                            service_id: picked.service_id,
+                            staff_id: picked.staff_id,
+                        })
+                        setShowAddForm(true)
+                    }}
+                />
+            )}
 
             {/* Add Appointment Modal */}
             {showAddForm && (
