@@ -36,7 +36,7 @@ export default function SmartBookModal({ clients, pets, services, staffMembers, 
   const [staffId, setStaffId] = useState('')
   // Auto-pick the only active staff member if there's just one (1-groomer shop)
   useEffect(() => {
-    const activeStaff = (staffMembers || []).filter((s) => s.status === 'active')
+    const activeStaff = (staffMembers || []).filter((s) => s.status !== 'inactive' && s.status !== 'archived')
     if (activeStaff.length === 1 && !staffId) {
       setStaffId(activeStaff[0].id)
     }
@@ -316,7 +316,7 @@ export default function SmartBookModal({ clients, pets, services, staffMembers, 
                   }}
                 >
                   <option value="">— Pick a groomer —</option>
-                  {(staffMembers || []).filter((s) => s.status === 'active').map((s) => (
+                  {(staffMembers || []).filter((s) => s.status !== 'inactive' && s.status !== 'archived').map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.first_name} {s.last_name || ''}
                     </option>
