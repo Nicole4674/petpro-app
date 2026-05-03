@@ -143,6 +143,112 @@ serve(async (req: Request) => {
 // NEW SUBSCRIPTION: fires when a groomer finishes Stripe checkout.
 // We use client_reference_id (passed in the Subscribe URL) to know which
 // groomer row to update.
+// ════════════ TOKEN PACK PAYMENT LINK MAPPING ════════════
+// Maps each Stripe Payment Link URL suffix → token pack size.
+// Add a new line here whenever a new pack's Stripe Payment Link is created.
+//
+// To add a new pack:
+//   1. Create the Stripe Payment Link in dashboard
+//   2. Copy the URL (e.g. https://buy.stripe.com/abc123xyz)
+//   3. Add an entry below: 'abc123xyz': <token count>
+//   4. Redeploy this webhook
+const PACK_LINK_TO_TOKENS: Record<string, number> = {
+  // 🧪 TEST PACK — REMOVE before launch
+  'bJedRb3EVdhocsnbBV7ok04': 1,
+  // Production packs
+  'dRm14p5N32CKboj6hB7ok05': 250,
+  '6oUdRb5N3b9g4ZVbBV7ok06': 500,
+  '00w8wR3EVa5c1NJfSb7ok07': 1000,
+}
+
+// Helper — extract the URL suffix from a payment_link string returned by Stripe.
+// Stripe returns either the URL ('https://buy.stripe.com/abc123') or the
+// plink_ ID — we need to handle both. Easiest: fetch the link and read its url.
+async function getPackSizeFromSession(session: Stripe.Checkout.Session): Promise<number | null> {
+  const paymentLinkRef = session.payment_link
+  if (!paymentLinkRef) return null
+
+  const linkId = typeof paymentLinkRef === 'string' ? paymentLinkRef : paymentLinkRef.id
+  try {
+    const link = await stripe.paymentLinks.retrieve(linkId)
+    if (!link.url) return null
+    // Extract the suffix after the last slash
+    const suffix = link.url.split('/').pop() || ''
+    return PACK_LINK_TO_TOKENS[suffix] ?? null
+  } catch (err) {
+    console.error('[token-pack] Could not fetch payment link', linkId, err)
+    return null
+  }
+}
+
+// ════════════ TOKEN PACK CHECKOUT HANDLER ════════════
+// Runs when a groomer pays for a top-up token pack. Adds tokens to their
+// Extra balance via the add_topup_tokens RPC + logs the purchase.
+async function handleTokenPackCheckout(
+  session: Stripe.Checkout.Session,
+  groomerId: string,
+  packSize: number
+) {
+  const amountCents = session.amount_total ?? 0
+  const sessionId = session.id
+  const paymentIntentId = typeof session.payment_intent === 'string'
+    ? session.payment_intent
+    : session.payment_intent?.id ?? null
+
+  // Idempotency check — if we already processed this session, skip
+  const { data: existing } = await supabase
+    .from('token_purchases')
+    .select('id, status')
+    .eq('stripe_session_id', sessionId)
+    .maybeSingle()
+
+  if (existing && existing.status === 'completed') {
+    console.log(`[token-pack] Session ${sessionId} already completed — skipping (idempotent)`)
+    return
+  }
+
+  // Insert (or update) the purchase record
+  if (!existing) {
+    const { error: insertErr } = await supabase
+      .from('token_purchases')
+      .insert({
+        groomer_id: groomerId,
+        pack_size: packSize,
+        amount_cents: amountCents,
+        stripe_session_id: sessionId,
+        stripe_payment_intent_id: paymentIntentId,
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+      })
+    if (insertErr) {
+      console.error('[token-pack] Insert purchase failed:', insertErr)
+      throw insertErr
+    }
+  } else {
+    await supabase
+      .from('token_purchases')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        stripe_payment_intent_id: paymentIntentId,
+      })
+      .eq('id', existing.id)
+  }
+
+  // Credit the tokens to the groomer's Extra balance via the RPC
+  const { data: rpcResult, error: rpcErr } = await supabase.rpc('add_topup_tokens', {
+    p_groomer_id: groomerId,
+    p_token_count: packSize,
+  })
+
+  if (rpcErr) {
+    console.error('[token-pack] add_topup_tokens RPC failed:', rpcErr)
+    throw rpcErr
+  }
+
+  console.log(`[token-pack] Added ${packSize} tokens to groomer ${groomerId}. New balance:`, rpcResult)
+}
+
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   const groomerId = session.client_reference_id
   const customerId =
@@ -156,8 +262,19 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     console.warn('checkout.session.completed had no client_reference_id. Cannot match to a groomer.')
     return
   }
+
+  // ════════════ TOKEN PACK ROUTING ════════════
+  // Before treating this as a subscription, check if it's actually a one-time
+  // token pack purchase (matches one of our PACK_LINK_TO_TOKENS entries).
+  const packSize = await getPackSizeFromSession(session)
+  if (packSize !== null) {
+    await handleTokenPackCheckout(session, groomerId, packSize)
+    return
+  }
+  // ════════════ End token pack routing ════════════
+
   if (!subscriptionId) {
-    console.warn('No subscription on this session (one-time payment?). Skipping.')
+    console.warn('No subscription on this session (one-time payment, not a token pack). Skipping.')
     return
   }
 
