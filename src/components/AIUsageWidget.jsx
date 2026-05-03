@@ -26,8 +26,6 @@ import { supabase } from '../lib/supabase'
 //   • metadata.pack_size matching the tokens count below
 // =====================================================================
 const TOPUP_PACKS = [
-  // 🧪 TEST PACK — REMOVE before going live to real customers
-  { tokens: 1,    priceLabel: '$1.00',  label: '🧪 1 token · $1.00 (TEST)', paymentLink: 'https://buy.stripe.com/bJedRb3EVdhocsnbBV7ok04' },
   { tokens: 250,  priceLabel: '$24.99', label: '250 tokens · $24.99',  paymentLink: 'https://buy.stripe.com/dRm14p5N32CKboj6hB7ok05' },
   { tokens: 500,  priceLabel: '$44.99', label: '500 tokens · $44.99 ⭐ best value', paymentLink: 'https://buy.stripe.com/6oUdRb5N3b9g4ZVbBV7ok06' },
   { tokens: 1000, priceLabel: '$84.99', label: '1,000 tokens · $84.99', paymentLink: 'https://buy.stripe.com/00w8wR3EVa5c1NJfSb7ok07' },

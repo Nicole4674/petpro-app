@@ -153,8 +153,6 @@ serve(async (req: Request) => {
 //   3. Add an entry below: 'abc123xyz': <token count>
 //   4. Redeploy this webhook
 const PACK_LINK_TO_TOKENS: Record<string, number> = {
-  // 🧪 TEST PACK — REMOVE before launch
-  'bJedRb3EVdhocsnbBV7ok04': 1,
   // Production packs
   'dRm14p5N32CKboj6hB7ok05': 250,
   '6oUdRb5N3b9g4ZVbBV7ok06': 500,
