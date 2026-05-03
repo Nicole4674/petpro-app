@@ -13,6 +13,7 @@ export default function PayrollDashboard() {
     ytdTips: 0,
     ytdNet: 0,
     ytdTaxes: 0,
+    ytdDeductions: 0,
     paycheckCount: 0,
     staffCount: 0
   })
@@ -54,11 +55,11 @@ export default function PayrollDashboard() {
     // math stays visually sane: Gross + Tips − Taxes − Deductions = Net.
     var { data: paychecks } = await supabase
       .from('paychecks')
-      .select('gross_pay, tips, net_pay, federal_tax, state_tax, social_security_tax, medicare_tax')
+      .select('gross_pay, tips, net_pay, federal_tax, state_tax, social_security_tax, medicare_tax, pre_tax_deductions_total, post_tax_deductions_total')
       .eq('groomer_id', user.id)
       .gte('created_at', yearStart)
 
-    var ytdGross = 0, ytdTips = 0, ytdNet = 0, ytdTaxes = 0, paycheckCount = 0
+    var ytdGross = 0, ytdTips = 0, ytdNet = 0, ytdTaxes = 0, ytdDeductions = 0, paycheckCount = 0
     if (paychecks && paychecks.length > 0) {
       paycheckCount = paychecks.length
       paychecks.forEach(function(p) {
@@ -69,6 +70,11 @@ export default function PayrollDashboard() {
                   + parseFloat(p.state_tax || 0)
                   + parseFloat(p.social_security_tax || 0)
                   + parseFloat(p.medicare_tax || 0)
+        // Other deductions (401k, health insurance, garnishments, etc.) — kept
+        // separate from taxes so the YTD card math reads cleanly:
+        //   Gross + Tips − Taxes − Deductions = Net
+        ytdDeductions += parseFloat(p.pre_tax_deductions_total || 0)
+                       + parseFloat(p.post_tax_deductions_total || 0)
       })
     }
 
@@ -182,6 +188,7 @@ export default function PayrollDashboard() {
       ytdTips: ytdTips,
       ytdNet: ytdNet,
       ytdTaxes: ytdTaxes,
+      ytdDeductions: ytdDeductions,
       paycheckCount: paycheckCount,
       staffCount: staffCount
     })
@@ -303,6 +310,12 @@ export default function PayrollDashboard() {
         <div className="pd-stat-card pd-stat-tax">
           <div className="pd-stat-label">YTD Taxes Withheld</div>
           <div className="pd-stat-value">{money(stats.ytdTaxes)}</div>
+          <div className="pd-stat-hint">federal + state + SS + Medicare</div>
+        </div>
+        <div className="pd-stat-card pd-stat-tax">
+          <div className="pd-stat-label">YTD Other Deductions</div>
+          <div className="pd-stat-value">{money(stats.ytdDeductions)}</div>
+          <div className="pd-stat-hint">401k, health, garnishments, etc.</div>
         </div>
         <div className="pd-stat-card pd-stat-count">
           <div className="pd-stat-label">Paychecks Run</div>
