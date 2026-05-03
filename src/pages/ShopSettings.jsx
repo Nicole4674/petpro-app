@@ -53,6 +53,12 @@ export default function ShopSettings() {
   // Agreements toggle — opt-in. Some groomers (like Nicole) don't use waivers
   // and don't want clients prompted to sign at portal login. Off by default.
   var [agreementsEnabled, setAgreementsEnabled] = useState(false)
+  // Waitlist auto-notify quiet hours — per-shop config so shops in different
+  // timezones don't text clients at 6 AM their time. Defaults match the old
+  // hardcoded behavior (9 AM - 8 PM, America/Chicago).
+  var [waitlistQuietStartHour, setWaitlistQuietStartHour] = useState(9)
+  var [waitlistQuietEndHour, setWaitlistQuietEndHour] = useState(20)
+  var [waitlistTimezone, setWaitlistTimezone] = useState('America/Chicago')
   // AI toggles — tier 1 (manual / "Moe Go Mode") vs tier 2 (full AI brain)
   var [groomerAiEnabled, setGroomerAiEnabled] = useState(true)
   var [clientAiBookingEnabled, setClientAiBookingEnabled] = useState(true)
@@ -202,6 +208,10 @@ export default function ShopSettings() {
         setPassFeesToClient(data.pass_fees_to_client === true)
         setAutoCancelUnpaid(data.auto_cancel_unpaid_bookings === true)
         setAutoCancelMinutes(data.auto_cancel_unpaid_minutes != null ? String(data.auto_cancel_unpaid_minutes) : '15')
+        // Waitlist quiet hours (defaults to 9-20 / Chicago if column is null)
+        if (typeof data.waitlist_quiet_start_hour === 'number') setWaitlistQuietStartHour(data.waitlist_quiet_start_hour)
+        if (typeof data.waitlist_quiet_end_hour === 'number') setWaitlistQuietEndHour(data.waitlist_quiet_end_hour)
+        if (data.waitlist_timezone) setWaitlistTimezone(data.waitlist_timezone)
       }
 
       // Smart Nudges + Stripe Connect status — both live on the groomers
@@ -327,6 +337,10 @@ export default function ShopSettings() {
         pass_fees_to_client: passFeesToClient,
         auto_cancel_unpaid_bookings: autoCancelUnpaid,
         auto_cancel_unpaid_minutes: parseInt(autoCancelMinutes) || 15,
+        // Waitlist quiet hours
+        waitlist_quiet_start_hour: waitlistQuietStartHour,
+        waitlist_quiet_end_hour: waitlistQuietEndHour,
+        waitlist_timezone: waitlistTimezone,
       }
 
       var { error: upsertError } = await supabase
@@ -552,6 +566,89 @@ export default function ShopSettings() {
             🐾 Classic Mode activated — pure manual booking, no AI anywhere.
           </div>
         )}
+      </div>
+
+      {/* Waitlist Auto-Notify Quiet Hours */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+          <span style={{ fontSize: '22px' }}>⏰</span>
+          <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#1f2937' }}>Waitlist Notification Hours</h2>
+        </div>
+        <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#6b7280', lineHeight: 1.5 }}>
+          When a slot opens, PetPro AI texts the waitlist — but only during your shop's daytime. Pick the window + your timezone so clients never get a 6 AM ping. Outside this window, the offer waits until the next slot opens during the day.
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+          {/* Start hour */}
+          <div>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+              Start sending at
+            </label>
+            <select
+              value={waitlistQuietStartHour}
+              onChange={(e) => setWaitlistQuietStartHour(parseInt(e.target.value))}
+              style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', background: '#fff' }}
+            >
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={h}>
+                  {h === 0 ? '12 AM (midnight)' : h < 12 ? `${h} AM` : h === 12 ? '12 PM (noon)' : `${h - 12} PM`}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* End hour */}
+          <div>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+              Stop sending at
+            </label>
+            <select
+              value={waitlistQuietEndHour}
+              onChange={(e) => setWaitlistQuietEndHour(parseInt(e.target.value))}
+              style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', background: '#fff' }}
+            >
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={h}>
+                  {h === 0 ? '12 AM (midnight)' : h < 12 ? `${h} AM` : h === 12 ? '12 PM (noon)' : `${h - 12} PM`}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Timezone */}
+          <div>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+              Your timezone
+            </label>
+            <select
+              value={waitlistTimezone}
+              onChange={(e) => setWaitlistTimezone(e.target.value)}
+              style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', background: '#fff' }}
+            >
+              <option value="America/New_York">Eastern (New York)</option>
+              <option value="America/Chicago">Central (Chicago)</option>
+              <option value="America/Denver">Mountain (Denver)</option>
+              <option value="America/Phoenix">Mountain - No DST (Phoenix)</option>
+              <option value="America/Los_Angeles">Pacific (Los Angeles)</option>
+              <option value="America/Anchorage">Alaska (Anchorage)</option>
+              <option value="Pacific/Honolulu">Hawaii (Honolulu)</option>
+              <option value="America/Toronto">Canada Eastern (Toronto)</option>
+              <option value="America/Vancouver">Canada Pacific (Vancouver)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{
+          padding: '10px 14px',
+          background: '#f0fdf4',
+          border: '1px solid #86efac',
+          borderRadius: '8px',
+          fontSize: '13px',
+          color: '#166534',
+          lineHeight: 1.5,
+        }}>
+          ✅ Currently sending waitlist offers from <strong>{waitlistQuietStartHour === 0 ? '12 AM' : waitlistQuietStartHour < 12 ? `${waitlistQuietStartHour} AM` : waitlistQuietStartHour === 12 ? '12 PM' : `${waitlistQuietStartHour - 12} PM`}</strong> to <strong>{waitlistQuietEndHour === 0 ? '12 AM' : waitlistQuietEndHour < 12 ? `${waitlistQuietEndHour} AM` : waitlistQuietEndHour === 12 ? '12 PM' : `${waitlistQuietEndHour - 12} PM`}</strong> ({waitlistTimezone.split('/').pop().replace('_', ' ')} time). Click <strong>Save Settings</strong> below to apply changes.
+        </div>
       </div>
 
       {/* AI Usage widget — shows used / cap for current month */}

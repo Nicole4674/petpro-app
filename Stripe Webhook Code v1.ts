@@ -62,6 +62,59 @@ const PRICE_TO_TIER: Record<string, string> = {
   'price_1TP34PQ63eOdno0TCNtSNRyv': 'growing',   // $399
 }
 
+// ════════════ Per-Tier Monthly AI Token Allocation ════════════
+// How many PetPro AI tokens each plan gets per billing cycle.
+// Updated automatically on subscribe + plan-change via the helper below.
+const TIER_TO_MONTHLY_TOKENS: Record<string, number> = {
+  'basic':    500,   // light user
+  'pro':      800,   // regular daily AI use
+  'pro_plus': 1000,  // power user
+  'growing':  3000,  // multi-staff facility
+}
+
+// Helper — sets the groomer's monthly token allocation based on their plan tier.
+// Creates the balance row if it doesn't exist; updates monthly_total + resets
+// monthly_remaining to the new total (so an upgrade unlocks the bigger bucket
+// immediately instead of waiting until the next billing period).
+async function syncTokenAllocationForTier(groomerId: string, tier: string | null) {
+  if (!tier) return
+  const monthlyTokens = TIER_TO_MONTHLY_TOKENS[tier]
+  if (monthlyTokens === undefined) {
+    console.warn(`[token-tier-sync] Unknown tier "${tier}" — skipping token allocation update`)
+    return
+  }
+
+  const { data: existing } = await supabase
+    .from('groomer_token_balance')
+    .select('groomer_id, monthly_tokens_total')
+    .eq('groomer_id', groomerId)
+    .maybeSingle()
+
+  if (!existing) {
+    // First-time subscriber — create their balance row with the right allocation
+    await supabase.from('groomer_token_balance').insert({
+      groomer_id: groomerId,
+      monthly_tokens_remaining: monthlyTokens,
+      monthly_tokens_total: monthlyTokens,
+      monthly_period_start: new Date().toISOString().slice(0, 10),
+    })
+    console.log(`[token-tier-sync] Created balance for ${groomerId}: ${monthlyTokens} tokens (${tier})`)
+  } else if (existing.monthly_tokens_total !== monthlyTokens) {
+    // Existing subscriber whose tier changed — update allocation + refill bucket
+    // to the new total. Don't take tokens away if they downgrade mid-cycle.
+    await supabase
+      .from('groomer_token_balance')
+      .update({
+        monthly_tokens_total: monthlyTokens,
+        monthly_tokens_remaining: monthlyTokens,
+        monthly_period_start: new Date().toISOString().slice(0, 10),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('groomer_id', groomerId)
+    console.log(`[token-tier-sync] Updated ${groomerId} to ${monthlyTokens} tokens (${tier})`)
+  }
+}
+
 // Helper: convert Stripe's unix-second timestamp to an ISO string (or null)
 function tsToIso(ts: number | null | undefined): string | null {
   return ts ? new Date(ts * 1000).toISOString() : null
@@ -307,6 +360,13 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   } catch (emailErr) {
     console.error('[stripe-webhook] Welcome email failed (non-fatal):', emailErr)
   }
+
+  // Sync token allocation to match the new tier
+  try {
+    await syncTokenAllocationForTier(groomerId, tier)
+  } catch (tokenErr) {
+    console.error('[stripe-webhook] Token allocation sync failed (non-fatal):', tokenErr)
+  }
 }
 
 // ─── WELCOME EMAIL HELPER ──────────────────────────────────────────────
@@ -471,6 +531,23 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
 
   if (error) throw error
   console.log(`Subscription updated for customer ${customerId}: ${tier} / ${subscription.status}`)
+
+  // Sync token allocation to match the new tier (handles plan upgrades + downgrades).
+  // Look up the groomer_id by customer ID since this handler doesn't get it directly.
+  if (tier) {
+    try {
+      const { data: groomerRow } = await supabase
+        .from('groomers')
+        .select('id')
+        .eq('stripe_customer_id', customerId)
+        .maybeSingle()
+      if (groomerRow?.id) {
+        await syncTokenAllocationForTier(groomerRow.id, tier)
+      }
+    } catch (tokenErr) {
+      console.error('[stripe-webhook] Token allocation sync failed on update (non-fatal):', tokenErr)
+    }
+  }
 }
 
 // CANCELLATION

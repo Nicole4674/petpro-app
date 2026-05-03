@@ -309,16 +309,32 @@ Deno.serve(async function (req) {
       )
     }
 
-    // ─── Quiet-hours guard ─────────────────────────────────────────────────
-    // Don't send waitlist offers outside 9 AM – 8 PM. Real reason: MoeGo
-    // messages at 8 AM and clients complain. We start at 9 AM. Hardcoded to
-    // America/Chicago for now since that's the only shop in production. When
-    // we onboard groomers in other timezones, move this to shop_settings.
-    // The message simply won't fire — the next slot opening during business
-    // hours will offer the same waitlist person.
+    // ─── Quiet-hours guard (per-shop config) ─────────────────────────────
+    // Each shop sets their own quiet window + timezone in Shop Settings.
+    // Defaults (matching the original hardcoded behavior): 9 AM - 8 PM,
+    // America/Chicago. The message simply won't fire — the next slot opening
+    // during the shop's daytime will offer the same waitlist person.
+    var quietStartHour = 9
+    var quietEndHour = 20
+    var quietTimezone = 'America/Chicago'
+    try {
+      var { data: shopRow } = await supabaseAdmin
+        .from('shop_settings')
+        .select('waitlist_quiet_start_hour, waitlist_quiet_end_hour, waitlist_timezone')
+        .eq('groomer_id', groomerId)
+        .maybeSingle()
+      if (shopRow) {
+        if (typeof shopRow.waitlist_quiet_start_hour === 'number') quietStartHour = shopRow.waitlist_quiet_start_hour
+        if (typeof shopRow.waitlist_quiet_end_hour === 'number') quietEndHour = shopRow.waitlist_quiet_end_hour
+        if (shopRow.waitlist_timezone) quietTimezone = shopRow.waitlist_timezone
+      }
+    } catch (settingsErr) {
+      console.warn('[waitlist-notify] shop_settings load failed — using defaults:', settingsErr)
+    }
+
     try {
       var hourStr = new Date().toLocaleString('en-US', {
-        timeZone: 'America/Chicago',
+        timeZone: quietTimezone,
         hour: '2-digit',
         hour12: false,
       })
@@ -326,13 +342,19 @@ Deno.serve(async function (req) {
       var nowLocalHour = parseInt(hourStr, 10)
       if (Number.isNaN(nowLocalHour)) nowLocalHour = 12
       if (nowLocalHour === 24) nowLocalHour = 0
-      // 9 AM ≤ hour < 20 (8 PM) is the "send" window
-      if (nowLocalHour < 9 || nowLocalHour >= 20) {
-        console.log('[waitlist-notify] Quiet hours active — skipping (local hour:', nowLocalHour, ')')
+      // Inside the shop's send window: start <= hour < end
+      if (nowLocalHour < quietStartHour || nowLocalHour >= quietEndHour) {
+        console.log('[waitlist-notify] Outside shop\'s send window — skipping. local hour:', nowLocalHour, '| window:', quietStartHour, '-', quietEndHour, '|', quietTimezone)
+        // Format hour labels for the friendly response message
+        function hourLabel(h) {
+          var ampm = h >= 12 ? 'PM' : 'AM'
+          var h12 = h % 12 || 12
+          return h12 + ' ' + ampm
+        }
         return new Response(
           JSON.stringify({
             notified: false,
-            reason: 'Outside business hours (9 AM – 8 PM CT). Will offer next time a slot opens during the day.'
+            reason: 'Outside your shop\'s send window (' + hourLabel(quietStartHour) + ' - ' + hourLabel(quietEndHour) + ', ' + quietTimezone + '). Will offer next time a slot opens during the day.'
           }),
           { status: 200, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders) }
         )
