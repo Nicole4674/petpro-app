@@ -99,6 +99,10 @@ export default function Signup() {
       password,
       options: {
         emailRedirectTo: window.location.origin + '/login',
+        // Cloudflare Turnstile token — Supabase will verify this with Cloudflare
+        // server-side. If invalid/missing, signup is REJECTED. This is what
+        // actually blocks bots (the front-end check alone wasn't enough).
+        captchaToken: turnstileToken,
         data: {
           full_name: fullName,
           business_name: businessName,
