@@ -242,7 +242,20 @@ async function sendWelcomeEmail(groomerId: string, tier: string | null, status: 
         <tr><td style="padding:24px 28px;">
           <div style="font-size:16px;color:#1f2937;margin-bottom:12px;">Hi ${escapeHtmlSafe(firstName)},</div>
           <div style="font-size:14px;color:#4b5563;line-height:1.6;margin-bottom:20px;">
-            Your PetPro account is active and ready. Click below to log in and start setting up your shop, adding clients, and booking appointments.
+            Your PetPro account is active and ready. Here's how to log in:
+          </div>
+
+          <!-- LOGIN CREDENTIALS BOX — explicit so groomers know exactly what to use -->
+          <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:16px 18px;margin-bottom:20px;">
+            <div style="font-size:13px;color:#5b21b6;line-height:1.6;">
+              <div style="margin-bottom:8px;">
+                <span style="font-weight:700;">📧 Login email:</span><br/>
+                <span style="font-size:15px;font-weight:800;color:#111827;word-break:break-all;">${escapeHtmlSafe(groomer.email)}</span>
+              </div>
+              <div>
+                <span style="font-weight:700;">🔑 Password:</span> the one you created at checkout.
+              </div>
+            </div>
           </div>
 
           <div style="text-align:center;margin:24px 0;">
@@ -254,6 +267,11 @@ async function sendWelcomeEmail(groomerId: string, tier: string | null, status: 
           <div style="font-size:13px;color:#6b7280;text-align:center;margin-top:16px;">
             Or copy &amp; paste this link into your browser:<br/>
             <a href="${loginUrl}" style="color:#7c3aed;word-break:break-all;">${loginUrl}</a>
+          </div>
+
+          <!-- FALLBACK NOTICE — covers the rare case where auto-confirm fails -->
+          <div style="margin-top:20px;padding:14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;font-size:13px;color:#92400e;line-height:1.5;">
+            <strong>📬 Got another email asking you to "confirm your email"?</strong> Click the link in THAT email FIRST to activate your account, then come back here to sign in.
           </div>
 
           <div style="margin-top:24px;padding:14px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;font-size:13px;color:#5b21b6;line-height:1.5;">

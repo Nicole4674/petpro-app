@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { Link, useSearchParams, Navigate } from 'react-router-dom'
 
@@ -10,6 +10,11 @@ const PAYMENT_LINKS = {
   pro_plus: 'https://buy.stripe.com/cNi5kF1wN3GO7835dx7ok01',
   growing:  'https://buy.stripe.com/9B614pdfv1yGcsn6hB7ok00',
 }
+
+// Cloudflare Turnstile site key — public, safe to embed in code. Bot
+// protection on the signup form. Pairs with TURNSTILE_SECRET_KEY (server-
+// side) if/when we add edge-function verification later.
+const TURNSTILE_SITE_KEY = '0x4AAAAAADH8RMpMtYfD8GUy'
 
 export default function Signup() {
   const [searchParams] = useSearchParams()
@@ -32,10 +37,57 @@ export default function Signup() {
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(false)
 
+  // Cloudflare Turnstile state — token gets set by Cloudflare's widget
+  // when the visitor passes the bot check. Without a token, signup is blocked.
+  const [turnstileToken, setTurnstileToken] = useState('')
+  const turnstileWidgetRef = useRef(null)
+
+  // Render the Turnstile widget once the script has loaded. We poll briefly
+  // because the script tag in index.html is `async defer` — it may not be
+  // ready when this component mounts. Once the widget's invisible check
+  // passes, the callback fires with a token we attach to the signup payload.
+  useEffect(() => {
+    let widgetId = null
+    const interval = setInterval(() => {
+      if (window.turnstile && turnstileWidgetRef.current && !widgetId) {
+        try {
+          widgetId = window.turnstile.render(turnstileWidgetRef.current, {
+            sitekey: TURNSTILE_SITE_KEY,
+            callback: (token) => setTurnstileToken(token),
+            'error-callback': () => setTurnstileToken(''),
+            'expired-callback': () => setTurnstileToken(''),
+          })
+          clearInterval(interval)
+        } catch (err) {
+          console.warn('[Turnstile] render failed:', err)
+          clearInterval(interval)
+        }
+      }
+    }, 200)
+    // Stop polling after 10 seconds if script never loaded
+    const timeout = setTimeout(() => clearInterval(interval), 10000)
+    return () => {
+      clearInterval(interval)
+      clearTimeout(timeout)
+      if (widgetId && window.turnstile) {
+        try { window.turnstile.remove(widgetId) } catch (e) { /* noop */ }
+      }
+    }
+  }, [])
+
   const handleSignup = async (e) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
+
+    // Block submission if Turnstile didn't pass. Real users always get a
+    // token (even with the invisible/managed widget — Cloudflare handles
+    // it silently). No token = bot or browser blocking the script.
+    if (!turnstileToken) {
+      setError('Please wait for the security check to complete, then try again.')
+      setLoading(false)
+      return
+    }
 
     // Sign up with Supabase auth.
     // emailRedirectTo overrides Supabase's default Site URL (which is set to
@@ -153,9 +205,27 @@ export default function Signup() {
             minLength={6}
             required
           />
+          {/* Cloudflare Turnstile bot check — Managed mode means it's
+              usually invisible (just shows briefly if Cloudflare suspects
+              suspicious behavior). The div is empty until the script
+              renders the widget into it via window.turnstile.render. */}
+          <div
+            ref={turnstileWidgetRef}
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              margin: '12px 0',
+              minHeight: '65px',  // reserves space so the form doesn't jump
+            }}
+          ></div>
+
           {error && <p className="error">{error}</p>}
-          <button type="submit" disabled={loading}>
-            {loading ? 'Creating Account...' : 'Create Account'}
+          <button type="submit" disabled={loading || !turnstileToken}>
+            {loading
+              ? 'Creating Account...'
+              : !turnstileToken
+                ? 'Loading security check…'
+                : 'Create Account'}
           </button>
         </form>
         <p className="switch-auth">
