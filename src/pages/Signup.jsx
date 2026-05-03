@@ -89,71 +89,62 @@ export default function Signup() {
       return
     }
 
-    // Sign up with Supabase auth.
-    // emailRedirectTo overrides Supabase's default Site URL (which is set to
-    // /portal/login for the CLIENT portal) so groomer confirmation links
-    // land on the groomer login page instead. After login they'll get routed
-    // to the dashboard (or /plans if their subscription isn't active yet).
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: window.location.origin + '/login',
-        // Cloudflare Turnstile token — Supabase will verify this with Cloudflare
-        // server-side. If invalid/missing, signup is REJECTED. This is what
-        // actually blocks bots (the front-end check alone wasn't enough).
-        captchaToken: turnstileToken,
-        data: {
+    // Sign up via our custom edge function. This bypasses Supabase's
+    // project-wide CAPTCHA Protection (which would also force CAPTCHA on
+    // login + password reset). Our edge function:
+    //   1. Verifies Turnstile token with Cloudflare server-side
+    //   2. Creates the user via admin API (auto-confirms email — Stripe
+    //      payment is the real verification anyway)
+    //   3. Inserts the groomers row
+    //   4. Returns user_id so we can pass it to Stripe checkout
+    const { data: fnData, error: signUpError } = await supabase.functions.invoke(
+      'signup-groomer-with-captcha',
+      {
+        body: {
+          email,
+          password,
           full_name: fullName,
           business_name: businessName,
+          turnstile_token: turnstileToken,
         },
-      },
-    })
+      }
+    )
 
     if (signUpError) {
-      setError(/captcha/i.test(signUpError.message)
-        ? "The browser security check didn't pass. Try opening this link in Safari or Chrome (NOT from inside Instagram, Facebook, or TikTok). If it still fails, please text the shop and we'll help you get signed up."
-        : signUpError.message)
+      setError(signUpError.message || 'Could not sign up — please try again.')
+      setLoading(false)
+      return
+    }
+    if (fnData?.error) {
+      setError(fnData.error)
+      setLoading(false)
+      return
+    }
+    if (!fnData?.user_id) {
+      setError('Signup succeeded but no user ID returned. Please try signing in.')
       setLoading(false)
       return
     }
 
-    // Create groomer profile in database
-    if (data.user) {
-      const { error: profileError } = await supabase
-        .from('groomers')
-        .insert({
-          id: data.user.id,
-          email: email,
-          full_name: fullName,
-          business_name: businessName,
+    // Fire Google Ads conversion event so Google can attribute this signup
+    // to whichever ad click brought them here. The actual conversion label
+    // gets configured in Google Ads → Tools → Conversions later — for now
+    // this fires a generic 'sign_up' event the algorithm can learn from.
+    if (typeof window !== 'undefined' && typeof window.gtag === 'function') {
+      try {
+        window.gtag('event', 'sign_up', {
+          send_to: 'AW-18122010108',
+          method: 'email',
         })
+      } catch (e) { /* never block signup over a tracking call */ }
+    }
 
-      if (profileError) {
-        console.error('Profile creation error:', profileError)
-      }
-
-      // Fire Google Ads conversion event so Google can attribute this signup
-      // to whichever ad click brought them here. The actual conversion label
-      // gets configured in Google Ads → Tools → Conversions later — for now
-      // this fires a generic 'sign_up' event the algorithm can learn from.
-      if (typeof window !== 'undefined' && typeof window.gtag === 'function') {
-        try {
-          window.gtag('event', 'sign_up', {
-            send_to: 'AW-18122010108',
-            method: 'email',
-          })
-        } catch (e) { /* never block signup over a tracking call */ }
-      }
-
-      // If they came from a pricing tile (?tier=pro etc.), forward them
-      // straight to Stripe checkout with their UUID attached. The webhook
-      // will match the payment back to this groomer row via client_reference_id.
-      if (tierFromUrl && PAYMENT_LINKS[tierFromUrl]) {
-        window.location.href =
-          PAYMENT_LINKS[tierFromUrl] + '?client_reference_id=' + data.user.id
-        return
-      }
+    // Forward to Stripe checkout with their UUID attached. The webhook
+    // will match the payment back to this groomer row via client_reference_id.
+    if (tierFromUrl && PAYMENT_LINKS[tierFromUrl]) {
+      window.location.href =
+        PAYMENT_LINKS[tierFromUrl] + '?client_reference_id=' + fnData.user_id
+      return
     }
 
     setSuccess(true)
