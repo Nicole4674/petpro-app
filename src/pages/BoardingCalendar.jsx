@@ -109,7 +109,11 @@ export default function BoardingCalendar() {
     // matches their mental model and updates instantly when dates change.
     per_night_rate: '',
     // Total price for the stay — drives the kennel card balance + payment flow
-    total_price: ''
+    total_price: '',
+    // Per-reservation mobile flag — only relevant if shop has mobile mode on.
+    // When true, this stay's drop-off + pick-up appear on the Route page.
+    // Storefront boardings (client comes to the salon) leave this false.
+    is_mobile_visit: false
   })
   const [savingRes, setSavingRes] = useState(false)
   const [clientSearch, setClientSearch] = useState('')
@@ -452,6 +456,8 @@ export default function BoardingCalendar() {
           // Total price — manually entered for now. Stored as the source of truth
           // for the kennel card "balance" math.
           total_price: parseFloat(newRes.total_price) || 0,
+          // Per-reservation mobile flag — Route page filters to true only.
+          is_mobile_visit: !!newRes.is_mobile_visit,
           created_by: user.id
         })
         .select()
@@ -1814,6 +1820,26 @@ export default function BoardingCalendar() {
               <button className="cal-modal-close" onClick={() => setSelectedReservation(null)}>✕</button>
             </div>
 
+            {/* Per-reservation Mobile Visit badge — only shows when this stay was
+                flagged as pickup/drop-off. Lets the groomer see at a glance
+                whether this boarding is on the Route or storefront. */}
+            {selectedReservation.is_mobile_visit && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '10px 20px',
+                background: '#f0fdf4',
+                borderBottom: '1px solid #86efac',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: '#166534',
+              }}>
+                <span style={{ fontSize: '18px' }}>🚐</span>
+                <span>Mobile boarding — pickup &amp; drop-off appear on the Route page</span>
+              </div>
+            )}
+
             {/* PROMINENT QUICK ACTION BAR — Check In / Check Out always visible at top */}
             {selectedReservation.status !== 'cancelled' && selectedReservation.status !== 'checked_out' && (
               <div style={{
@@ -3061,6 +3087,49 @@ export default function BoardingCalendar() {
                     onChange={e => setNewRes(prev => ({ ...prev, end_time: e.target.value }))} />
                 </div>
               </div>
+
+              {/* Per-reservation Mobile Visit toggle — only renders for shops with
+                  mobile mode on (hybrid). When checked, this stay's drop-off AND
+                  pick-up appear on the Route page on those days. Storefront
+                  boardings (client comes to the salon) leave this off. */}
+              {shopSettings && shopSettings.is_mobile && (
+                <div style={{
+                  marginTop: '12px',
+                  padding: '12px 14px',
+                  background: newRes.is_mobile_visit ? '#f0fdf4' : '#f9fafb',
+                  border: '1px solid ' + (newRes.is_mobile_visit ? '#86efac' : '#e5e7eb'),
+                  borderRadius: '10px',
+                }}>
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: '#111827',
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={!!newRes.is_mobile_visit}
+                      onChange={e => setNewRes(prev => ({ ...prev, is_mobile_visit: e.target.checked }))}
+                      style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                    />
+                    <span>📍 Mobile boarding (pickup &amp; drop-off at client's home)</span>
+                  </label>
+                  <div style={{
+                    fontSize: '12px',
+                    color: '#6b7280',
+                    marginLeft: '28px',
+                    marginTop: '4px',
+                    lineHeight: 1.4,
+                  }}>
+                    {newRes.is_mobile_visit
+                      ? '✓ Both the check-in and check-out days will appear on your Route page.'
+                      : 'Leave unchecked for storefront boardings (client comes to the salon).'}
+                  </div>
+                </div>
+              )}
 
               {/* Per-Night Rate — what the groomer charges per night. When set,
                   Total Price below auto-fills to rate × nights. Optional —

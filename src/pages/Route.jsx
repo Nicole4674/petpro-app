@@ -206,41 +206,50 @@ export default function Route() {
       // 1. Today's grooming appointments — pull cached lat/lng so the map
       //    can render instantly without re-geocoding addresses.
       //    NEW: email pulled too so the Heads-up button knows who to email.
+      //    NEW (Per-appt mobile flag): only is_mobile_visit=true appts come
+      //    onto the Route. Storefront appts stay on the Calendar only.
+      //    DOUBLE-LOCK: appointment_date EXACTLY equals TODAY's local date —
+      //    no future dates leak in. (Tomorrow's appts must wait until tomorrow.)
       var { data: appts, error: apptErr } = await supabase
         .from('appointments')
         .select(`
-          id, appointment_date, start_time, status, client_id,
+          id, appointment_date, start_time, status, client_id, is_mobile_visit,
           clients:client_id(first_name, last_name, phone, email, address, address_notes, latitude, longitude),
           pets:pet_id(name),
           services:service_id(service_name)
         `)
         .eq('groomer_id', user.id)
         .eq('appointment_date', today)
+        .eq('is_mobile_visit', true)
         .neq('status', 'cancelled')
         .order('start_time', { ascending: true })
 
       if (apptErr) throw apptErr
 
       // 2. Today's boarding drop-offs (start_date = today)
+      //    Mobile-only: storefront drop-offs at the salon don't belong on the route.
       var { data: dropoffs } = await supabase
         .from('boarding_reservations')
         .select(`
-          id, start_date, end_date, start_time, end_time, status, client_id,
+          id, start_date, end_date, start_time, end_time, status, client_id, is_mobile_visit,
           clients:client_id(first_name, last_name, phone, email, address, address_notes, latitude, longitude)
         `)
         .eq('groomer_id', user.id)
         .eq('start_date', today)
+        .eq('is_mobile_visit', true)
         .neq('status', 'cancelled')
 
       // 3. Today's boarding pickups (end_date = today)
+      //    Mobile-only: storefront pickups happen at the salon, not on the route.
       var { data: pickups } = await supabase
         .from('boarding_reservations')
         .select(`
-          id, start_date, end_date, start_time, end_time, status, client_id,
+          id, start_date, end_date, start_time, end_time, status, client_id, is_mobile_visit,
           clients:client_id(first_name, last_name, phone, email, address, address_notes, latitude, longitude)
         `)
         .eq('groomer_id', user.id)
         .eq('end_date', today)
+        .eq('is_mobile_visit', true)
         .neq('status', 'cancelled')
 
       // 4. Combine into a single sorted stop list

@@ -2938,6 +2938,29 @@ export default function Calendar() {
                         </div>
 
                         <div className="appt-detail-body">
+                            {/* Per-appointment Mobile Visit badge — only shows when this
+                                specific booking was flagged as pickup/drop-off. Lets the
+                                groomer instantly tell which appointments are on the Route
+                                vs storefront, without opening edit mode. */}
+                            {selectedAppt.is_mobile_visit && (
+                                <div style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '10px',
+                                    padding: '10px 14px',
+                                    background: '#f0fdf4',
+                                    border: '1px solid #86efac',
+                                    borderRadius: '10px',
+                                    marginBottom: '14px',
+                                    fontSize: '13px',
+                                    fontWeight: 600,
+                                    color: '#166534',
+                                }}>
+                                    <span style={{ fontSize: '18px' }}>🚐</span>
+                                    <span>Mobile visit (pickup / drop-off) — appears on today's Route page</span>
+                                </div>
+                            )}
+
                             {/* Schedule Info */}
                             <div className="appt-detail-schedule">
                                 <div className="appt-detail-sched-item">
@@ -5819,6 +5842,35 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
     const [safetyCheck, setSafetyCheck] = useState(null)
     const [checking, setChecking] = useState(false)
 
+    // Per-appointment mobile flag — shown ONLY if shop has mobile mode on.
+    // Hybrid shops use this to mark THIS visit as pickup/drop-off vs storefront.
+    // Stored as is_mobile_visit on the appointments row. Route page filters
+    // to is_mobile_visit=true so storefront appts stay off the route.
+    const [isMobileVisit, setIsMobileVisit] = useState(false)
+    const [isMobileShop, setIsMobileShop] = useState(false)
+
+    // Load shop_settings.is_mobile so we know whether to show the checkbox.
+    // Storefront-only shops never see it.
+    useEffect(() => {
+        let cancelled = false
+        ;(async () => {
+            try {
+                const { data: { user } } = await supabase.auth.getUser()
+                if (!user || cancelled) return
+                const { data: shop } = await supabase
+                    .from('shop_settings')
+                    .select('is_mobile')
+                    .eq('groomer_id', user.id)
+                    .maybeSingle()
+                if (cancelled) return
+                setIsMobileShop(!!(shop && shop.is_mobile))
+            } catch (err) {
+                console.warn('[AddAppointmentModal] Could not load shop is_mobile:', err)
+            }
+        })()
+        return () => { cancelled = true }
+    }, [])
+
     useEffect(() => {
         if (form.client_id) {
             // Active pets only — memorial + archived pets are filtered out of booking dropdowns
@@ -6158,6 +6210,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                         recurring_series_id: seriesRow.id,
                         recurring_sequence: g.sequence,
                         recurring_conflict: conflict,
+                        is_mobile_visit: isMobileVisit,
                     }
                 })
 
@@ -6248,6 +6301,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                 has_flags: hasFlags || false,
                 flag_details: flagDetails,
                 flag_status: flagStatus,
+                is_mobile_visit: isMobileVisit,
             })
             .select()
             .single()
@@ -6720,6 +6774,49 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                             <input type="time" name="end_time" value={form.end_time} onChange={handleChange} />
                         </div>
                     </div>
+
+                    {/* Per-appointment Mobile Visit toggle — only renders for shops
+                        with mobile mode on (hybrid). Lets the groomer flag THIS visit
+                        as pickup/drop-off so it appears on the Route page. Storefront
+                        appts stay false and only show on the Calendar. */}
+                    {isMobileShop && (
+                        <div style={{
+                            margin: '8px 0 14px',
+                            padding: '12px 14px',
+                            background: isMobileVisit ? '#f0fdf4' : '#f9fafb',
+                            border: '1px solid ' + (isMobileVisit ? '#86efac' : '#e5e7eb'),
+                            borderRadius: '10px',
+                        }}>
+                            <label style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '10px',
+                                cursor: 'pointer',
+                                fontSize: '14px',
+                                fontWeight: 600,
+                                color: '#111827',
+                            }}>
+                                <input
+                                    type="checkbox"
+                                    checked={isMobileVisit}
+                                    onChange={(e) => setIsMobileVisit(e.target.checked)}
+                                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                                />
+                                <span>📍 Mobile visit (pickup / drop-off)</span>
+                            </label>
+                            <div style={{
+                                fontSize: '12px',
+                                color: '#6b7280',
+                                marginLeft: '28px',
+                                marginTop: '4px',
+                                lineHeight: 1.4,
+                            }}>
+                                {isMobileVisit
+                                    ? '✓ This appointment will appear on the Route page for the day.'
+                                    : 'Leave unchecked for storefront / drop-off-at-salon appointments.'}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Mobile-aware drive-time check (Phase 11) — renders ONLY for
                         mobile groomers (gated by shop_settings.is_mobile inside the
