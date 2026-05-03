@@ -51,6 +51,7 @@ import StaffLogin from './pages/StaffLogin'
 import StaffMe from './pages/StaffMe'
 import Route2 from './pages/Route'  // imported as Route2 to avoid clash with react-router-dom Route
 import PetProAI from './pages/PetProAI'
+import Expenses from './pages/Expenses'
 
 // ─────────────────────────────────────────────────────────────────
 // RootRedirect — smart routing at "/" based on user type.
@@ -206,6 +207,8 @@ function App() {
                     <Route path="/route" element={gate(session, <Route2 />)} />
                     {/* PetPro AI — full conversational chat with lifted guardrails */}
                     <Route path="/petpro-ai" element={gate(session, <PetProAI />)} />
+                    {/* Expenses — track tax-deductible business expenses */}
+                    <Route path="/expenses" element={gate(session, <Expenses />)} />
                     <Route path="/flagged" element={gate(session, <FlaggedBookings />)} />
                     <Route path="/voice" element={gate(session, <VoiceMode />)} />
                     <Route path="/import" element={gate(session, <ImportClients />)} />

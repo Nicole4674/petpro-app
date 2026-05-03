@@ -386,6 +386,14 @@ export default function PayrollDashboard() {
               <div className="pd-action-label">Tax Settings</div>
               <div className="pd-action-hint">State, EIN, rates</div>
             </button>
+            <button
+              className="pd-action"
+              onClick={function() { navigate('/expenses') }}
+            >
+              <div className="pd-action-icon">💰</div>
+              <div className="pd-action-label">Expenses</div>
+              <div className="pd-action-hint">Track tax write-offs</div>
+            </button>
             {/* Reports — hidden for launch, coming in v1.1
             <button
               className="pd-action"
