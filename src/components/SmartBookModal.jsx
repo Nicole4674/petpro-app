@@ -34,6 +34,13 @@ export default function SmartBookModal({ clients, pets, services, staffMembers, 
   const [petId, setPetId] = useState('')
   const [serviceId, setServiceId] = useState('')
   const [staffId, setStaffId] = useState('')
+  // Auto-pick the only active staff member if there's just one (1-groomer shop)
+  useEffect(() => {
+    const activeStaff = (staffMembers || []).filter((s) => s.status === 'active')
+    if (activeStaff.length === 1 && !staffId) {
+      setStaffId(activeStaff[0].id)
+    }
+  }, [staffMembers])
   const [daysAhead, setDaysAhead] = useState(14)
   const [timePreference, setTimePreference] = useState('any')
   const [clientSearch, setClientSearch] = useState('')
@@ -75,6 +82,10 @@ export default function SmartBookModal({ clients, pets, services, staffMembers, 
   async function handleFindSlots() {
     if (!clientId || !petId || !serviceId) {
       setError('Please pick a client, pet, and service first.')
+      return
+    }
+    if (!staffId) {
+      setError("Please pick a specific groomer — that way PetPro AI checks their actual schedule and you don't risk a double-book.")
       return
     }
     setLoading(true)
@@ -293,23 +304,27 @@ export default function SmartBookModal({ clients, pets, services, staffMembers, 
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '4px' }}>
-                  Groomer (optional)
+                  Groomer *
                 </label>
                 <select
                   value={staffId}
                   onChange={(e) => setStaffId(e.target.value)}
                   style={{
-                    width: '100%', padding: '10px 12px', border: '1px solid #d1d5db',
+                    width: '100%', padding: '10px 12px',
+                    border: '1px solid ' + (!staffId ? '#fca5a5' : '#d1d5db'),
                     borderRadius: '8px', fontSize: '14px', background: '#fff',
                   }}
                 >
-                  <option value="">Any groomer</option>
+                  <option value="">— Pick a groomer —</option>
                   {(staffMembers || []).filter((s) => s.status === 'active').map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.first_name} {s.last_name || ''}
                     </option>
                   ))}
                 </select>
+                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px', lineHeight: 1.3 }}>
+                  Required — AI checks THIS groomer's actual schedule (no double-booking).
+                </div>
               </div>
             </div>
 
@@ -354,11 +369,12 @@ export default function SmartBookModal({ clients, pets, services, staffMembers, 
 
             <button
               onClick={handleFindSlots}
-              disabled={loading || !serviceId}
+              disabled={loading || !serviceId || !staffId}
               style={{
-                width: '100%', padding: '12px', background: loading || !serviceId ? '#a78bfa' : '#7c3aed',
+                width: '100%', padding: '12px',
+                background: (loading || !serviceId || !staffId) ? '#a78bfa' : '#7c3aed',
                 color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 700, fontSize: '15px',
-                cursor: loading || !serviceId ? 'not-allowed' : 'pointer', marginBottom: '14px',
+                cursor: (loading || !serviceId || !staffId) ? 'not-allowed' : 'pointer', marginBottom: '14px',
               }}
             >
               {loading ? '🤖 PetPro AI is thinking…' : '🪄 Find Best Slots'}

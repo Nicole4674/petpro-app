@@ -2511,9 +2511,12 @@ export default function Calendar() {
                     staffMembers={staffMembers}
                     onClose={() => setShowSmartBook(false)}
                     onSlotPicked={(picked) => {
-                        // Picked slot from PetPro AI → close Smart Book + open
-                        // existing AddAppointmentModal pre-filled with everything
+                        // Picked slot from PetPro AI → close Smart Book, jump
+                        // the calendar to that day so the groomer can SEE the
+                        // schedule, then open the booking modal pre-filled.
                         setShowSmartBook(false)
+                        // Navigate calendar view to the picked day
+                        setCurrentDate(new Date(picked.date + 'T00:00:00'))
                         setSelectedDate(picked.date)
                         setSelectedTime(picked.start_time)
                         setPreFillBooking({
