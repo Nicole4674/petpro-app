@@ -568,6 +568,29 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
 
   if (error) throw error
   console.log(`Subscription canceled for customer ${customerId}`)
+
+  // Zero out monthly token allocation — canceled users shouldn't get free AI forever.
+  // Keep top-up tokens intact (they paid for those, that's fair to keep).
+  try {
+    const { data: groomerRow } = await supabase
+      .from('groomers')
+      .select('id')
+      .eq('stripe_customer_id', customerId)
+      .maybeSingle()
+    if (groomerRow?.id) {
+      await supabase
+        .from('groomer_token_balance')
+        .update({
+          monthly_tokens_remaining: 0,
+          monthly_tokens_total: 0,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('groomer_id', groomerRow.id)
+      console.log(`[stripe-webhook] Zeroed monthly tokens for canceled groomer ${groomerRow.id}`)
+    }
+  } catch (tokenErr) {
+    console.error('[stripe-webhook] Token zero-out failed (non-fatal):', tokenErr)
+  }
 }
 
 // CARD DECLINED
