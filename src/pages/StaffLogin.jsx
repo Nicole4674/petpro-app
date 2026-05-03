@@ -188,7 +188,9 @@ export default function StaffLogin() {
         if (signUpErr.message.toLowerCase().includes('already registered')) {
           setError('This email is already registered. Try logging in instead.')
         } else {
-          setError('Signup failed: ' + signUpErr.message)
+          setError(/captcha/i.test(signUpErr.message)
+            ? "The browser security check didn't pass. Try opening this link in Safari or Chrome (NOT from inside Instagram, Facebook, or TikTok). If it still fails, please text the shop and we'll help you get signed up."
+            : 'Signup failed: ' + signUpErr.message)
         }
         setSubmitting(false)
         return

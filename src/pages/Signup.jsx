@@ -111,7 +111,9 @@ export default function Signup() {
     })
 
     if (signUpError) {
-      setError(signUpError.message)
+      setError(/captcha/i.test(signUpError.message)
+        ? "The browser security check didn't pass. Try opening this link in Safari or Chrome (NOT from inside Instagram, Facebook, or TikTok). If it still fails, please text the shop and we'll help you get signed up."
+        : signUpError.message)
       setLoading(false)
       return
     }

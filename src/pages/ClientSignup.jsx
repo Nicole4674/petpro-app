@@ -194,7 +194,9 @@ export default function ClientSignup() {
           // Fallback — show Supabase's exact message for any other password rule
           setError(signUpError.message)
         } else {
-          setError('Sign up failed: ' + signUpError.message)
+          setError(/captcha/i.test(signUpError.message)
+            ? "The browser security check didn't pass. Try opening this link in Safari or Chrome (NOT from inside Instagram, Facebook, or TikTok). If it still fails, please text the shop and we'll help you get signed up."
+            : 'Sign up failed: ' + signUpError.message)
         }
         setSubmitting(false)
         return
