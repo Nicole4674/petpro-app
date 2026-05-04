@@ -15246,26 +15246,19 @@
     50%      { box-shadow: 0 0 0 10px rgba(220, 38, 38, 0); }
 }
 
-/* Mobile: the corner bar stretches to almost full-width and Suds shrinks
-   so they don't overlap on a phone. */
+/* Mobile: shrink the stack a bit so it doesn't dominate small screens.
+   The stack is positioned via JS (drag-aware), but we shrink Suds + bar width. */
 @media (max-width: 640px) {
-    .suds-bar {
-        right: 12px !important;
-        bottom: 140px !important;       /* lifted above Suds on phones */
+    .suds-stack {
         width: calc(100vw - 24px) !important;
         max-width: calc(100vw - 24px) !important;
+        gap: 8px !important;
     }
     .suds-bubble .suds-img {
         width: 100px !important;
     }
-    .suds-bubble {
-        bottom: 16px !important;
-        right: 16px !important;
-    }
     .suds-speech-bubble {
-        max-width: calc(100vw - 32px) !important;
-        right: 16px !important;
-        bottom: 220px !important;       /* sits above the bar on mobile */
+        max-width: 100% !important;
     }
 }
 

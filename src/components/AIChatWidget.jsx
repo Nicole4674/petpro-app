@@ -266,6 +266,114 @@ export default function AIChatWidget() {
     setTimeout(function () { sendMessage() }, 30)
   }
 
+  // ════════════ DRAGGABLE SUDS — relocate the whole stack ════════════
+  // sudsPos = { x, y } in viewport pixels (top-left of the container) OR null = default bottom-right.
+  // When the user drags Suds, the whole stack (bubble + bar + Suds) moves with him,
+  // and the position persists in localStorage so it sticks across page loads.
+  const [sudsPos, setSudsPos] = useState(function () {
+    if (typeof window === 'undefined') return null
+    try {
+      var saved = window.localStorage.getItem('petpro_suds_position')
+      if (saved) {
+        var p = JSON.parse(saved)
+        if (p && typeof p.x === 'number' && typeof p.y === 'number') return p
+      }
+    } catch (e) { /* fall back to default */ }
+    return null
+  })
+  const [sudsDragging, setSudsDragging] = useState(false)
+  const sudsDragStateRef = useRef({ startX: 0, startY: 0, offsetX: 0, offsetY: 0, moved: false })
+  const sudsContainerRef = useRef(null)
+
+  // Helpers to keep Suds inside the viewport even after window resize
+  function clampSudsPos(x, y) {
+    if (typeof window === 'undefined') return { x: x, y: y }
+    var w = (sudsContainerRef.current && sudsContainerRef.current.offsetWidth) || 460
+    var h = (sudsContainerRef.current && sudsContainerRef.current.offsetHeight) || 220
+    var maxX = window.innerWidth - w
+    var maxY = window.innerHeight - h
+    if (maxX < 0) maxX = 0
+    if (maxY < 0) maxY = 0
+    if (x < 0) x = 0
+    if (y < 0) y = 0
+    if (x > maxX) x = maxX
+    if (y > maxY) y = maxY
+    return { x: x, y: y }
+  }
+
+  function onSudsPointerDown(e) {
+    // Don't start drag if user clicked an interactive child (buttons in the bar above)
+    if (e.target && e.target.closest && e.target.closest('button, input, textarea, .suds-bar, .suds-speech-bubble')) {
+      // Only drag if user clicked Suds himself (the .suds-bubble button)
+      if (!e.target.closest('.suds-bubble')) return
+    }
+    var point = (e.touches && e.touches[0]) ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY }
+    var rect = sudsContainerRef.current ? sudsContainerRef.current.getBoundingClientRect() : { left: point.x, top: point.y }
+    sudsDragStateRef.current = {
+      startX: point.x,
+      startY: point.y,
+      offsetX: point.x - rect.left,
+      offsetY: point.y - rect.top,
+      moved: false,
+    }
+    setSudsDragging(true)
+  }
+
+  // Attach global move/up listeners only while actively dragging
+  useEffect(function () {
+    if (!sudsDragging) return
+    function onMove(e) {
+      var point = (e.touches && e.touches[0]) ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY }
+      var s = sudsDragStateRef.current
+      var dx = Math.abs(point.x - s.startX)
+      var dy = Math.abs(point.y - s.startY)
+      // Only count it as a real drag once we move >5px (so a clean click still focuses input)
+      if (!s.moved && (dx > 5 || dy > 5)) s.moved = true
+      if (s.moved) {
+        var newX = point.x - s.offsetX
+        var newY = point.y - s.offsetY
+        setSudsPos(clampSudsPos(newX, newY))
+        if (e.preventDefault) e.preventDefault()
+      }
+    }
+    function onEnd() {
+      var moved = sudsDragStateRef.current.moved
+      setSudsDragging(false)
+      if (moved && sudsPos) {
+        try { window.localStorage.setItem('petpro_suds_position', JSON.stringify(sudsPos)) } catch (e) { /* noop */ }
+      } else if (!moved) {
+        // Treat a clean click (no drag movement) as "focus the input"
+        focusInput()
+      }
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onEnd)
+    window.addEventListener('touchmove', onMove, { passive: false })
+    window.addEventListener('touchend', onEnd)
+    return function () {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onEnd)
+      window.removeEventListener('touchmove', onMove)
+      window.removeEventListener('touchend', onEnd)
+    }
+  }, [sudsDragging, sudsPos])
+
+  // Re-clamp Suds inside the viewport when the user resizes the browser window
+  useEffect(function () {
+    function onResize() {
+      if (sudsPos) setSudsPos(function (p) { return p ? clampSudsPos(p.x, p.y) : p })
+    }
+    window.addEventListener('resize', onResize)
+    return function () { window.removeEventListener('resize', onResize) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sudsPos])
+
+  // Optional reset — double-click Suds to return him to the default bottom-right corner
+  function resetSudsPosition() {
+    setSudsPos(null)
+    try { window.localStorage.removeItem('petpro_suds_position') } catch (e) { /* noop */ }
+  }
+
   function toggleVoice() {
     var next = !voiceEnabled
     setVoiceEnabled(next)
@@ -952,16 +1060,41 @@ export default function AIChatWidget() {
         </div>
       )}
 
-      {/* ─── SPEECH BUBBLE — comic-style, pops above Suds when he talks ─── */}
+      {/* ═══════════════════════════════════════════════════════════════
+          SUDS STACK — bubble + bar + Suds all in ONE draggable container.
+          The user grabs Suds and the whole stack moves with him; position
+          is saved to localStorage so he stays put across page loads.
+          ═══════════════════════════════════════════════════════════════ */}
+      <div
+        ref={sudsContainerRef}
+        className="suds-stack"
+        style={{
+          position: 'fixed',
+          /* When sudsPos is set, use it; otherwise default bottom-right */
+          ...(sudsPos
+            ? { left: sudsPos.x + 'px', top: sudsPos.y + 'px', right: 'auto', bottom: 'auto' }
+            : { right: '24px', bottom: '24px', left: 'auto', top: 'auto' }
+          ),
+          width: '460px',
+          maxWidth: 'calc(100vw - 32px)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',     /* Suds aligned to the right edge of the stack */
+          gap: '10px',
+          zIndex: 999,
+          /* While dragging, no transition so the cursor stays glued to him */
+          transition: sudsDragging ? 'none' : 'top 0.15s ease, left 0.15s ease',
+        }}
+      >
+      {/* ─── SPEECH BUBBLE — top of the stack, comic-style ─── */}
       {bubble && (
         <div
           className="suds-speech-bubble"
           style={{
-            position: 'fixed',
-            bottom: '150px',           /* lifted slightly to clear the bigger Suds */
-            right: '24px',
-            maxWidth: '320px',
-            /* Frosted glass to match the bar */
+            position: 'relative',
+            alignSelf: 'stretch',
+            maxWidth: '420px',
+            marginLeft: 'auto',
             background: 'rgba(255, 255, 255, 0.78)',
             backdropFilter: 'blur(14px) saturate(160%)',
             WebkitBackdropFilter: 'blur(14px) saturate(160%)',
@@ -971,7 +1104,6 @@ export default function AIChatWidget() {
             boxShadow: '0 10px 30px rgba(124, 58, 237, 0.22), 0 0 0 1.5px rgba(124, 58, 237, 0.25)',
             fontSize: '14px',
             lineHeight: 1.45,
-            zIndex: 1001,
             animation: 'sudsBubbleIn 0.28s ease-out',
             cursor: bubble.longText ? 'pointer' : 'default',
           }}
@@ -1002,30 +1134,25 @@ export default function AIChatWidget() {
             width: 0, height: 0,
             borderLeft: '10px solid transparent',
             borderRight: '10px solid transparent',
-            borderTop: '10px solid #fff',
-            filter: 'drop-shadow(0 1px 0 #e9d5ff)',
+            borderTop: '10px solid rgba(255, 255, 255, 0.78)',
+            filter: 'drop-shadow(0 1px 0 rgba(124, 58, 237, 0.25))',
           }} />
         </div>
       )}
 
-      {/* ─── CORNER BAR — mic + text + send, slides in to the LEFT of Suds ─── */}
+      {/* ─── CORNER BAR — sits directly ABOVE Suds in the stack ─── */}
       {/* No background container — just floating controls. The text input
           gets its own little pill so it stays readable; everything else
-          sits as colored circles with subtle drop-shadows. */}
+          sits as floating circles with subtle drop-shadows. */}
       <div
         className="suds-bar"
         style={{
-          position: 'fixed',
-          bottom: '40px',
-          right: '160px',          /* tucked just to the left of bigger Suds */
-          maxWidth: 'calc(100vw - 200px)',
-          width: '460px',
+          width: '100%',
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
           background: 'transparent',
           padding: 0,
-          zIndex: 999,
         }}
       >
         {/* Hidden file picker for image attachments (📎) */}
@@ -1189,13 +1316,11 @@ export default function AIChatWidget() {
         </button>
       </div>
 
-      {/* Pending image previews — float above the bar */}
+      {/* Pending image previews — sit between the bar and Suds */}
       {pendingImages.length > 0 && (
         <div style={{
-          position: 'fixed',
-          bottom: '95px',
-          right: '140px',
-          maxWidth: '440px',
+          alignSelf: 'flex-end',
+          maxWidth: '100%',
           display: 'flex', flexWrap: 'wrap', gap: '6px',
           background: 'rgba(255, 255, 255, 0.78)',
           backdropFilter: 'blur(14px) saturate(160%)',
@@ -1203,7 +1328,6 @@ export default function AIChatWidget() {
           padding: '8px',
           borderRadius: '12px',
           boxShadow: '0 6px 18px rgba(124, 58, 237, 0.18), 0 0 0 1.5px rgba(124, 58, 237, 0.25)',
-          zIndex: 999,
         }}>
           {pendingImages.map(function (img, idx) {
             return (
@@ -1220,22 +1344,31 @@ export default function AIChatWidget() {
         </div>
       )}
 
-      {/* ─── FLOATING SUDS — always visible, click to focus the bar ─── */}
+      {/* ─── SUDS — bottom of the stack, also the drag handle ─── */}
+      {/* Mouse/touch down starts a drag. If the pointer doesn't move >5px,
+          it's treated as a click (focuses the input). Double-click resets
+          his position back to the bottom-right corner. */}
       <button
         className="chat-bubble-btn suds-bubble"
-        onClick={focusInput}
-        aria-label="Talk to Suds"
+        aria-label="Talk to Suds (drag to move)"
+        title="Click to talk · Drag to move · Double-click to reset position"
+        onMouseDown={onSudsPointerDown}
+        onTouchStart={onSudsPointerDown}
+        onDoubleClick={resetSudsPosition}
         style={{
-          position: 'fixed',
           background: 'transparent',
           border: 'none',
           padding: 0,
-          cursor: 'pointer',
+          cursor: sudsDragging ? 'grabbing' : 'grab',
           filter: 'drop-shadow(0 6px 14px rgba(124, 58, 237, 0.25))',
-          transition: 'transform 0.2s ease-out',
+          transition: sudsDragging ? 'none' : 'transform 0.2s ease-out',
+          touchAction: 'none',
+          userSelect: 'none',
+          WebkitUserDrag: 'none',
+          alignSelf: 'flex-end',
         }}
-        onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.06)' }}
-        onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
+        onMouseEnter={(e) => { if (!sudsDragging) e.currentTarget.style.transform = 'scale(1.06)' }}
+        onMouseLeave={(e) => { if (!sudsDragging) e.currentTarget.style.transform = 'scale(1)' }}
       >
         {(() => {
           var pose = pickSudsPose()
@@ -1248,11 +1381,13 @@ export default function AIChatWidget() {
               src={sudsImageFor(pose)}
               alt="Suds the otter"
               className="suds-img"
+              draggable={false}
               style={{
                 width: '130px',
                 height: 'auto',
                 display: 'block',
                 animation: anim,
+                pointerEvents: 'none',
               }}
             />
           )
@@ -1270,6 +1405,7 @@ export default function AIChatWidget() {
           borderRadius: '999px',
           whiteSpace: 'nowrap',
           letterSpacing: '0.3px',
+          pointerEvents: 'none',
         }}>
           PetPro AI
         </span>
@@ -1291,11 +1427,13 @@ export default function AIChatWidget() {
             justifyContent: 'center',
             boxShadow: '0 2px 6px rgba(220, 38, 38, 0.4)',
             border: '2px solid #fff',
+            pointerEvents: 'none',
           }}>
             {insights.length > 9 ? '9+' : insights.length}
           </span>
         )}
       </button>
+      </div>{/* end .suds-stack */}
     </>
   )
 }
