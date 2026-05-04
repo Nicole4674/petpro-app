@@ -2965,13 +2965,18 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
         var endIsoP = new Date(endP + 'T23:59:59').toISOString()
         var { data: pays } = await supabaseAdmin
           .from('payments')
-          .select('amount, refunded_amount')
+          .select('amount, refunded_amount, tip_amount')
           .eq('groomer_id', groomerId)
           .gte('created_at', startIsoP)
           .lte('created_at', endIsoP)
         var revenue = 0
         ;(pays || []).forEach(function (p) {
-          revenue += (parseFloat(p.amount || 0) - parseFloat(p.refunded_amount || 0))
+          // Total cash flow including tips (tip allocation to staff is separate)
+          revenue += (
+            parseFloat(p.amount || 0)
+            + parseFloat(p.tip_amount || 0)
+            - parseFloat(p.refunded_amount || 0)
+          )
         })
 
         // Expenses

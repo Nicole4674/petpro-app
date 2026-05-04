@@ -189,7 +189,7 @@ export default function Dashboard() {
 
     var { data: payments } = await supabase
       .from('payments')
-      .select('amount, refunded_amount, created_at, stripe_payment_intent_id')
+      .select('amount, refunded_amount, tip_amount, created_at, stripe_payment_intent_id')
       .eq('groomer_id', userId)
       .not('stripe_payment_intent_id', 'is', null)
       .gte('created_at', startOfWeek.toISOString())
@@ -202,8 +202,12 @@ export default function Dashboard() {
     var todayNet = 0, todayCount = 0, weekNet = 0, weekCount = 0
     payments.forEach(function (p) {
       var paid = parseFloat(p.amount || 0)
+      var tip = parseFloat(p.tip_amount || 0)
       var refunded = parseFloat(p.refunded_amount || 0)
-      var net = Math.max(0, paid - refunded)
+      // Total cash flow = service + tips - refunds. Tip allocation logic to
+      // staff is untouched; this is purely the "total dollars in" view that
+      // solo groomers want to see at the dashboard level.
+      var net = Math.max(0, paid + tip - refunded)
       var when = new Date(p.created_at)
       // Always counts toward the week (we already filtered week range)
       weekNet += net

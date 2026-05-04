@@ -120,14 +120,20 @@ export default function Expenses() {
       const endIso = new Date(endDate + 'T23:59:59').toISOString()
       const { data: payments } = await supabase
         .from('payments')
-        .select('amount, refunded_amount')
+        .select('amount, refunded_amount, tip_amount')
         .eq('groomer_id', user.id)
         .gte('created_at', startIso)
         .lte('created_at', endIso)
 
+      // Revenue = service + tips - refunds (total cash flow view, matches
+      // what solo groomers see on Dashboard + appointment popup totals).
       let totalRev = 0
       ;(payments || []).forEach((p) => {
-        totalRev += (parseFloat(p.amount || 0) - parseFloat(p.refunded_amount || 0))
+        totalRev += (
+          parseFloat(p.amount || 0)
+          + parseFloat(p.tip_amount || 0)
+          - parseFloat(p.refunded_amount || 0)
+        )
       })
       setRevenue(totalRev)
     } catch (err) {

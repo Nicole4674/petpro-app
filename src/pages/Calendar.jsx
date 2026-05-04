@@ -4193,8 +4193,24 @@ export default function Calendar() {
                                                     </div>
                                                     {totalTips > 0 && (
                                                         <div className="appt-payments-summary-row appt-payments-summary-tips">
-                                                            <span>Tips</span>
+                                                            <span>Tips (goes to groomer)</span>
                                                             <span>${totalTips.toFixed(2)}</span>
+                                                        </div>
+                                                    )}
+                                                    {/* Grand total — service + tips. Solo groomers want to see
+                                                        the full dollar amount this client put in their pocket today,
+                                                        not just the service price. Tip allocation to groomer is
+                                                        unchanged — this is purely a display sum. */}
+                                                    {totalTips > 0 && (
+                                                        <div className="appt-payments-summary-row" style={{
+                                                            borderTop: '1px solid #e5e7eb',
+                                                            marginTop: '4px',
+                                                            paddingTop: '6px',
+                                                            fontWeight: 700,
+                                                            color: '#166534',
+                                                        }}>
+                                                            <span>💰 Total (service + tips)</span>
+                                                            <span>${(totalPaid + totalTips).toFixed(2)}</span>
                                                         </div>
                                                     )}
                                                     <div className={'appt-payments-summary-row appt-payments-summary-balance ' + (balance < 0.01 ? 'appt-payments-summary-paid' : 'appt-payments-summary-owed')}>
