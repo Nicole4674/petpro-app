@@ -15251,12 +15251,12 @@
 @media (max-width: 640px) {
     .suds-bar {
         right: 12px !important;
-        bottom: 110px !important;       /* lifted above Suds on phones */
+        bottom: 130px !important;       /* lifted above Suds on phones */
         width: calc(100vw - 24px) !important;
         max-width: calc(100vw - 24px) !important;
     }
     .suds-bubble .suds-img {
-        width: 70px !important;
+        width: 90px !important;
     }
     .suds-bubble {
         bottom: 16px !important;
@@ -15265,7 +15265,7 @@
     .suds-speech-bubble {
         max-width: calc(100vw - 32px) !important;
         right: 16px !important;
-        bottom: 180px !important;       /* sits above the bar on mobile */
+        bottom: 200px !important;       /* sits above the bar on mobile */
     }
 }
 

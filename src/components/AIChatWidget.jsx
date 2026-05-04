@@ -958,14 +958,17 @@ export default function AIChatWidget() {
           className="suds-speech-bubble"
           style={{
             position: 'fixed',
-            bottom: '130px',
+            bottom: '150px',           /* lifted slightly to clear the bigger Suds */
             right: '24px',
             maxWidth: '320px',
-            background: '#fff',
+            /* Frosted glass to match the bar */
+            background: 'rgba(255, 255, 255, 0.78)',
+            backdropFilter: 'blur(14px) saturate(160%)',
+            WebkitBackdropFilter: 'blur(14px) saturate(160%)',
             color: '#1f2937',
             padding: '12px 14px 10px',
             borderRadius: '14px',
-            boxShadow: '0 10px 30px rgba(124, 58, 237, 0.20), 0 0 0 2px #e9d5ff',
+            boxShadow: '0 10px 30px rgba(124, 58, 237, 0.22), 0 0 0 1.5px rgba(124, 58, 237, 0.25)',
             fontSize: '14px',
             lineHeight: 1.45,
             zIndex: 1001,
@@ -1010,17 +1013,21 @@ export default function AIChatWidget() {
         className="suds-bar"
         style={{
           position: 'fixed',
-          bottom: '32px',
-          right: '120px',          /* tucked just to the left of Suds */
-          maxWidth: 'calc(100vw - 160px)',
-          width: '420px',
+          bottom: '36px',
+          right: '140px',          /* tucked just to the left of Suds (bigger Suds = more breathing room) */
+          maxWidth: 'calc(100vw - 180px)',
+          width: '440px',
           display: 'flex',
           alignItems: 'center',
           gap: '6px',
-          background: '#fff',
+          /* Frosted glass — translucent + blur so the bar inherits the page color
+             instead of slapping a white pill on top of it. */
+          background: 'rgba(255, 255, 255, 0.55)',
+          backdropFilter: 'blur(14px) saturate(160%)',
+          WebkitBackdropFilter: 'blur(14px) saturate(160%)',
           padding: '6px 6px 6px 10px',
           borderRadius: '999px',
-          boxShadow: '0 8px 24px rgba(124, 58, 237, 0.18), 0 0 0 2px #e9d5ff',
+          boxShadow: '0 8px 24px rgba(124, 58, 237, 0.22), 0 0 0 1.5px rgba(124, 58, 237, 0.25)',
           zIndex: 999,
         }}
       >
@@ -1164,14 +1171,16 @@ export default function AIChatWidget() {
       {pendingImages.length > 0 && (
         <div style={{
           position: 'fixed',
-          bottom: '88px',
-          right: '120px',
-          maxWidth: '420px',
+          bottom: '95px',
+          right: '140px',
+          maxWidth: '440px',
           display: 'flex', flexWrap: 'wrap', gap: '6px',
-          background: '#fff',
+          background: 'rgba(255, 255, 255, 0.78)',
+          backdropFilter: 'blur(14px) saturate(160%)',
+          WebkitBackdropFilter: 'blur(14px) saturate(160%)',
           padding: '8px',
           borderRadius: '12px',
-          boxShadow: '0 6px 18px rgba(0,0,0,0.10), 0 0 0 2px #e9d5ff',
+          boxShadow: '0 6px 18px rgba(124, 58, 237, 0.18), 0 0 0 1.5px rgba(124, 58, 237, 0.25)',
           zIndex: 999,
         }}>
           {pendingImages.map(function (img, idx) {
@@ -1218,7 +1227,7 @@ export default function AIChatWidget() {
               alt="Suds the otter"
               className="suds-img"
               style={{
-                width: '90px',
+                width: '110px',
                 height: 'auto',
                 display: 'block',
                 animation: anim,
@@ -1233,9 +1242,9 @@ export default function AIChatWidget() {
           transform: 'translateX(-50%)',
           background: '#7c3aed',
           color: '#fff',
-          fontSize: '10px',
+          fontSize: '11px',
           fontWeight: 700,
-          padding: '2px 8px',
+          padding: '2px 9px',
           borderRadius: '999px',
           whiteSpace: 'nowrap',
           letterSpacing: '0.3px',
