@@ -49,6 +49,8 @@ export default function AIChatWidget() {
 
   // Suds speaks — calls the petpro-tts edge function, plays the mp3 it returns.
   // Fire-and-forget — never blocks the chat flow if voice fails.
+  // We use fetch() directly instead of supabase.functions.invoke because invoke
+  // tries to parse the response as JSON, which corrupts binary audio data.
   async function speakSuds(text) {
     if (!voiceEnabled || !text || !text.trim()) return
     try {
@@ -57,12 +59,28 @@ export default function AIChatWidget() {
         try { audioRef.current.pause() } catch (e) { /* noop */ }
       }
       setSudsTalking(true)
-      const { data, error } = await supabase.functions.invoke('petpro-tts', {
-        body: { text: text },
+
+      // Pull the user's session token + supabase URL/anon key from the client
+      const { data: { session } } = await supabase.auth.getSession()
+      const supabaseUrl = supabase.supabaseUrl
+      const supabaseAnonKey = supabase.supabaseKey
+
+      const ttsRes = await fetch(supabaseUrl + '/functions/v1/petpro-tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (session?.access_token || supabaseAnonKey),
+          'apikey': supabaseAnonKey,
+        },
+        body: JSON.stringify({ text: text }),
       })
-      if (error) throw error
-      // The function returns binary audio — Supabase wraps it in a Blob
-      const blob = data instanceof Blob ? data : new Blob([data], { type: 'audio/mpeg' })
+
+      if (!ttsRes.ok) {
+        const errMsg = await ttsRes.text().catch(function () { return '' })
+        throw new Error('TTS request failed (' + ttsRes.status + '): ' + errMsg.slice(0, 200))
+      }
+
+      const blob = await ttsRes.blob()
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
       audioRef.current = audio
