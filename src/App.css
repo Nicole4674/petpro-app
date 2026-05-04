@@ -15263,15 +15263,19 @@
 }
 
 /* Override the default chat-bubble-btn styling for Suds — no rounded background,
-   no purple fill. The image itself IS the button. */
+   no purple fill. The image itself IS the button.
+   Phase 4: Suds now lives INSIDE the .suds-stack container, so we strip the
+   fixed positioning that .chat-bubble-btn adds — the stack handles position. */
 .suds-bubble {
+    position: static !important;
     background: transparent !important;
     box-shadow: none !important;
     border-radius: 0 !important;
     width: auto !important;
     height: auto !important;
     padding: 0 !important;
-    bottom: 24px;
-    right: 24px;
-    z-index: 1000;
+    bottom: auto !important;
+    right: auto !important;
+    top: auto !important;
+    left: auto !important;
 }
