@@ -1091,6 +1091,7 @@ export default function AIChatWidget() {
         <div
           className="suds-speech-bubble"
           style={{
+            order: 1,
             position: 'relative',
             alignSelf: 'stretch',
             maxWidth: '420px',
@@ -1140,13 +1141,14 @@ export default function AIChatWidget() {
         </div>
       )}
 
-      {/* ─── CORNER BAR — sits directly ABOVE Suds in the stack ─── */}
+      {/* ─── CORNER BAR — sits BELOW Suds in the stack (order: 3) ─── */}
       {/* No background container — just floating controls. The text input
           gets its own little pill so it stays readable; everything else
           sits as floating circles with subtle drop-shadows. */}
       <div
         className="suds-bar"
         style={{
+          order: 3,
           width: '100%',
           display: 'flex',
           alignItems: 'center',
@@ -1316,9 +1318,10 @@ export default function AIChatWidget() {
         </button>
       </div>
 
-      {/* Pending image previews — sit between the bar and Suds */}
+      {/* Pending image previews — bottom of the stack (order: 4), below the bar */}
       {pendingImages.length > 0 && (
         <div style={{
+          order: 4,
           alignSelf: 'flex-end',
           maxWidth: '100%',
           display: 'flex', flexWrap: 'wrap', gap: '6px',
@@ -1344,7 +1347,7 @@ export default function AIChatWidget() {
         </div>
       )}
 
-      {/* ─── SUDS — bottom of the stack, also the drag handle ─── */}
+      {/* ─── SUDS — middle of the stack (order: 2), also the drag handle ─── */}
       {/* Mouse/touch down starts a drag. If the pointer doesn't move >5px,
           it's treated as a click (focuses the input). Double-click resets
           his position back to the bottom-right corner. */}
@@ -1356,6 +1359,7 @@ export default function AIChatWidget() {
         onTouchStart={onSudsPointerDown}
         onDoubleClick={resetSudsPosition}
         style={{
+          order: 2,
           background: 'transparent',
           border: 'none',
           padding: 0,
