@@ -8047,7 +8047,8 @@ function SlotChooserModal({ slot, staff, onBook, onBlock, onClose }) {
     )
 }
 
-// ================================================================function BlockTimeModal({ modal, staff, saving, onSave, onDelete, onClose }) {
+// ================================================================
+function BlockTimeModal({ modal, staff, saving, onSave, onDelete, onClose }) {
     const isEdit = modal && modal.mode === 'edit'
     const existing = (modal && modal.block) || null
 
