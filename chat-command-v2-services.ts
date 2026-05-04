@@ -855,6 +855,58 @@ var toolDefinitions = [
       required: ['client_id', 'message_text'],
     },
   },
+,
+  {
+    name: 'add_expense',
+    description: 'Log a new business expense for the groomer. Use when the owner mentions a purchase, bill, or any business cost — examples: "I just bought $25 of shampoo from PetEdge", "log a $50 blade sharpening", "add my $400 rent for May". Categories MUST be one of: supplies, equipment, blade_sharpening, rent, utilities, phone, vehicle_mileage, marketing, software, insurance, education, doggy_supplies, other. Confirm the amount and category before saving.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        expense_date: { type: 'string', description: 'YYYY-MM-DD. Default to today if owner doesn\'t specify.' },
+        amount_dollars: { type: 'number', description: 'The amount in dollars (e.g. 25.99). Function converts to cents internally.' },
+        category: { type: 'string', description: 'One of: supplies, equipment, blade_sharpening, rent, utilities, phone, vehicle_mileage, marketing, software, insurance, education, doggy_supplies, other.' },
+        vendor: { type: 'string', description: 'Where they bought it. Optional (e.g. "PetEdge", "Andis").' },
+        payment_method: { type: 'string', description: 'cash | card | zelle | venmo | check | paypal | other. Optional.' },
+        notes: { type: 'string', description: 'Optional context — what was it for, etc.' },
+      },
+      required: ['amount_dollars', 'category'],
+    },
+  },
+  {
+    name: 'get_expense_summary',
+    description: 'Get total expenses + breakdown by category for a date range. Use when the owner asks "what did I spend this month?", "show me my expenses for the year", "what\'s my biggest expense category?", etc.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        start_date: { type: 'string', description: 'YYYY-MM-DD. Default to first day of current month if not given.' },
+        end_date: { type: 'string', description: 'YYYY-MM-DD. Default to today if not given.' },
+      },
+    },
+  },
+  {
+    name: 'get_expenses_by_category',
+    description: 'Get all expenses in a specific category for a date range. Use when the owner asks "how much did I spend on shampoo?", "list all my supplies expenses this year", etc. Returns each expense row with date/amount/vendor/notes.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', description: 'One of the valid categories (supplies, equipment, etc.).' },
+        start_date: { type: 'string', description: 'YYYY-MM-DD. Default to first day of current year.' },
+        end_date: { type: 'string', description: 'YYYY-MM-DD. Default to today.' },
+      },
+      required: ['category'],
+    },
+  },
+  {
+    name: 'get_profit_loss',
+    description: 'Compute Revenue − Expenses = Profit for a date range. Use when the owner asks "did I make money this month?", "what\'s my profit YTD?", "am I in the red?". Pulls revenue from card payments + expenses from the expenses table.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        start_date: { type: 'string', description: 'YYYY-MM-DD. Default to first day of current month.' },
+        end_date: { type: 'string', description: 'YYYY-MM-DD. Default to today.' },
+      },
+    },
+  },
 ]
 
 // Execute tool calls
@@ -2790,6 +2842,158 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
           client_name: clientRow.first_name + ' ' + (clientRow.last_name || ''),
           thread_id: threadId,
           message_id: newMsg.id,
+        }
+      }
+
+      case 'add_expense': {
+        var validCats = ['supplies', 'equipment', 'blade_sharpening', 'rent', 'utilities', 'phone', 'vehicle_mileage', 'marketing', 'software', 'insurance', 'education', 'doggy_supplies', 'other']
+        if (!validCats.includes(toolInput.category)) {
+          return { success: false, error: 'Invalid category. Must be one of: ' + validCats.join(', ') }
+        }
+        var dollars = parseFloat(toolInput.amount_dollars)
+        if (isNaN(dollars) || dollars < 0) {
+          return { success: false, error: 'amount_dollars must be a positive number' }
+        }
+        var expDate = toolInput.expense_date || new Date().toISOString().slice(0, 10)
+        var { data: newExp, error: expErr } = await supabaseAdmin
+          .from('expenses')
+          .insert({
+            groomer_id: groomerId,
+            expense_date: expDate,
+            amount_cents: Math.round(dollars * 100),
+            category: toolInput.category,
+            vendor: toolInput.vendor || null,
+            payment_method: toolInput.payment_method || null,
+            notes: toolInput.notes || null,
+          })
+          .select()
+          .single()
+        if (expErr) return { success: false, error: 'Could not save expense: ' + expErr.message }
+        return {
+          success: true,
+          expense_id: newExp.id,
+          summary: 'Logged $' + dollars.toFixed(2) + ' in ' + toolInput.category + (toolInput.vendor ? ' from ' + toolInput.vendor : '') + ' on ' + expDate,
+        }
+      }
+
+      case 'get_expense_summary': {
+        var now = new Date()
+        var defaultStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+        var defaultEnd = now.toISOString().slice(0, 10)
+        var startDate = toolInput.start_date || defaultStart
+        var endDate = toolInput.end_date || defaultEnd
+
+        var { data: exps, error: expErr } = await supabaseAdmin
+          .from('expenses')
+          .select('amount_cents, category, expense_date, vendor')
+          .eq('groomer_id', groomerId)
+          .gte('expense_date', startDate)
+          .lte('expense_date', endDate)
+        if (expErr) return { success: false, error: expErr.message }
+
+        var total = 0
+        var byCategory = {}
+        ;(exps || []).forEach(function (e) {
+          var amt = parseFloat(e.amount_cents) / 100
+          total += amt
+          byCategory[e.category] = (byCategory[e.category] || 0) + amt
+        })
+        var sortedCats = Object.entries(byCategory)
+          .map(function (kv) { return { category: kv[0], total_dollars: kv[1] } })
+          .sort(function (a, b) { return b.total_dollars - a.total_dollars })
+
+        return {
+          success: true,
+          start_date: startDate,
+          end_date: endDate,
+          total_expenses_dollars: total,
+          expense_count: (exps || []).length,
+          by_category: sortedCats,
+        }
+      }
+
+      case 'get_expenses_by_category': {
+        var validCats2 = ['supplies', 'equipment', 'blade_sharpening', 'rent', 'utilities', 'phone', 'vehicle_mileage', 'marketing', 'software', 'insurance', 'education', 'doggy_supplies', 'other']
+        if (!validCats2.includes(toolInput.category)) {
+          return { success: false, error: 'Invalid category. Must be one of: ' + validCats2.join(', ') }
+        }
+        var nowB = new Date()
+        var startDateB = toolInput.start_date || (nowB.getFullYear() + '-01-01')
+        var endDateB = toolInput.end_date || nowB.toISOString().slice(0, 10)
+
+        var { data: catExps } = await supabaseAdmin
+          .from('expenses')
+          .select('expense_date, amount_cents, vendor, payment_method, notes')
+          .eq('groomer_id', groomerId)
+          .eq('category', toolInput.category)
+          .gte('expense_date', startDateB)
+          .lte('expense_date', endDateB)
+          .order('expense_date', { ascending: false })
+
+        var totalC = 0
+        var rows = (catExps || []).map(function (e) {
+          var amt = parseFloat(e.amount_cents) / 100
+          totalC += amt
+          return {
+            date: e.expense_date,
+            amount_dollars: amt,
+            vendor: e.vendor,
+            payment_method: e.payment_method,
+            notes: e.notes,
+          }
+        })
+        return {
+          success: true,
+          category: toolInput.category,
+          start_date: startDateB,
+          end_date: endDateB,
+          total_dollars: totalC,
+          count: rows.length,
+          expenses: rows,
+        }
+      }
+
+      case 'get_profit_loss': {
+        var nowP = new Date()
+        var defStartP = new Date(nowP.getFullYear(), nowP.getMonth(), 1).toISOString().slice(0, 10)
+        var defEndP = nowP.toISOString().slice(0, 10)
+        var startP = toolInput.start_date || defStartP
+        var endP = toolInput.end_date || defEndP
+
+        // Revenue from payments (uses created_at timestamp)
+        var startIsoP = new Date(startP + 'T00:00:00').toISOString()
+        var endIsoP = new Date(endP + 'T23:59:59').toISOString()
+        var { data: pays } = await supabaseAdmin
+          .from('payments')
+          .select('amount, refunded_amount')
+          .eq('groomer_id', groomerId)
+          .gte('created_at', startIsoP)
+          .lte('created_at', endIsoP)
+        var revenue = 0
+        ;(pays || []).forEach(function (p) {
+          revenue += (parseFloat(p.amount || 0) - parseFloat(p.refunded_amount || 0))
+        })
+
+        // Expenses
+        var { data: expsP } = await supabaseAdmin
+          .from('expenses')
+          .select('amount_cents')
+          .eq('groomer_id', groomerId)
+          .gte('expense_date', startP)
+          .lte('expense_date', endP)
+        var expensesTotal = 0
+        ;(expsP || []).forEach(function (e) {
+          expensesTotal += parseFloat(e.amount_cents) / 100
+        })
+
+        return {
+          success: true,
+          start_date: startP,
+          end_date: endP,
+          revenue_dollars: revenue,
+          expenses_dollars: expensesTotal,
+          profit_dollars: revenue - expensesTotal,
+          in_the_black: (revenue - expensesTotal) >= 0,
         }
       }
 

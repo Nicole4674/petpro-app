@@ -410,6 +410,12 @@ export default function Sidebar({ onToggle }) {
               >
                 Tax Settings
               </div>
+              <div
+                className={'sidebar-subitem' + (isActive('/expenses') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/expenses') }}
+              >
+                💰 Expenses
+              </div>
               {/* Reports — hidden for launch, coming in v1.1
               <div
                 className={'sidebar-subitem' + (isActive('/payroll/reports') ? ' sidebar-subitem-active' : '')}
