@@ -5431,9 +5431,24 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                 onClick={(e) => onApptClick(appt, e)}
                                                 title={'Groomer: ' + groomerName + ' · Status: ' + apptStatus + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '') + (isDraggable ? ' · Drag to reschedule' : '')}
                                             >
-                                                <span className="appt-time">
-                                                    {formatTime(appt.start_time)}
-                                                    {appt.end_time ? ' – ' + formatTime(appt.end_time) : ''}
+                                                <span className="appt-time" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
+                                                    <span>
+                                                        {formatTime(appt.start_time)}
+                                                        {appt.end_time ? ' – ' + formatTime(appt.end_time) : ''}
+                                                    </span>
+                                                    {/* At-a-glance price — final_price wins (post-checkout) over quoted_price */}
+                                                    {(parseFloat(appt.final_price) > 0 || parseFloat(appt.quoted_price) > 0) && (
+                                                        <span style={{
+                                                            fontSize: '12px',
+                                                            fontWeight: 800,
+                                                            background: 'rgba(255,255,255,0.25)',
+                                                            padding: '1px 7px',
+                                                            borderRadius: '6px',
+                                                            whiteSpace: 'nowrap',
+                                                        }}>
+                                                            ${parseFloat(appt.final_price || appt.quoted_price || 0).toFixed(0)}
+                                                        </span>
+                                                    )}
                                                 </span>
                                                 <span className="appt-pet">{(appt.appointment_pets && appt.appointment_pets.length > 0) ? appt.appointment_pets.map(function(ap){ return ap.pets?.name }).filter(Boolean).join(', ') : appt.pets?.name}</span>
                                                 <span className="appt-client">{appt.clients?.first_name} {appt.clients?.last_name}</span>
@@ -5657,9 +5672,24 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                 onClick={(e) => onApptClick(appt, e)}
                 title={'Groomer: ' + groomerName + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '') + (isFlaggedPending ? ' · ⏳ Needs approval' : '') + (isDraggable ? ' · Drag to reschedule' : '')}
             >
-                <span className="appt-time">
-                    {formatTime(appt.start_time)}
-                    {appt.end_time ? ' – ' + formatTime(appt.end_time) : ''}
+                <span className="appt-time" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
+                    <span>
+                        {formatTime(appt.start_time)}
+                        {appt.end_time ? ' – ' + formatTime(appt.end_time) : ''}
+                    </span>
+                    {/* At-a-glance price — final_price wins (post-checkout) over quoted_price */}
+                    {(parseFloat(appt.final_price) > 0 || parseFloat(appt.quoted_price) > 0) && (
+                        <span style={{
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            background: 'rgba(255,255,255,0.25)',
+                            padding: '1px 7px',
+                            borderRadius: '6px',
+                            whiteSpace: 'nowrap',
+                        }}>
+                            ${parseFloat(appt.final_price || appt.quoted_price || 0).toFixed(0)}
+                        </span>
+                    )}
                 </span>
                 <span className="appt-pet">{(appt.appointment_pets && appt.appointment_pets.length > 0) ? appt.appointment_pets.map(function(ap){ return ap.pets?.name }).filter(Boolean).join(', ') : appt.pets?.name}</span>
                 <span className="appt-client">{appt.clients?.first_name} {appt.clients?.last_name}</span>
