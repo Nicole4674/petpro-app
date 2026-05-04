@@ -1680,9 +1680,10 @@ export default function ClientPortalDashboard() {
                                   <span>⏱️ {appt.services.time_block_minutes} min</span>
                                 )}
                               </div>
-                              {appt.service_notes && (
-                                <div className="cp-history-notes">📝 {appt.service_notes}</div>
-                              )}
+                              {/* INTENTIONALLY HIDDEN — service_notes are internal groomer notes
+                                  ("ask owner about groom", "photo of finished cut", staff reminders, etc).
+                                  Clients should NEVER see these. If a groomer wants to message a client,
+                                  use the Messages feature instead. */}
                               {/* Awaiting Payment banner — when booking is pending and balance is owed,
                                    this is a require-prepay shop. Tell client they need to pay to confirm. */}
                               {appt.status === 'pending' && (function () {
