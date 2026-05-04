@@ -1009,25 +1009,22 @@ export default function AIChatWidget() {
       )}
 
       {/* ─── CORNER BAR — mic + text + send, slides in to the LEFT of Suds ─── */}
+      {/* No background container — just floating controls. The text input
+          gets its own little pill so it stays readable; everything else
+          sits as colored circles with subtle drop-shadows. */}
       <div
         className="suds-bar"
         style={{
           position: 'fixed',
-          bottom: '36px',
-          right: '140px',          /* tucked just to the left of Suds (bigger Suds = more breathing room) */
-          maxWidth: 'calc(100vw - 180px)',
-          width: '440px',
+          bottom: '40px',
+          right: '160px',          /* tucked just to the left of bigger Suds */
+          maxWidth: 'calc(100vw - 200px)',
+          width: '460px',
           display: 'flex',
           alignItems: 'center',
-          gap: '6px',
-          /* Frosted glass — translucent + blur so the bar inherits the page color
-             instead of slapping a white pill on top of it. */
-          background: 'rgba(255, 255, 255, 0.55)',
-          backdropFilter: 'blur(14px) saturate(160%)',
-          WebkitBackdropFilter: 'blur(14px) saturate(160%)',
-          padding: '6px 6px 6px 10px',
-          borderRadius: '999px',
-          boxShadow: '0 8px 24px rgba(124, 58, 237, 0.22), 0 0 0 1.5px rgba(124, 58, 237, 0.25)',
+          gap: '8px',
+          background: 'transparent',
+          padding: 0,
           zIndex: 999,
         }}
       >
@@ -1062,47 +1059,66 @@ export default function AIChatWidget() {
           🎤
         </button>
 
-        {/* Text input — also fills with mic transcript while listening */}
-        <input
-          ref={inputRef}
-          className="suds-bar-input"
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyPress={handleKeyPress}
-          placeholder={
-            isListening ? 'Listening...' :
-            sending ? 'Suds is thinking...' :
-            migrationMode ? 'Chat or attach a screenshot...' :
-            'Talk or type to Suds...'
-          }
-          disabled={sending}
-          style={{
-            flex: 1,
-            border: 'none',
-            outline: 'none',
-            background: 'transparent',
-            fontSize: '14px',
-            padding: '6px 4px',
-            color: '#1f2937',
-            minWidth: 0,
-          }}
-        />
+        {/* Text input — wrapped in its own white pill so it stays readable
+            without putting a slab behind the entire bar. */}
+        <div style={{
+          flex: 1,
+          minWidth: 0,
+          display: 'flex',
+          alignItems: 'center',
+          background: 'rgba(255, 255, 255, 0.95)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          borderRadius: '999px',
+          padding: '0 14px',
+          boxShadow: '0 4px 14px rgba(124, 58, 237, 0.18), 0 0 0 1px rgba(124, 58, 237, 0.18)',
+          height: '40px',
+        }}>
+          <input
+            ref={inputRef}
+            className="suds-bar-input"
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyPress={handleKeyPress}
+            placeholder={
+              isListening ? 'Listening...' :
+              sending ? 'Suds is thinking...' :
+              migrationMode ? 'Chat or attach a screenshot...' :
+              'Talk or type to Suds...'
+            }
+            disabled={sending}
+            style={{
+              flex: 1,
+              border: 'none',
+              outline: 'none',
+              background: 'transparent',
+              fontSize: '14px',
+              padding: 0,
+              color: '#1f2937',
+              minWidth: 0,
+              height: '100%',
+            }}
+          />
+        </div>
 
-        {/* 📎 Attach image */}
+        {/* 📎 Attach image — floating circle so it's visible without a bar bg */}
         <button
           onClick={() => { if (fileInputRef.current) fileInputRef.current.click() }}
           disabled={sending}
           title="Attach image"
           style={{
-            width: '34px', height: '34px',
+            width: '36px', height: '36px',
             borderRadius: '50%',
             border: 'none',
-            background: 'transparent',
+            background: 'rgba(255, 255, 255, 0.95)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
             color: '#6b7280',
             fontSize: '15px',
             cursor: sending ? 'not-allowed' : 'pointer',
             flexShrink: 0,
+            boxShadow: '0 3px 10px rgba(124, 58, 237, 0.18)',
           }}
         >
           📎
@@ -1113,14 +1129,17 @@ export default function AIChatWidget() {
           onClick={openHistory}
           title="Open chat history"
           style={{
-            width: '34px', height: '34px',
+            width: '36px', height: '36px',
             borderRadius: '50%',
             border: 'none',
-            background: 'transparent',
+            background: 'rgba(255, 255, 255, 0.95)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
             color: '#6b7280',
             fontSize: '14px',
             cursor: 'pointer',
             flexShrink: 0,
+            boxShadow: '0 3px 10px rgba(124, 58, 237, 0.18)',
           }}
         >
           📜
@@ -1131,15 +1150,18 @@ export default function AIChatWidget() {
           onClick={toggleVoice}
           title={voiceEnabled ? 'Mute Suds' : 'Unmute Suds'}
           style={{
-            width: '34px', height: '34px',
+            width: '36px', height: '36px',
             borderRadius: '50%',
             border: 'none',
-            background: 'transparent',
+            background: 'rgba(255, 255, 255, 0.95)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
             color: '#6b7280',
             fontSize: '14px',
             cursor: 'pointer',
             flexShrink: 0,
             opacity: voiceEnabled ? 1 : 0.5,
+            boxShadow: '0 3px 10px rgba(124, 58, 237, 0.18)',
           }}
         >
           {voiceEnabled ? '🔊' : '🔇'}
@@ -1227,7 +1249,7 @@ export default function AIChatWidget() {
               alt="Suds the otter"
               className="suds-img"
               style={{
-                width: '110px',
+                width: '130px',
                 height: 'auto',
                 display: 'block',
                 animation: anim,
@@ -1244,7 +1266,7 @@ export default function AIChatWidget() {
           color: '#fff',
           fontSize: '11px',
           fontWeight: 700,
-          padding: '2px 9px',
+          padding: '2px 10px',
           borderRadius: '999px',
           whiteSpace: 'nowrap',
           letterSpacing: '0.3px',
