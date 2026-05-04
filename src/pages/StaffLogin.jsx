@@ -9,7 +9,7 @@
 // Auth uses Supabase email/password. After login, we verify the
 // user has a matching staff_members row (via auth_user_id).
 // =======================================================
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
@@ -22,44 +22,6 @@ export default function StaffLogin() {
   var [error, setError] = useState('')
   var [submitting, setSubmitting] = useState(false)
   var [signupSuccess, setSignupSuccess] = useState(false)
-
-  // Cloudflare Turnstile — required by Supabase CAPTCHA Protection on signup.
-  // Only renders + required when mode === 'signup' (login doesn't need a token).
-  var [turnstileToken, setTurnstileToken] = useState('')
-  var turnstileWidgetRef = useRef(null)
-
-  useEffect(function () {
-    // Only render Turnstile when we're in signup mode — re-render if mode flips
-    if (mode !== 'signup') {
-      setTurnstileToken('')
-      return
-    }
-    var widgetId = null
-    var interval = setInterval(function () {
-      if (window.turnstile && turnstileWidgetRef.current && !widgetId) {
-        try {
-          widgetId = window.turnstile.render(turnstileWidgetRef.current, {
-            sitekey: '0x4AAAAAADH8RMpMtYfD8GUy',
-            callback: function (token) { setTurnstileToken(token) },
-            'error-callback': function () { setTurnstileToken('') },
-            'expired-callback': function () { setTurnstileToken('') },
-          })
-          clearInterval(interval)
-        } catch (err) {
-          console.warn('[Turnstile] render failed:', err)
-          clearInterval(interval)
-        }
-      }
-    }, 200)
-    var timeout = setTimeout(function () { clearInterval(interval) }, 10000)
-    return function () {
-      clearInterval(interval)
-      clearTimeout(timeout)
-      if (widgetId && window.turnstile) {
-        try { window.turnstile.remove(widgetId) } catch (e) { /* noop */ }
-      }
-    }
-  }, [mode])
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -168,19 +130,11 @@ export default function StaffLogin() {
       }
       // status === 'eligible' — proceed
 
-      // Block submission if Turnstile didn't pass (Supabase will reject anyway)
-      if (!turnstileToken) {
-        setError('Please wait for the security check to complete, then try again.')
-        setSubmitting(false)
-        return
-      }
-
       // Create the auth user — trigger auto-links to staff_members by email
       var { error: signUpErr } = await supabase.auth.signUp({
         email: email.trim().toLowerCase(),
         password: password,
         options: {
-          captchaToken: turnstileToken,
           data: { role: 'staff' },
         },
       })
@@ -277,25 +231,12 @@ export default function StaffLogin() {
               </div>
             )}
 
-            {/* Cloudflare Turnstile — only renders in signup mode */}
-            {mode === 'signup' && (
-              <div
-                ref={turnstileWidgetRef}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'center',
-                  margin: '12px 0',
-                  minHeight: '65px',
-                }}
-              ></div>
-            )}
-
             <button
               type="submit"
-              disabled={submitting || (mode === 'signup' && !turnstileToken)}
+              disabled={submitting}
               style={{
                 width: '100%', padding: '14px',
-                background: (submitting || (mode === 'signup' && !turnstileToken)) ? '#9ca3af' : '#7c3aed',
+                background: submitting ? '#9ca3af' : '#7c3aed',
                 color: '#fff', border: 'none', borderRadius: '8px',
                 fontWeight: '700', fontSize: '15px', cursor: submitting ? 'wait' : 'pointer',
               }}

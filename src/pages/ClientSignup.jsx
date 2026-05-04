@@ -5,7 +5,7 @@
 // - New clients fill form, Supabase creates auth account
 // - DB trigger auto-creates matching clients row
 // =======================================================
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { notifyUser } from '../lib/push'
@@ -32,41 +32,6 @@ export default function ClientSignup() {
   var [confirmPassword, setConfirmPassword] = useState('')
   // SMS opt-in (defaults OFF — opt-in only, per Twilio TCR compliance rules)
   var [smsConsent, setSmsConsent] = useState(false)
-
-  // Cloudflare Turnstile state — Supabase rejects signups without a valid token
-  // (because we enabled CAPTCHA Protection at the project level). Same setup as
-  // the groomer Signup.jsx — invisible/managed widget that fires a callback
-  // when the visitor passes Cloudflare's silent bot check.
-  var [turnstileToken, setTurnstileToken] = useState('')
-  var turnstileWidgetRef = useRef(null)
-
-  useEffect(function () {
-    var widgetId = null
-    var interval = setInterval(function () {
-      if (window.turnstile && turnstileWidgetRef.current && !widgetId) {
-        try {
-          widgetId = window.turnstile.render(turnstileWidgetRef.current, {
-            sitekey: '0x4AAAAAADH8RMpMtYfD8GUy',
-            callback: function (token) { setTurnstileToken(token) },
-            'error-callback': function () { setTurnstileToken('') },
-            'expired-callback': function () { setTurnstileToken('') },
-          })
-          clearInterval(interval)
-        } catch (err) {
-          console.warn('[Turnstile] render failed:', err)
-          clearInterval(interval)
-        }
-      }
-    }, 200)
-    var timeout = setTimeout(function () { clearInterval(interval) }, 10000)
-    return function () {
-      clearInterval(interval)
-      clearTimeout(timeout)
-      if (widgetId && window.turnstile) {
-        try { window.turnstile.remove(widgetId) } catch (e) { /* noop */ }
-      }
-    }
-  }, [])
 
   useEffect(function () {
     if (!groomerId) {
@@ -139,20 +104,10 @@ export default function ClientSignup() {
       // We also do a best-effort update on the clients row immediately after
       // signup so consent is recorded even if the trigger doesn't copy it.
       var smsConsentTimestamp = smsConsent ? new Date().toISOString() : null
-      // Block submission if Turnstile didn't pass — Supabase will reject anyway
-      // (CAPTCHA Protection is enabled at the project level), but failing fast
-      // here gives a clearer error message to real users.
-      if (!turnstileToken) {
-        setError('Please wait for the security check to complete, then try again.')
-        setSubmitting(false)
-        return
-      }
-
       var { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: email.trim().toLowerCase(),
         password: password,
         options: {
-          captchaToken: turnstileToken,
           data: {
             full_name: fullNameCombined,
             phone: phone.trim(),
@@ -419,26 +374,13 @@ export default function ClientSignup() {
             </label>
           </div>
 
-          {/* Cloudflare Turnstile bot check — invisible/managed widget. Renders
-              into this div via window.turnstile.render in the useEffect above.
-              Reserves min-height so the form doesn't jump when the widget appears. */}
-          <div
-            ref={turnstileWidgetRef}
-            style={{
-              display: 'flex',
-              justifyContent: 'center',
-              margin: '12px 0',
-              minHeight: '65px',
-            }}
-          ></div>
-
           <button
             type="submit"
-            disabled={submitting || !turnstileToken}
+            disabled={submitting}
             style={{
               width: '100%',
               padding: '14px',
-              background: (submitting || !turnstileToken) ? '#9ca3af' : brandColor,
+              background: submitting ? '#9ca3af' : brandColor,
               color: '#fff',
               border: 'none',
               borderRadius: '8px',
