@@ -2254,10 +2254,62 @@ export default function ClientDetail() {
                 </div>
               ) : client.notes ? (
                 <div className="cp-note-item cp-note-item-client">
-                  <div className="cp-note-header-row">
+                  <div className="cp-note-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                     <span className="cp-note-badge-client">📋 Imported Notes</span>
+                    {editingNoteId !== '__imported__' && (
+                      <button
+                        onClick={() => { setEditingNoteId('__imported__'); setEditingNoteText(client.notes || '') }}
+                        style={{ background: 'transparent', border: 'none', color: '#7c3aed', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                      >
+                        ✏️ Edit
+                      </button>
+                    )}
                   </div>
-                  <div className="cp-note-text" style={{ whiteSpace: 'pre-wrap' }}>{client.notes}</div>
+                  {editingNoteId === '__imported__' ? (
+                    <div style={{ marginTop: '6px' }}>
+                      <textarea
+                        value={editingNoteText}
+                        onChange={(e) => setEditingNoteText(e.target.value)}
+                        rows={4}
+                        style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', fontFamily: 'inherit', boxSizing: 'border-box', resize: 'vertical' }}
+                      />
+                      <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '6px' }}>
+                        <button
+                          onClick={cancelEditNote}
+                          disabled={savingEdit}
+                          style={{ padding: '6px 12px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!editingNoteText.trim()) return
+                            setSavingEdit(true)
+                            const { error: upErr } = await supabase
+                              .from('clients')
+                              .update({ notes: editingNoteText.trim() })
+                              .eq('id', id)
+                            if (upErr) {
+                              alert('Error saving: ' + upErr.message)
+                              setSavingEdit(false)
+                              return
+                            }
+                            setEditingNoteId(null)
+                            setEditingNoteText('')
+                            setSavingEdit(false)
+                            // Refresh client data so the note shows updated text
+                            fetchClientAndPets()
+                          }}
+                          disabled={savingEdit || !editingNoteText.trim()}
+                          style={{ padding: '6px 12px', background: savingEdit ? '#a78bfa' : '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}
+                        >
+                          {savingEdit ? 'Saving…' : '💾 Save'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="cp-note-text" style={{ whiteSpace: 'pre-wrap' }}>{client.notes}</div>
+                  )}
                 </div>
               ) : (
                 <div className="cp-notes-empty-mini">No client notes yet</div>
