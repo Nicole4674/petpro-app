@@ -25,6 +25,62 @@ export default function AIChatWidget() {
   const [insights, setInsights] = useState([])
   const navigate = useNavigate()
 
+  // ════════════ SUDS VOICE — TTS playback ════════════
+  // Voice toggle persists in localStorage so the groomer's preference sticks.
+  // Default: ON for groomers (they'll love hearing Suds), OFF if they mute.
+  const [voiceEnabled, setVoiceEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true
+    var saved = window.localStorage.getItem('petpro_suds_voice')
+    return saved === null ? true : saved === '1'
+  })
+  const [sudsTalking, setSudsTalking] = useState(false)
+  const audioRef = useRef(null)
+
+  function toggleVoice() {
+    var next = !voiceEnabled
+    setVoiceEnabled(next)
+    try { window.localStorage.setItem('petpro_suds_voice', next ? '1' : '0') } catch (e) { /* noop */ }
+    // If turning OFF mid-speech, stop the audio
+    if (!next && audioRef.current) {
+      try { audioRef.current.pause(); audioRef.current.currentTime = 0 } catch (e) { /* noop */ }
+      setSudsTalking(false)
+    }
+  }
+
+  // Suds speaks — calls the petpro-tts edge function, plays the mp3 it returns.
+  // Fire-and-forget — never blocks the chat flow if voice fails.
+  async function speakSuds(text) {
+    if (!voiceEnabled || !text || !text.trim()) return
+    try {
+      // Stop any currently-playing audio first (don't stack overlapping clips)
+      if (audioRef.current) {
+        try { audioRef.current.pause() } catch (e) { /* noop */ }
+      }
+      setSudsTalking(true)
+      const { data, error } = await supabase.functions.invoke('petpro-tts', {
+        body: { text: text },
+      })
+      if (error) throw error
+      // The function returns binary audio — Supabase wraps it in a Blob
+      const blob = data instanceof Blob ? data : new Blob([data], { type: 'audio/mpeg' })
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audioRef.current = audio
+      audio.onended = function () {
+        setSudsTalking(false)
+        URL.revokeObjectURL(url)
+      }
+      audio.onerror = function () {
+        setSudsTalking(false)
+        URL.revokeObjectURL(url)
+      }
+      await audio.play()
+    } catch (err) {
+      console.warn('[Suds voice] playback failed (non-fatal):', err)
+      setSudsTalking(false)
+    }
+  }
+
   // Check the toggle on mount — reads shop_settings.groomer_ai_enabled for the current user
   useEffect(function () {
     var cancelled = false
@@ -376,6 +432,8 @@ export default function AIChatWidget() {
         setMessages(prev => [...prev, { role: 'assistant', text: data.text }])
         // Successful AI response — count this against their monthly cap
         logAIUsage('chat_widget')
+        // Suds speaks his reply (fire-and-forget — never blocks the UI)
+        speakSuds(data.text)
       }
     } catch (err) {
       console.error('Chat failed:', err)
@@ -564,10 +622,11 @@ export default function AIChatWidget() {
             title="Drag to move"
           >
             <div className="chat-header-info" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {/* Mini Suds in the header so he stays visible while chatting */}
+              {/* Mini Suds in the header — bounces when he's speaking */}
               <img
                 src="/suds.png"
                 alt="Suds"
+                className={sudsTalking ? 'suds-celebrate' : ''}
                 style={{ width: '32px', height: '32px', objectFit: 'contain', flexShrink: 0 }}
               />
               <span className="chat-header-title">
@@ -577,6 +636,15 @@ export default function AIChatWidget() {
               </span>
             </div>
             <div className="chat-header-actions">
+              {/* Voice on/off — Suds talks back when ON. Saved per-browser. */}
+              <button
+                className="chat-clear-btn"
+                onClick={toggleVoice}
+                title={voiceEnabled ? 'Mute Suds (voice ON)' : 'Unmute Suds (voice OFF)'}
+                style={{ opacity: voiceEnabled ? 1 : 0.5 }}
+              >
+                {voiceEnabled ? '🔊' : '🔇'}
+              </button>
               <button className="chat-clear-btn" onClick={clearChat} title="Clear chat">🗑</button>
               <button className="chat-close-btn" onClick={() => setIsOpen(false)}>✕</button>
             </div>
