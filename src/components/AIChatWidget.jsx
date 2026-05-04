@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom'
 export default function AIChatWidget() {
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState([
-    { role: 'assistant', text: 'Hey! I\'m PetPro AI. Ask me anything about your schedule, clients, or pets. I\'m here to help!' }
+    { role: 'assistant', text: 'Hey! I\'m Suds 🦦 — your PetPro AI buddy. Ask me anything about your schedule, clients, pets, expenses, marketing, or just chat. I\'m here to help!' }
   ])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -464,11 +464,60 @@ export default function AIChatWidget() {
 
   return (
     <>
-      {/* Chat Bubble Button */}
+      {/* ════════════ SUDS THE OTTER — chat bubble mascot ════════════
+          Replaces the boring 💬 emoji bubble. Suds is the brand face for
+          PetPro AI. Subtle breathing animation so he feels alive, scale-up
+          on hover, click to open chat. */}
       {!isOpen && (
-        <button className="chat-bubble-btn" onClick={() => setIsOpen(true)} style={{ position: 'fixed', /* fallback — most app styles set this already */ }}>
-          <span className="chat-bubble-icon">💬</span>
-          <span className="chat-bubble-label">PetPro AI</span>
+        <button
+          className="chat-bubble-btn suds-bubble"
+          onClick={() => setIsOpen(true)}
+          aria-label="Chat with PetPro AI"
+          style={{
+            position: 'fixed',
+            // Override the default bubble look — Suds needs his own space
+            background: 'transparent',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            // Drop-shadow keeps Suds visible against any background
+            filter: 'drop-shadow(0 6px 14px rgba(124, 58, 237, 0.25))',
+            // Scale + bounce on hover handled in CSS keyframes below
+            transition: 'transform 0.2s ease-out',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.08)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
+        >
+          {/* The image itself — has its own gentle idle breathing animation
+              applied via the .suds-img class (added to App.css below). */}
+          <img
+            src="/suds.png"
+            alt="Suds the otter"
+            className="suds-img"
+            style={{
+              width: '80px',
+              height: 'auto',
+              display: 'block',
+              animation: 'sudsBreathe 3.5s ease-in-out infinite',
+            }}
+          />
+          {/* Tiny "PetPro AI" tag below Suds so first-time users know who he is */}
+          <span style={{
+            position: 'absolute',
+            bottom: '-4px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: '#7c3aed',
+            color: '#fff',
+            fontSize: '10px',
+            fontWeight: 700,
+            padding: '2px 8px',
+            borderRadius: '999px',
+            whiteSpace: 'nowrap',
+            letterSpacing: '0.3px',
+          }}>
+            PetPro AI
+          </span>
           {/* Red badge with unread insights count */}
           {insights.length > 0 && (
             <span style={{
@@ -514,8 +563,13 @@ export default function AIChatWidget() {
             style={{ cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none', userSelect: 'none' }}
             title="Drag to move"
           >
-            <div className="chat-header-info">
-              <span className="chat-header-dot"></span>
+            <div className="chat-header-info" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {/* Mini Suds in the header so he stays visible while chatting */}
+              <img
+                src="/suds.png"
+                alt="Suds"
+                style={{ width: '32px', height: '32px', objectFit: 'contain', flexShrink: 0 }}
+              />
               <span className="chat-header-title">
                 PetPro AI
                 {adminMode ? ' (Admin)' : ''}

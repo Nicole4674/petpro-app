@@ -855,7 +855,6 @@ var toolDefinitions = [
       required: ['client_id', 'message_text'],
     },
   },
-,
   {
     name: 'add_expense',
     description: 'Log a new business expense for the groomer. Use when the owner mentions a purchase, bill, or any business cost — examples: "I just bought $25 of shampoo from PetEdge", "log a $50 blade sharpening", "add my $400 rent for May". Categories MUST be one of: supplies, equipment, blade_sharpening, rent, utilities, phone, vehicle_mileage, marketing, software, insurance, education, doggy_supplies, other. Confirm the amount and category before saving.',

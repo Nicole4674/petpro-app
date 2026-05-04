@@ -15149,3 +15149,71 @@
     opacity: 0.6;
     cursor: not-allowed;
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   SUDS THE OTTER — chat bubble mascot animations
+   ════════════════════════════════════════════════════════════════════
+   Suds replaces the boring 💬 bubble. Animations give him life:
+     • sudsBreathe — gentle vertical bob, like he's breathing/swaying
+     • sudsWiggle — happy wiggle on hover (handled in JSX inline)
+     • sudsCelebrate — used later for milestones (Phase 3)
+   ════════════════════════════════════════════════════════════════════ */
+
+/* Idle: gentle breathing motion — Suds is always alive but never distracting */
+@keyframes sudsBreathe {
+    0%, 100% {
+        transform: translateY(0px) rotate(0deg);
+    }
+    50% {
+        transform: translateY(-3px) rotate(-1deg);
+    }
+}
+
+/* When the user hovers, Suds gives a little welcoming tilt */
+.suds-bubble:hover .suds-img {
+    animation: sudsWelcome 0.6s ease-in-out;
+}
+@keyframes sudsWelcome {
+    0% { transform: rotate(0deg); }
+    25% { transform: rotate(-6deg) scale(1.05); }
+    50% { transform: rotate(6deg) scale(1.1); }
+    75% { transform: rotate(-3deg) scale(1.05); }
+    100% { transform: rotate(0deg) scale(1); }
+}
+
+/* Celebration animation — for big moments like fully booked day, $1k day,
+   100 appointments, etc. Add the .suds-celebrate class to trigger. */
+@keyframes sudsCelebrate {
+    0%, 100% {
+        transform: translateY(0px) rotate(0deg) scale(1);
+    }
+    20% {
+        transform: translateY(-15px) rotate(-12deg) scale(1.15);
+    }
+    40% {
+        transform: translateY(0px) rotate(8deg) scale(1.1);
+    }
+    60% {
+        transform: translateY(-10px) rotate(-6deg) scale(1.12);
+    }
+    80% {
+        transform: translateY(-2px) rotate(3deg) scale(1.05);
+    }
+}
+.suds-celebrate {
+    animation: sudsCelebrate 1.2s ease-in-out !important;
+}
+
+/* Override the default chat-bubble-btn styling for Suds — no rounded background,
+   no purple fill. The image itself IS the button. */
+.suds-bubble {
+    background: transparent !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    padding: 0 !important;
+    bottom: 24px;
+    right: 24px;
+    z-index: 1000;
+}
