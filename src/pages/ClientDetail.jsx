@@ -503,6 +503,39 @@ export default function ClientDetail() {
     setSavingNote(false)
   }
 
+  // ─── Inline note edit (no delete — preserves audit trail) ────────────
+  // Lets the groomer fix typos / update info on existing notes. Tracks
+  // which note is currently in edit mode + the working text in the textarea.
+  const [editingNoteId, setEditingNoteId] = useState(null)
+  const [editingNoteText, setEditingNoteText] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+
+  const startEditNote = (note) => {
+    setEditingNoteId(note.id)
+    setEditingNoteText(note.content || '')
+  }
+  const cancelEditNote = () => {
+    setEditingNoteId(null)
+    setEditingNoteText('')
+  }
+  const saveEditNote = async () => {
+    if (!editingNoteId || !editingNoteText.trim()) return
+    setSavingEdit(true)
+    const { error } = await supabase
+      .from('notes')
+      .update({ content: editingNoteText.trim(), updated_at: new Date().toISOString() })
+      .eq('id', editingNoteId)
+    if (error) {
+      alert('Error saving edit: ' + error.message)
+      setSavingEdit(false)
+      return
+    }
+    setEditingNoteId(null)
+    setEditingNoteText('')
+    setSavingEdit(false)
+    fetchNotes()
+  }
+
   // ===== Edit Client handlers =====
   const startEditClient = () => {
     if (!client) return
@@ -2171,11 +2204,51 @@ export default function ClientDetail() {
                 <div className="cp-notes-list">
                   {clientNotes.map(note => (
                     <div key={note.id} className="cp-note-item cp-note-item-client">
-                      <div className="cp-note-header-row">
-                        <span className="cp-note-badge-client">📋 Client</span>
-                        <span className="cp-note-date">{formatDate(note.created_at)}</span>
+                      <div className="cp-note-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <span className="cp-note-badge-client">📋 Client</span>
+                          <span className="cp-note-date">{formatDate(note.created_at)}</span>
+                          {note.updated_at && note.updated_at !== note.created_at && (
+                            <span style={{ fontSize: '10px', color: '#9ca3af', fontStyle: 'italic' }}>· edited</span>
+                          )}
+                        </div>
+                        {editingNoteId !== note.id && (
+                          <button
+                            onClick={() => startEditNote(note)}
+                            style={{ background: 'transparent', border: 'none', color: '#7c3aed', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                          >
+                            ✏️ Edit
+                          </button>
+                        )}
                       </div>
-                      <div className="cp-note-text">{note.content}</div>
+                      {editingNoteId === note.id ? (
+                        <div style={{ marginTop: '6px' }}>
+                          <textarea
+                            value={editingNoteText}
+                            onChange={(e) => setEditingNoteText(e.target.value)}
+                            rows={3}
+                            style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', fontFamily: 'inherit', boxSizing: 'border-box', resize: 'vertical' }}
+                          />
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '6px' }}>
+                            <button
+                              onClick={cancelEditNote}
+                              disabled={savingEdit}
+                              style={{ padding: '6px 12px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={saveEditNote}
+                              disabled={savingEdit || !editingNoteText.trim()}
+                              style={{ padding: '6px 12px', background: savingEdit ? '#a78bfa' : '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}
+                            >
+                              {savingEdit ? 'Saving…' : '💾 Save'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="cp-note-text">{note.content}</div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -2215,11 +2288,51 @@ export default function ClientDetail() {
                         </div>
                         {petNotes.map(note => (
                           <div key={note.id} className="cp-note-item cp-note-item-groom">
-                            <div className="cp-note-header-row">
-                              <span className="cp-note-badge-groom">✂️ Grooming</span>
-                              <span className="cp-note-date">{formatDate(note.created_at)}</span>
+                            <div className="cp-note-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                <span className="cp-note-badge-groom">✂️ Grooming</span>
+                                <span className="cp-note-date">{formatDate(note.created_at)}</span>
+                                {note.updated_at && note.updated_at !== note.created_at && (
+                                  <span style={{ fontSize: '10px', color: '#9ca3af', fontStyle: 'italic' }}>· edited</span>
+                                )}
+                              </div>
+                              {editingNoteId !== note.id && (
+                                <button
+                                  onClick={() => startEditNote(note)}
+                                  style={{ background: 'transparent', border: 'none', color: '#7c3aed', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                                >
+                                  ✏️ Edit
+                                </button>
+                              )}
                             </div>
-                            <div className="cp-note-text">{note.content}</div>
+                            {editingNoteId === note.id ? (
+                              <div style={{ marginTop: '6px' }}>
+                                <textarea
+                                  value={editingNoteText}
+                                  onChange={(e) => setEditingNoteText(e.target.value)}
+                                  rows={3}
+                                  style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', fontFamily: 'inherit', boxSizing: 'border-box', resize: 'vertical' }}
+                                />
+                                <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '6px' }}>
+                                  <button
+                                    onClick={cancelEditNote}
+                                    disabled={savingEdit}
+                                    style={{ padding: '6px 12px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    onClick={saveEditNote}
+                                    disabled={savingEdit || !editingNoteText.trim()}
+                                    style={{ padding: '6px 12px', background: savingEdit ? '#a78bfa' : '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}
+                                  >
+                                    {savingEdit ? 'Saving…' : '💾 Save'}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="cp-note-text">{note.content}</div>
+                            )}
                           </div>
                         ))}
                       </div>
