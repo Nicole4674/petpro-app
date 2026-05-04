@@ -6372,6 +6372,15 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                     conflicts: conflicts.length,
                     conflictDates: conflicts.map(c => c.appointment_date),
                 })
+
+                // Suds loves a recurring series — that's recurring revenue.
+                try {
+                    var seriesMsg = rowsToInsert.length >= 12
+                        ? 'A whole year of recurring bookings — locked in! That\'s smart business!'
+                        : 'Recurring series booked! ' + rowsToInsert.length + ' appointments locked in. Way to retain that client!'
+                    window.dispatchEvent(new CustomEvent('petpro:celebrate', { detail: { message: seriesMsg } }))
+                } catch (e) { /* non-fatal */ }
+
                 setSaving(false)
                 return // Don't call onSaved yet — user needs to click "Done" on summary
             } catch (err) {
@@ -6479,7 +6488,63 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
             }
         }
 
+        // ════════════ Suds Celebration (Phase 3) ════════════
+        // After a successful single-appointment save, ping Suds with a
+        // milestone-aware message. He picks the right pose + voice line.
+        // Wrapped in try/catch — booking already saved, this is sugar on top.
+        try {
+            await fireSudsCelebration({
+                groomerId: user.id,
+                bookingDate: form.appointment_date,
+                bookingTotal: totalPrice ? parseFloat(totalPrice) : 0,
+            })
+        } catch (e) { /* Suds is shy today — non-fatal */ }
+
         onSaved()
+    }
+
+    // Quick milestone check for Suds — counts today's bookings + sum total,
+    // chooses the punchiest celebration line, dispatches the event for the widget.
+    async function fireSudsCelebration(opts) {
+        try {
+            // Only celebrate when booking is for TODAY (no celebrate for distant future bookings)
+            var todayStr = new Date().toISOString().slice(0, 10)
+            var isToday = opts.bookingDate === todayStr
+
+            // Always run the count — even for future bookings we celebrate the count milestone
+            var { data: todayAppts } = await supabase
+                .from('appointments')
+                .select('id, quoted_price')
+                .eq('groomer_id', opts.groomerId)
+                .eq('appointment_date', todayStr)
+                .not('status', 'in', '(cancelled,rescheduled,no_show)')
+
+            var count = (todayAppts || []).length
+            var dayTotal = (todayAppts || []).reduce(function (sum, a) {
+                return sum + (parseFloat(a.quoted_price) || 0)
+            }, 0)
+
+            // Pick the message based on milestones (most impressive first)
+            var message = null
+            if (dayTotal >= 1000 && isToday) {
+                message = 'Holy cow! You just cracked a thousand-dollar day! Look at you go!'
+            } else if (count >= 10 && isToday) {
+                message = 'Ten appointments today! That\'s a full plate — you\'re crushing it!'
+            } else if (count >= 5 && isToday) {
+                message = 'Five today! Nice rhythm — you\'re cooking!'
+            } else if (count === 1 && isToday) {
+                message = 'First booking of the day — let\'s go!'
+            } else if (opts.bookingTotal >= 200) {
+                message = 'Nice ticket! That\'s a solid one on the books!'
+            } else {
+                message = 'Booked! Another one in the calendar.'
+            }
+
+            window.dispatchEvent(new CustomEvent('petpro:celebrate', { detail: { message: message } }))
+        } catch (e) {
+            // Even if the count query fails, give a tiny win nod
+            window.dispatchEvent(new CustomEvent('petpro:celebrate', { detail: { message: 'Booked!' } }))
+        }
     }
 
     // Task #19 — After a recurring series is saved, show summary before closing

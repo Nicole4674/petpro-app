@@ -36,6 +36,236 @@ export default function AIChatWidget() {
   const [sudsTalking, setSudsTalking] = useState(false)
   const audioRef = useRef(null)
 
+  // ════════════ SUDS MOOD ENGINE — pose + animation per context ════════════
+  // Suds has 5 poses, each lives in /public/:
+  //   idle      → /suds.png            (default — neutral, polo + hat)
+  //   waving    → /suds-waving.png     (paw raised — greetings + first open)
+  //   thinking  → /suds-thinking.png   (paper + pen — AI is processing/booking)
+  //   celebrate → /suds-celebrate.png  (arms up — milestone wins)
+  //   sleeping  → /suds-sleeping.png   (Zzz — after-hours when chat closed)
+  //
+  // The mood is auto-derived from app state (sending, sudsTalking, time of day).
+  // Other pages can fire window.dispatchEvent(new CustomEvent('petpro:celebrate',
+  // { detail: { message: 'Way to go!' } })) to make Suds jump + cheer.
+  const [sudsMood, setSudsMood] = useState('idle')
+  const moodTimerRef = useRef(null)
+
+  // Helper — temporarily set a mood, then revert to 'idle' after `ms` milliseconds.
+  // Used for transient celebrations + first-open waves so they don't get stuck.
+  function flashMood(mood, ms) {
+    if (moodTimerRef.current) clearTimeout(moodTimerRef.current)
+    setSudsMood(mood)
+    moodTimerRef.current = setTimeout(function () {
+      setSudsMood('idle')
+      moodTimerRef.current = null
+    }, ms || 2500)
+  }
+
+  // Derived pose — chosen each render based on what's happening right now.
+  // Priority (highest first):
+  //   1. sending  → thinking (AI is working)
+  //   2. mood is 'celebrate' or 'waving' (transient flash) → use it
+  //   3. history closed AND no active speech bubble AND after-hours (8pm–6am) → sleeping
+  //   4. fallback → idle (default Suds)
+  function pickSudsPose() {
+    if (sending) return 'thinking'
+    if (sudsMood === 'celebrate') return 'celebrate'
+    if (sudsMood === 'waving') return 'waving'
+    if (!historyOpen && !bubble) {
+      var hour = new Date().getHours()
+      if (hour >= 20 || hour < 6) return 'sleeping'
+    }
+    return 'idle'
+  }
+
+  function sudsImageFor(pose) {
+    if (pose === 'waving') return '/suds-waving.png'
+    if (pose === 'thinking') return '/suds-thinking.png'
+    if (pose === 'celebrate') return '/suds-celebrate.png'
+    if (pose === 'sleeping') return '/suds-sleeping.png'
+    return '/suds.png'
+  }
+
+  // Wave + greet ONCE on mount — Suds is now always visible, so the wave is
+  // his "hi there!" when the user lands on the page. Delayed slightly so it
+  // doesn't fire before the page paints.
+  const greetedRef = useRef(false)
+  useEffect(function () {
+    if (greetedRef.current) return
+    greetedRef.current = true
+    var t = setTimeout(function () { flashMood('waving', 2400) }, 800)
+    return function () { clearTimeout(t) }
+  }, [])
+
+  // ════════════ MILESTONE LISTENER — petpro:celebrate event ════════════
+  // Any page can trigger Suds to jump + cheer by dispatching:
+  //   window.dispatchEvent(new CustomEvent('petpro:celebrate',
+  //     { detail: { message: 'Booked $1,200 today! Way to go!' } }))
+  // We celebrate via pose AND voice (if voice is on). The message is what Suds says.
+  useEffect(function () {
+    function onCelebrate(ev) {
+      var detail = (ev && ev.detail) || {}
+      var message = detail.message || 'Way to go! That\'s another win for the books!'
+      flashMood('celebrate', 3000)
+      // Speak the celebration line — fire-and-forget, voice toggle still respected
+      speakSuds(message)
+      // Pop a speech bubble too so it's visible even with voice off
+      showSpeech(message, 5500)
+    }
+    window.addEventListener('petpro:celebrate', onCelebrate)
+    return function () { window.removeEventListener('petpro:celebrate', onCelebrate) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceEnabled])
+
+  // Re-render every minute while chat is closed so sleeping pose kicks in/out
+  // automatically when the clock crosses 8pm or 6am. Cheap — single setInterval.
+  const [, setMinuteTick] = useState(0)
+  useEffect(function () {
+    if (isOpen) return
+    var t = setInterval(function () { setMinuteTick(function (n) { return n + 1 }) }, 60000)
+    return function () { clearInterval(t) }
+  }, [isOpen])
+
+  // ════════════ PHASE 4 — BONZI-STYLE FLOATING UI ════════════
+  // Replaces the floating chat window with:
+  //   • Always-visible Suds (bottom-right)
+  //   • Speech bubble that pops above him when he talks
+  //   • Tiny purple mic+text bar that slides in to the LEFT of Suds when expanded
+  //   • Slide-up history panel for the full conversation
+  //
+  // Why: a chat window in the corner is corporate. Suds talking back is
+  // a vibe. The bar feels like talking TO him, not typing INTO a form.
+
+  // bubble = { text, longText? } | null. longText is the full message when
+  // text is the truncated preview shown in the bubble (with "Read more").
+  const [bubble, setBubble] = useState(null)
+  const bubbleTimerRef = useRef(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+
+  // Mic / Web Speech API state
+  // (Using browser-native SpeechRecognition for tonight — free, instant, Chrome-perfect.
+  //  TODO Phase 5: swap to Whisper edge function for accuracy + cross-browser support.)
+  const [isListening, setIsListening] = useState(false)
+  const recognitionRef = useRef(null)
+
+  // Pop a speech bubble above Suds. Long messages get truncated to a preview;
+  // user can tap "Read more →" to open the full history panel.
+  function showSpeech(text, durationMs) {
+    if (!text) return
+    if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current)
+
+    var trimmed = String(text).trim()
+    var preview = trimmed
+    var isTruncated = false
+    if (trimmed.length > 240) {
+      preview = trimmed.slice(0, 220).trim() + '...'
+      isTruncated = true
+    }
+    setBubble({ text: preview, longText: isTruncated ? trimmed : null })
+
+    // Auto-dismiss after a duration scaled to text length (min 6s, max 18s)
+    var ms = durationMs || Math.max(6000, Math.min(18000, trimmed.length * 60))
+    bubbleTimerRef.current = setTimeout(function () {
+      setBubble(null)
+      bubbleTimerRef.current = null
+    }, ms)
+  }
+
+  function dismissBubble() {
+    if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current)
+    bubbleTimerRef.current = null
+    setBubble(null)
+  }
+
+  // Cleanup any pending bubble timer on unmount
+  useEffect(function () {
+    return function () {
+      if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current)
+      if (moodTimerRef.current) clearTimeout(moodTimerRef.current)
+    }
+  }, [])
+
+  // ─── Voice input via SpeechRecognition (Web Speech API) ───
+  // Some browsers prefix it (webkitSpeechRecognition). We feature-detect once.
+  function getSpeechRecognition() {
+    if (typeof window === 'undefined') return null
+    return window.SpeechRecognition || window.webkitSpeechRecognition || null
+  }
+
+  function startListening() {
+    var SR = getSpeechRecognition()
+    if (!SR) {
+      // Fallback: tell the user to type instead — most groomers use Chrome so this is rare
+      showSpeech("Mic isn't supported in this browser — try Chrome, or just type to me!", 7000)
+      return
+    }
+    try {
+      // Stop any in-flight TTS so Suds doesn't talk over the user
+      if (audioRef.current) {
+        try { audioRef.current.pause() } catch (e) { /* noop */ }
+        setSudsTalking(false)
+      }
+      var recognition = new SR()
+      recognition.continuous = false
+      recognition.interimResults = true
+      recognition.lang = 'en-US'
+
+      recognition.onstart = function () { setIsListening(true) }
+      recognition.onerror = function (ev) {
+        setIsListening(false)
+        // 'no-speech' is not really an error — just the user not talking
+        if (ev && ev.error && ev.error !== 'no-speech' && ev.error !== 'aborted') {
+          showSpeech("I didn't catch that — try again, or type instead.", 5000)
+        }
+      }
+      recognition.onend = function () {
+        setIsListening(false)
+        recognitionRef.current = null
+      }
+      recognition.onresult = function (ev) {
+        var transcript = ''
+        for (var i = ev.resultIndex; i < ev.results.length; i++) {
+          transcript += ev.results[i][0].transcript
+        }
+        // Live-update the input field as they speak
+        setInput(transcript)
+        // Auto-send when the API marks it final
+        if (ev.results[ev.results.length - 1].isFinal) {
+          var finalText = transcript.trim()
+          if (finalText) {
+            // Stuff it into input and trigger send
+            // Tiny delay so React has time to flush the input state
+            setTimeout(function () {
+              setInput('')
+              sendMessageRaw(finalText)
+            }, 50)
+          }
+        }
+      }
+
+      recognitionRef.current = recognition
+      recognition.start()
+    } catch (err) {
+      console.warn('[Suds mic] startListening failed:', err)
+      setIsListening(false)
+    }
+  }
+
+  function stopListening() {
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop() } catch (e) { /* noop */ }
+    }
+    setIsListening(false)
+  }
+
+  // Send a raw text message bypassing the input field — used by mic auto-send
+  // and could be reused by quick-action chips later.
+  function sendMessageRaw(text) {
+    setInput(text)
+    // useState is async, so we trigger send on the next tick after input has set
+    setTimeout(function () { sendMessage() }, 30)
+  }
+
   function toggleVoice() {
     var next = !voiceEnabled
     setVoiceEnabled(next)
@@ -126,6 +356,8 @@ export default function AIChatWidget() {
 
   // Smart Nudges loader — fetches unread insights so the badge shows the count.
   // We re-check after the chat closes so dismissed/actioned ones disappear.
+  // Phase 4: also auto-pop the most-recent insight as a speech bubble so the
+  // groomer actually SEES it (instead of buried in a panel they never open).
   useEffect(function () {
     var cancelled = false
     async function loadInsights() {
@@ -133,22 +365,32 @@ export default function AIChatWidget() {
         var { data: { user } } = await supabase.auth.getUser()
         if (!user) return
         var items = await fetchUnreadInsights(user.id)
-        if (!cancelled) setInsights(items || [])
+        if (cancelled) return
+        setInsights(items || [])
+        // Pop the FIRST insight as a speech bubble — slight delay so it appears
+        // after the welcome wave finishes. User can tap "Read more →" to open
+        // the full Smart Nudges list in the history panel.
+        if (items && items.length > 0) {
+          var top = items[0]
+          var preview = (top.title || 'Heads up') + ' — ' + (top.body || '')
+          setTimeout(function () { showSpeech(preview, 12000) }, 3500)
+        }
       } catch (e) { /* badge just won't show — non-critical */ }
     }
     loadInsights()
     return function () { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // When the chat opens, mark all unread as read so the badge clears
-  // (insights stay visible inside the chat until dismissed/actioned)
+  // When the history panel opens, mark all unread as read so the badge clears
+  // (insights stay visible inside the panel until dismissed/actioned)
   useEffect(function () {
-    if (!isOpen || insights.length === 0) return
+    if (!historyOpen || insights.length === 0) return
     ;(async function () {
       var { data: { user } } = await supabase.auth.getUser()
       if (user) await markInsightsRead(user.id)
     })()
-  }, [isOpen])
+  }, [historyOpen])
 
   // Handler — user clicked the action button on an insight
   async function handleInsightAction(insight) {
@@ -170,11 +412,15 @@ export default function AIChatWidget() {
   // and auto-open the widget in migration mode.
   useEffect(function () {
     function handleStartMigration() {
+      // Phase 4 — open the history panel AND pop a speech bubble to greet them
       setIsOpen(true)
+      setHistoryOpen(true)
       setMigrationMode(true)
+      var greeting = 'Hey! I\'m going to help you move your shop over — this is the easy part, promise. Quick question to start: what software (or system) are you coming from? Moe Go, Gingr, Pawfinity, paper notebook, spreadsheet — whatever it is, I can work with it.'
       setMessages([
-        { role: 'assistant', text: 'Hey! I\'m going to help you move your shop over — this is the easy part, promise. Quick question to start: what software (or system) are you coming from? Moe Go, Gingr, Pawfinity, paper notebook, spreadsheet — whatever it is, I can work with it.' }
+        { role: 'assistant', text: greeting }
       ])
+      showSpeech('Migration mode on! Open up the history panel — I\'ll walk you through it.', 8000)
     }
     window.addEventListener('petpro:start-migration', handleStartMigration)
     return function () {
@@ -450,8 +696,10 @@ export default function AIChatWidget() {
         setMessages(prev => [...prev, { role: 'assistant', text: data.text }])
         // Successful AI response — count this against their monthly cap
         logAIUsage('chat_widget')
-        // Suds speaks his reply (fire-and-forget — never blocks the UI)
+        // Suds speaks his reply AND pops a speech bubble above his head
+        // (both fire-and-forget — never block the UI)
         speakSuds(data.text)
+        showSpeech(data.text)
       }
     } catch (err) {
       console.error('Chat failed:', err)
@@ -538,90 +786,34 @@ export default function AIChatWidget() {
   // Returning null while loading avoids a quick flash of the widget before the check resolves
   if (aiEnabled !== true) return null
 
+  // Phase 4 helper — clicking Suds focuses the input bar (chat is always open)
+  function focusInput() {
+    if (inputRef.current) {
+      try { inputRef.current.focus() } catch (e) { /* noop */ }
+    }
+  }
+
+  // Phase 4 helper — open the history panel and dismiss any active speech bubble
+  function openHistory() {
+    dismissBubble()
+    setIsOpen(true)
+    setHistoryOpen(true)
+  }
+
   return (
     <>
-      {/* ════════════ SUDS THE OTTER — chat bubble mascot ════════════
-          Replaces the boring 💬 emoji bubble. Suds is the brand face for
-          PetPro AI. Subtle breathing animation so he feels alive, scale-up
-          on hover, click to open chat. */}
-      {!isOpen && (
-        <button
-          className="chat-bubble-btn suds-bubble"
-          onClick={() => setIsOpen(true)}
-          aria-label="Chat with PetPro AI"
-          style={{
-            position: 'fixed',
-            // Override the default bubble look — Suds needs his own space
-            background: 'transparent',
-            border: 'none',
-            padding: 0,
-            cursor: 'pointer',
-            // Drop-shadow keeps Suds visible against any background
-            filter: 'drop-shadow(0 6px 14px rgba(124, 58, 237, 0.25))',
-            // Scale + bounce on hover handled in CSS keyframes below
-            transition: 'transform 0.2s ease-out',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.08)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
-        >
-          {/* The image itself — has its own gentle idle breathing animation
-              applied via the .suds-img class (added to App.css below). */}
-          <img
-            src="/suds.png"
-            alt="Suds the otter"
-            className="suds-img"
-            style={{
-              width: '80px',
-              height: 'auto',
-              display: 'block',
-              animation: 'sudsBreathe 3.5s ease-in-out infinite',
-            }}
-          />
-          {/* Tiny "PetPro AI" tag below Suds so first-time users know who he is */}
-          <span style={{
-            position: 'absolute',
-            bottom: '-4px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            background: '#7c3aed',
-            color: '#fff',
-            fontSize: '10px',
-            fontWeight: 700,
-            padding: '2px 8px',
-            borderRadius: '999px',
-            whiteSpace: 'nowrap',
-            letterSpacing: '0.3px',
-          }}>
-            PetPro AI
-          </span>
-          {/* Red badge with unread insights count */}
-          {insights.length > 0 && (
-            <span style={{
-              position: 'absolute',
-              top: '-6px',
-              right: '-6px',
-              background: '#dc2626',
-              color: '#fff',
-              borderRadius: '999px',
-              minWidth: '22px',
-              height: '22px',
-              padding: '0 7px',
-              fontSize: '12px',
-              fontWeight: 700,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 2px 6px rgba(220, 38, 38, 0.4)',
-              border: '2px solid #fff',
-            }}>
-              {insights.length > 9 ? '9+' : insights.length}
-            </span>
-          )}
-        </button>
-      )}
+      {/* ═══════════════════════════════════════════════════════════════
+          PHASE 4 — BONZI-STYLE FLOATING SUDS
+          Architecture:
+            • Suds (always visible, bottom-right)
+            • Speech bubble above him when he's talking
+            • Pill bar to his LEFT for typing or talking back
+            • Slide-up history panel for full conversation
+          The old chat-window is repurposed as the history panel.
+          ═══════════════════════════════════════════════════════════════ */}
 
-      {/* Chat Window */}
-      {isOpen && (
+      {/* ─── HISTORY PANEL — slide-up read-only message log ─── */}
+      {historyOpen && (
         <div
           className="chat-window"
           style={position ? {
@@ -631,7 +823,6 @@ export default function AIChatWidget() {
             right: 'auto',
           } : undefined}
         >
-          {/* Chat Header — also the drag handle */}
           <div
             className="chat-header"
             onMouseDown={onDragStart}
@@ -640,21 +831,24 @@ export default function AIChatWidget() {
             title="Drag to move"
           >
             <div className="chat-header-info" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {/* Mini Suds in the header — bounces when he's speaking */}
-              <img
-                src="/suds.png"
-                alt="Suds"
-                className={sudsTalking ? 'suds-celebrate' : ''}
-                style={{ width: '32px', height: '32px', objectFit: 'contain', flexShrink: 0 }}
-              />
+              {(() => {
+                var headerPose = pickSudsPose()
+                return (
+                  <img
+                    src={sudsImageFor(headerPose)}
+                    alt="Suds"
+                    className={(sudsTalking || headerPose === 'celebrate') ? 'suds-celebrate' : ''}
+                    style={{ width: '32px', height: '32px', objectFit: 'contain', flexShrink: 0 }}
+                  />
+                )
+              })()}
               <span className="chat-header-title">
-                PetPro AI
+                Chat History
                 {adminMode ? ' (Admin)' : ''}
                 {migrationMode ? ' 🤖 Migration Mode' : ''}
               </span>
             </div>
             <div className="chat-header-actions">
-              {/* Voice on/off — Suds talks back when ON. Saved per-browser. */}
               <button
                 className="chat-clear-btn"
                 onClick={toggleVoice}
@@ -664,50 +858,32 @@ export default function AIChatWidget() {
                 {voiceEnabled ? '🔊' : '🔇'}
               </button>
               <button className="chat-clear-btn" onClick={clearChat} title="Clear chat">🗑</button>
-              <button className="chat-close-btn" onClick={() => setIsOpen(false)}>✕</button>
+              <button className="chat-close-btn" onClick={() => { setHistoryOpen(false); setIsOpen(false) }}>✕</button>
             </div>
           </div>
 
-          {/* Chat Messages */}
           <div className="chat-messages">
-            {/* Smart Nudges — proactive insights pinned at the top of the conversation.
-                Each card shows the title, body, an Action button, and a Dismiss X. */}
+            {/* Smart Nudges live in history view too */}
             {insights.length > 0 && (
               <div style={{ marginBottom: '12px' }}>
                 <div style={{
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
-                  color: '#7c3aed',
-                  marginBottom: '8px',
-                  padding: '0 4px',
+                  fontSize: '11px', fontWeight: 700, textTransform: 'uppercase',
+                  letterSpacing: '0.5px', color: '#7c3aed', marginBottom: '8px', padding: '0 4px',
                 }}>
                   ✨ Smart Nudges
                 </div>
                 {insights.map(function (item) {
                   return (
                     <div key={item.id} style={{
-                      background: '#faf5ff',
-                      border: '1px solid #e9d5ff',
-                      borderRadius: '10px',
-                      padding: '12px 14px',
-                      marginBottom: '8px',
-                      position: 'relative',
+                      background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '10px',
+                      padding: '12px 14px', marginBottom: '8px', position: 'relative',
                     }}>
                       <button
                         onClick={function () { handleInsightDismiss(item) }}
                         style={{
-                          position: 'absolute',
-                          top: '6px',
-                          right: '8px',
-                          background: 'transparent',
-                          border: 'none',
-                          color: '#9ca3af',
-                          fontSize: '16px',
-                          cursor: 'pointer',
-                          padding: '2px 6px',
-                          lineHeight: 1,
+                          position: 'absolute', top: '6px', right: '8px',
+                          background: 'transparent', border: 'none', color: '#9ca3af',
+                          fontSize: '16px', cursor: 'pointer', padding: '2px 6px', lineHeight: 1,
                         }}
                         title="Dismiss"
                       >×</button>
@@ -721,14 +897,9 @@ export default function AIChatWidget() {
                         <button
                           onClick={function () { handleInsightAction(item) }}
                           style={{
-                            background: '#7c3aed',
-                            color: '#fff',
-                            border: 'none',
-                            borderRadius: '6px',
-                            padding: '6px 12px',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            cursor: 'pointer',
+                            background: '#7c3aed', color: '#fff', border: 'none',
+                            borderRadius: '6px', padding: '6px 12px', fontSize: '12px',
+                            fontWeight: 600, cursor: 'pointer',
                           }}
                         >
                           {item.action_label} →
@@ -739,9 +910,16 @@ export default function AIChatWidget() {
                 })}
               </div>
             )}
+
             {messages.map((msg, i) => (
               <div key={i} className={`chat-msg ${msg.role === 'user' ? 'chat-msg-user' : 'chat-msg-ai'}`}>
-                {msg.role === 'assistant' && <span className="chat-msg-avatar">🐾</span>}
+                {msg.role === 'assistant' && (
+                  <img
+                    src="/suds.png"
+                    alt="Suds"
+                    style={{ width: '24px', height: '24px', objectFit: 'contain', flexShrink: 0, marginRight: '6px' }}
+                  />
+                )}
                 <div className={`chat-msg-bubble ${msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'}`}>
                   {msg.images && msg.images.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: msg.text ? '6px' : 0 }}>
@@ -756,72 +934,337 @@ export default function AIChatWidget() {
             ))}
             {sending && (
               <div className="chat-msg chat-msg-ai">
-                <span className="chat-msg-avatar">🐾</span>
+                <img
+                  src="/suds-thinking.png"
+                  alt="Suds is thinking"
+                  style={{
+                    width: '34px', height: '34px', objectFit: 'contain', flexShrink: 0,
+                    animation: 'sudsThink 1.6s ease-in-out infinite', marginRight: '6px',
+                  }}
+                />
                 <div className="chat-bubble-ai chat-typing">
-                  PetPro AI is typing...
+                  Suds is thinking...
                 </div>
               </div>
             )}
             <div ref={messagesEndRef} />
           </div>
-
-          {/* Pending image previews (before send) */}
-          {pendingImages.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '8px 12px 0', borderTop: '1px solid #eee' }}>
-              {pendingImages.map(function (img, idx) {
-                return (
-                  <div key={idx} style={{ position: 'relative' }}>
-                    <img src={img.preview} alt={img.name} style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '6px', border: '1px solid #ccc' }} />
-                    <button
-                      onClick={function () { removePendingImage(idx) }}
-                      style={{ position: 'absolute', top: '-6px', right: '-6px', width: '20px', height: '20px', borderRadius: '50%', border: 'none', background: '#e74c3c', color: 'white', cursor: 'pointer', fontSize: '12px', lineHeight: 1, padding: 0 }}
-                      title="Remove"
-                    >×</button>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {/* Chat Input */}
-          <div className="chat-input-area">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleFilePick}
-              style={{ display: 'none' }}
-            />
-            <button
-              className="chat-send-btn"
-              onClick={function () { if (fileInputRef.current) fileInputRef.current.click() }}
-              disabled={sending}
-              title="Attach image (screenshot, photo, cert)"
-              style={{ background: migrationMode ? '#10b981' : undefined }}
-            >
-              📎
-            </button>
-            <textarea
-              ref={inputRef}
-              className="chat-input"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder={migrationMode ? 'Chat or drop a screenshot...' : 'Ask PetPro AI anything...'}
-              rows={1}
-              disabled={sending}
-            />
-            <button
-              className="chat-send-btn"
-              onClick={sendMessage}
-              disabled={sending || (!input.trim() && pendingImages.length === 0)}
-            >
-              ➤
-            </button>
-          </div>
         </div>
       )}
+
+      {/* ─── SPEECH BUBBLE — comic-style, pops above Suds when he talks ─── */}
+      {bubble && (
+        <div
+          className="suds-speech-bubble"
+          style={{
+            position: 'fixed',
+            bottom: '130px',
+            right: '24px',
+            maxWidth: '320px',
+            background: '#fff',
+            color: '#1f2937',
+            padding: '12px 14px 10px',
+            borderRadius: '14px',
+            boxShadow: '0 10px 30px rgba(124, 58, 237, 0.20), 0 0 0 2px #e9d5ff',
+            fontSize: '14px',
+            lineHeight: 1.45,
+            zIndex: 1001,
+            animation: 'sudsBubbleIn 0.28s ease-out',
+            cursor: bubble.longText ? 'pointer' : 'default',
+          }}
+          onClick={() => { if (bubble.longText) openHistory() }}
+          title={bubble.longText ? 'Tap to see the full message in history' : ''}
+        >
+          {/* Dismiss × */}
+          <button
+            onClick={(e) => { e.stopPropagation(); dismissBubble() }}
+            style={{
+              position: 'absolute', top: '4px', right: '6px',
+              background: 'transparent', border: 'none', color: '#9ca3af',
+              fontSize: '15px', cursor: 'pointer', lineHeight: 1, padding: '2px 5px',
+            }}
+            title="Dismiss"
+          >×</button>
+          <div style={{ paddingRight: '14px', whiteSpace: 'pre-wrap' }}>{bubble.text}</div>
+          {bubble.longText && (
+            <div style={{ marginTop: '6px', fontSize: '12px', fontWeight: 600, color: '#7c3aed' }}>
+              Tap to read more →
+            </div>
+          )}
+          {/* Comic-style downward tail pointing at Suds */}
+          <div style={{
+            position: 'absolute',
+            bottom: '-10px',
+            right: '32px',
+            width: 0, height: 0,
+            borderLeft: '10px solid transparent',
+            borderRight: '10px solid transparent',
+            borderTop: '10px solid #fff',
+            filter: 'drop-shadow(0 1px 0 #e9d5ff)',
+          }} />
+        </div>
+      )}
+
+      {/* ─── CORNER BAR — mic + text + send, slides in to the LEFT of Suds ─── */}
+      <div
+        className="suds-bar"
+        style={{
+          position: 'fixed',
+          bottom: '32px',
+          right: '120px',          /* tucked just to the left of Suds */
+          maxWidth: 'calc(100vw - 160px)',
+          width: '420px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          background: '#fff',
+          padding: '6px 6px 6px 10px',
+          borderRadius: '999px',
+          boxShadow: '0 8px 24px rgba(124, 58, 237, 0.18), 0 0 0 2px #e9d5ff',
+          zIndex: 999,
+        }}
+      >
+        {/* Hidden file picker for image attachments (📎) */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={handleFilePick}
+          style={{ display: 'none' }}
+        />
+
+        {/* 🎤 Mic toggle — push-to-talk style */}
+        <button
+          onClick={isListening ? stopListening : startListening}
+          disabled={sending}
+          title={isListening ? 'Stop listening' : 'Talk to Suds'}
+          style={{
+            width: '38px', height: '38px',
+            borderRadius: '50%',
+            border: 'none',
+            background: isListening ? '#dc2626' : '#7c3aed',
+            color: '#fff',
+            fontSize: '17px',
+            cursor: sending ? 'not-allowed' : 'pointer',
+            flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            animation: isListening ? 'sudsMicPulse 1.1s ease-in-out infinite' : 'none',
+          }}
+        >
+          🎤
+        </button>
+
+        {/* Text input — also fills with mic transcript while listening */}
+        <input
+          ref={inputRef}
+          className="suds-bar-input"
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyPress={handleKeyPress}
+          placeholder={
+            isListening ? 'Listening...' :
+            sending ? 'Suds is thinking...' :
+            migrationMode ? 'Chat or attach a screenshot...' :
+            'Talk or type to Suds...'
+          }
+          disabled={sending}
+          style={{
+            flex: 1,
+            border: 'none',
+            outline: 'none',
+            background: 'transparent',
+            fontSize: '14px',
+            padding: '6px 4px',
+            color: '#1f2937',
+            minWidth: 0,
+          }}
+        />
+
+        {/* 📎 Attach image */}
+        <button
+          onClick={() => { if (fileInputRef.current) fileInputRef.current.click() }}
+          disabled={sending}
+          title="Attach image"
+          style={{
+            width: '34px', height: '34px',
+            borderRadius: '50%',
+            border: 'none',
+            background: 'transparent',
+            color: '#6b7280',
+            fontSize: '15px',
+            cursor: sending ? 'not-allowed' : 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          📎
+        </button>
+
+        {/* 📜 History */}
+        <button
+          onClick={openHistory}
+          title="Open chat history"
+          style={{
+            width: '34px', height: '34px',
+            borderRadius: '50%',
+            border: 'none',
+            background: 'transparent',
+            color: '#6b7280',
+            fontSize: '14px',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          📜
+        </button>
+
+        {/* 🔊/🔇 Voice toggle */}
+        <button
+          onClick={toggleVoice}
+          title={voiceEnabled ? 'Mute Suds' : 'Unmute Suds'}
+          style={{
+            width: '34px', height: '34px',
+            borderRadius: '50%',
+            border: 'none',
+            background: 'transparent',
+            color: '#6b7280',
+            fontSize: '14px',
+            cursor: 'pointer',
+            flexShrink: 0,
+            opacity: voiceEnabled ? 1 : 0.5,
+          }}
+        >
+          {voiceEnabled ? '🔊' : '🔇'}
+        </button>
+
+        {/* ➤ Send */}
+        <button
+          onClick={sendMessage}
+          disabled={sending || (!input.trim() && pendingImages.length === 0)}
+          title="Send"
+          style={{
+            width: '38px', height: '38px',
+            borderRadius: '50%',
+            border: 'none',
+            background: '#7c3aed',
+            color: '#fff',
+            fontSize: '15px',
+            cursor: (sending || (!input.trim() && pendingImages.length === 0)) ? 'not-allowed' : 'pointer',
+            opacity: (sending || (!input.trim() && pendingImages.length === 0)) ? 0.5 : 1,
+            flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          ➤
+        </button>
+      </div>
+
+      {/* Pending image previews — float above the bar */}
+      {pendingImages.length > 0 && (
+        <div style={{
+          position: 'fixed',
+          bottom: '88px',
+          right: '120px',
+          maxWidth: '420px',
+          display: 'flex', flexWrap: 'wrap', gap: '6px',
+          background: '#fff',
+          padding: '8px',
+          borderRadius: '12px',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.10), 0 0 0 2px #e9d5ff',
+          zIndex: 999,
+        }}>
+          {pendingImages.map(function (img, idx) {
+            return (
+              <div key={idx} style={{ position: 'relative' }}>
+                <img src={img.preview} alt={img.name} style={{ width: '52px', height: '52px', objectFit: 'cover', borderRadius: '6px', border: '1px solid #ccc' }} />
+                <button
+                  onClick={function () { removePendingImage(idx) }}
+                  style={{ position: 'absolute', top: '-6px', right: '-6px', width: '18px', height: '18px', borderRadius: '50%', border: 'none', background: '#e74c3c', color: 'white', cursor: 'pointer', fontSize: '11px', lineHeight: 1, padding: 0 }}
+                  title="Remove"
+                >×</button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* ─── FLOATING SUDS — always visible, click to focus the bar ─── */}
+      <button
+        className="chat-bubble-btn suds-bubble"
+        onClick={focusInput}
+        aria-label="Talk to Suds"
+        style={{
+          position: 'fixed',
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          filter: 'drop-shadow(0 6px 14px rgba(124, 58, 237, 0.25))',
+          transition: 'transform 0.2s ease-out',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.06)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
+      >
+        {(() => {
+          var pose = pickSudsPose()
+          var anim = 'sudsBreathe 3.5s ease-in-out infinite'
+          if (pose === 'sleeping') anim = 'sudsBreatheSlow 5s ease-in-out infinite'
+          if (pose === 'celebrate') anim = 'sudsCelebrate 1.2s ease-in-out infinite'
+          if (pose === 'waving') anim = 'sudsWave 1.4s ease-in-out infinite'
+          return (
+            <img
+              src={sudsImageFor(pose)}
+              alt="Suds the otter"
+              className="suds-img"
+              style={{
+                width: '90px',
+                height: 'auto',
+                display: 'block',
+                animation: anim,
+              }}
+            />
+          )
+        })()}
+        <span style={{
+          position: 'absolute',
+          bottom: '-4px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: '#7c3aed',
+          color: '#fff',
+          fontSize: '10px',
+          fontWeight: 700,
+          padding: '2px 8px',
+          borderRadius: '999px',
+          whiteSpace: 'nowrap',
+          letterSpacing: '0.3px',
+        }}>
+          PetPro AI
+        </span>
+        {insights.length > 0 && (
+          <span style={{
+            position: 'absolute',
+            top: '-6px',
+            right: '-6px',
+            background: '#dc2626',
+            color: '#fff',
+            borderRadius: '999px',
+            minWidth: '22px',
+            height: '22px',
+            padding: '0 7px',
+            fontSize: '12px',
+            fontWeight: 700,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 2px 6px rgba(220, 38, 38, 0.4)',
+            border: '2px solid #fff',
+          }}>
+            {insights.length > 9 ? '9+' : insights.length}
+          </span>
+        )}
+      </button>
     </>
   )
 }

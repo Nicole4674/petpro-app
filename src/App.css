@@ -15204,6 +15204,71 @@
     animation: sudsCelebrate 1.2s ease-in-out !important;
 }
 
+/* ═══ Phase 3 poses — sleeping, waving, thinking ═══ */
+
+/* Sleeping: very slow breath, no rotation. Suds is curled up — calm rise/fall. */
+@keyframes sudsBreatheSlow {
+    0%, 100% {
+        transform: translateY(0px) scale(1);
+    }
+    50% {
+        transform: translateY(-2px) scale(1.015);
+    }
+}
+
+/* Waving: gentle side-to-side wiggle so his raised paw waves at the user.
+   Looped while the wave pose is active (first chat open). */
+@keyframes sudsWave {
+    0%, 100% { transform: rotate(0deg) translateY(0px); }
+    25%      { transform: rotate(-7deg) translateY(-2px); }
+    50%      { transform: rotate(0deg) translateY(0px); }
+    75%      { transform: rotate(7deg) translateY(-2px); }
+}
+
+/* Thinking: tiny wobble + scale pulse — like Suds is scribbling on his pad
+   while the AI is generating a response. Used in the typing indicator slot. */
+@keyframes sudsThink {
+    0%, 100% { transform: rotate(-2deg) scale(1); }
+    50%      { transform: rotate(2deg) scale(1.04); }
+}
+
+/* ═══ Phase 4 — Bonzi-style floating UI ═══ */
+
+/* Speech bubble pop-in: scale + fade up so it feels like Suds is "saying" it */
+@keyframes sudsBubbleIn {
+    0%   { transform: translateY(8px) scale(0.92); opacity: 0; }
+    100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+/* Mic listening pulse — gentle red glow ring while recording */
+@keyframes sudsMicPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.5); }
+    50%      { box-shadow: 0 0 0 10px rgba(220, 38, 38, 0); }
+}
+
+/* Mobile: the corner bar stretches to almost full-width and Suds shrinks
+   so they don't overlap on a phone. */
+@media (max-width: 640px) {
+    .suds-bar {
+        right: 12px !important;
+        bottom: 110px !important;       /* lifted above Suds on phones */
+        width: calc(100vw - 24px) !important;
+        max-width: calc(100vw - 24px) !important;
+    }
+    .suds-bubble .suds-img {
+        width: 70px !important;
+    }
+    .suds-bubble {
+        bottom: 16px !important;
+        right: 16px !important;
+    }
+    .suds-speech-bubble {
+        max-width: calc(100vw - 32px) !important;
+        right: 16px !important;
+        bottom: 180px !important;       /* sits above the bar on mobile */
+    }
+}
+
 /* Override the default chat-bubble-btn styling for Suds — no rounded background,
    no purple fill. The image itself IS the button. */
 .suds-bubble {
