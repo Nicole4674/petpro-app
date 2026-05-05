@@ -2,9 +2,15 @@
 // petpro-tts — Text-to-Speech for Suds the Otter
 // =============================================================================
 // Converts Claude's text reply to spoken audio so Suds actually talks back.
-// Uses OpenAI's TTS API (cheaper than ElevenLabs for high-volume use):
-//   • Voice: fable (warm, friendly male, slight British charm — Suds energy)
-//   • Model: tts-1 (fast, $15/1M chars, ~$0.005-0.015 per typical reply)
+// Uses ElevenLabs' Charlie voice — warm, playful, younger British male.
+// (Previously used OpenAI fable. Swapped for stronger British accent + more
+// expressive emotion. Nicole already has an ElevenLabs sub for Mortal Ties.)
+//
+// Voice: "Charlie" — voice_id IKne3meq5aSn9XLyUdCD
+// Model: eleven_turbo_v2_5 — fastest low-latency voice, great quality
+//
+// Falls back to OpenAI tts-1 with fable if ElevenLabs key is missing or fails,
+// so Suds never goes silent.
 //
 // Request body (POST):
 //   { text: string }   // the assistant text to speak
@@ -12,7 +18,7 @@
 // Response:
 //   audio/mpeg binary stream — frontend wraps it in a Blob + plays via Audio()
 //
-// Required env: OPENAI_API_KEY
+// Required env: ELEVENLABS_API_KEY (primary), OPENAI_API_KEY (fallback)
 // =============================================================================
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
@@ -23,18 +29,21 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 }
 
+// Charlie — ElevenLabs default voice library. Younger, friendly British male.
+// To swap voices later: change this voice_id to any other ElevenLabs voice
+// (e.g. George, Daniel, Adam, or your own cloned voice).
+const ELEVENLABS_VOICE_ID = "IKne3meq5aSn9XLyUdCD"   // Charlie
+
+// Model choice — turbo is fast + great quality. Use eleven_multilingual_v2
+// if you want max quality at the cost of slightly higher latency.
+const ELEVENLABS_MODEL = "eleven_turbo_v2_5"
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
   }
 
   try {
-    const openaiKey = Deno.env.get("OPENAI_API_KEY")
-    if (!openaiKey) {
-      console.error("[petpro-tts] OPENAI_API_KEY not configured")
-      return jsonError("Voice is not configured yet — please contact support.", 500)
-    }
-
     const body = await req.json()
     const text = (body.text || "").toString().trim()
 
@@ -43,10 +52,64 @@ serve(async (req) => {
     }
 
     // Cap input length to keep cost predictable + voice clip short.
-    // 4096 chars ≈ ~3-4 minutes of audio at normal pace.
-    const cappedText = text.length > 4096 ? text.slice(0, 4096) : text
+    // ElevenLabs charges per character, so this limit also caps spend.
+    const cappedText = text.length > 2000 ? text.slice(0, 2000) : text
 
-    // Call OpenAI TTS
+    const elevenKey = Deno.env.get("ELEVENLABS_API_KEY")
+    const openaiKey = Deno.env.get("OPENAI_API_KEY")
+
+    // ─── PRIMARY: ElevenLabs ───
+    if (elevenKey) {
+      const elevenUrl = `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`
+      const elevenRes = await fetch(elevenUrl, {
+        method: "POST",
+        headers: {
+          "xi-api-key": elevenKey,
+          "Content-Type": "application/json",
+          "Accept": "audio/mpeg",
+        },
+        body: JSON.stringify({
+          text: cappedText,
+          model_id: ELEVENLABS_MODEL,
+          // Voice settings — tweak these to dial in the personality:
+          //   stability: 0–1 (lower = more expressive/emotional, higher = more consistent)
+          //   similarity_boost: 0–1 (how closely to match the original voice)
+          //   style: 0–1 (style exaggeration; 0 = neutral, higher = more dramatic)
+          //   use_speaker_boost: clarity boost
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0.3,           // a touch of style for personality
+            use_speaker_boost: true,
+          },
+        }),
+      })
+
+      if (elevenRes.ok) {
+        const audioBuffer = await elevenRes.arrayBuffer()
+        return new Response(audioBuffer, {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "audio/mpeg",
+            "Content-Length": audioBuffer.byteLength.toString(),
+            "Cache-Control": "public, max-age=300",
+            "X-TTS-Provider": "elevenlabs",
+          },
+        })
+      }
+
+      // ElevenLabs failed — log and fall through to OpenAI
+      const errText = await elevenRes.text().catch(() => "")
+      console.error("[petpro-tts] ElevenLabs error:", elevenRes.status, errText)
+    }
+
+    // ─── FALLBACK: OpenAI TTS (if ElevenLabs missing or errored) ───
+    if (!openaiKey) {
+      console.error("[petpro-tts] No TTS provider configured (no ELEVENLABS_API_KEY or OPENAI_API_KEY)")
+      return jsonError("Voice is not configured yet — please contact support.", 500)
+    }
+
     const ttsResponse = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: {
@@ -54,21 +117,20 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "tts-1",          // fast + cheap; tts-1-hd is 2x cost for marginal quality bump
-        voice: "fable",          // soft, warm, British charm — Suds the Otter's voice
+        model: "tts-1",
+        voice: "fable",          // British-ish fallback voice
         input: cappedText,
-        response_format: "mp3",  // smallest file size, widest browser support
-        speed: 1.0,              // can slow down later if needed for clarity
+        response_format: "mp3",
+        speed: 1.0,
       }),
     })
 
     if (!ttsResponse.ok) {
       const errText = await ttsResponse.text()
-      console.error("[petpro-tts] OpenAI error:", ttsResponse.status, errText)
+      console.error("[petpro-tts] OpenAI fallback error:", ttsResponse.status, errText)
       return jsonError("Could not generate Suds's voice — please try again.", 500)
     }
 
-    // Stream the mp3 audio back to the browser
     const audioBuffer = await ttsResponse.arrayBuffer()
 
     return new Response(audioBuffer, {
@@ -77,8 +139,8 @@ serve(async (req) => {
         ...corsHeaders,
         "Content-Type": "audio/mpeg",
         "Content-Length": audioBuffer.byteLength.toString(),
-        // Cache for 5 min — same text = same audio = no need to regenerate
         "Cache-Control": "public, max-age=300",
+        "X-TTS-Provider": "openai-fallback",
       },
     })
   } catch (err: any) {
