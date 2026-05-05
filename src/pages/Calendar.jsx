@@ -394,7 +394,7 @@ export default function Calendar() {
         const [apptResult, clientResult, petResult, serviceResult, staffResult, blockedResult] = await Promise.all([
             supabase
                 .from('appointments')
-                .select('*, clients(id, first_name, last_name, phone), pets(name, breed, behavior_tags), services:service_id(id, service_name), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed, behavior_tags), services:service_id(id, service_name), appointment_pet_addons(id, service_id, services:service_id(id, service_name)))')
+                .select('*, clients(id, first_name, last_name, phone), pets(name, breed, behavior_tags), services:service_id(id, service_name), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed, behavior_tags), services:service_id(id, service_name), appointment_pet_addons(id, service_id, services:service_id(id, service_name))), payments(id, amount, refunded_amount)')
                 .gte('appointment_date', startDate)
                 .lte('appointment_date', endDate)
                 .order('start_time'),
@@ -5375,8 +5375,45 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                         const isCancelled = apptStatus === 'cancelled'
                                         // Phase 6 — booking-rule flag pending (AI held it for groomer approval)
                                         const isFlaggedPending = appt.flag_status === 'pending'
-                                        const blockBg = isPending ? '#fbbf24' : (isCancelled ? '#d1d5db' : groomerColor)
-                                        const blockBorder = isPending ? '#d97706' : (isCancelled ? '#9ca3af' : groomerColor)
+                                        // ─── "Done & Paid" green status — Mike's tweak so finished appts are obvious at a glance ───
+                                        // Triggers when the appointment is BOTH checked out AND fully paid.
+                                        // Uses the payment data joined onto the appointment record.
+                                        let isDoneAndPaid = false
+                                        if (appt.checked_out_at) {
+                                            // Compute net paid (amount minus refunds, never negative per row)
+                                            var paidNet = (appt.payments || []).reduce(function (sum, p) {
+                                                var amt = parseFloat(p.amount || 0)
+                                                var refunded = parseFloat(p.refunded_amount || 0)
+                                                return sum + Math.max(0, amt - refunded)
+                                            }, 0)
+                                            // Compute quoted total (newer multi-pet OR sum appointment_pets OR legacy quoted_price)
+                                            var quotedTotal = parseFloat(appt.total_price || 0)
+                                            if (!quotedTotal && appt.appointment_pets && appt.appointment_pets.length > 0) {
+                                                quotedTotal = appt.appointment_pets.reduce(function (sum, ap) {
+                                                    return sum + parseFloat(ap.quoted_price || 0)
+                                                }, 0)
+                                            }
+                                            if (!quotedTotal) quotedTotal = parseFloat(appt.quoted_price || 0)
+                                            // Subtract any discount that was applied to the appt
+                                            var discount = parseFloat(appt.discount_amount || 0)
+                                            var owed = Math.max(0, quotedTotal - discount)
+                                            // Done & paid if owed === 0 OR paid >= owed (penny-tolerant)
+                                            isDoneAndPaid = owed <= 0.01 || paidNet >= owed - 0.01
+                                        }
+                                        const blockBg = isPending
+                                            ? '#fbbf24'
+                                            : isCancelled
+                                                ? '#d1d5db'
+                                                : isDoneAndPaid
+                                                    ? '#10b981'   // green — done & paid
+                                                    : groomerColor
+                                        const blockBorder = isPending
+                                            ? '#d97706'
+                                            : isCancelled
+                                                ? '#9ca3af'
+                                                : isDoneAndPaid
+                                                    ? '#047857'   // darker green border
+                                                    : groomerColor
                                         // Badge label + colors (only shown pre-check-in, except DONE handled below)
                                         let statusBadge = null
                                         if (!appt.checked_in_at && !appt.checked_out_at) {
@@ -5630,6 +5667,29 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
         const isCancelled = apptStatus === 'cancelled'
         const isDraggable = !isCancelled && apptStatus !== 'completed' && !appt.checked_out_at
         const isBeingDragged = draggedApptId === appt.id
+
+        // ─── "Done & Paid" green — same logic as the day view ───
+        let isDoneAndPaid = false
+        if (appt.checked_out_at) {
+            var paidNet = (appt.payments || []).reduce(function (sum, p) {
+                var amt = parseFloat(p.amount || 0)
+                var refunded = parseFloat(p.refunded_amount || 0)
+                return sum + Math.max(0, amt - refunded)
+            }, 0)
+            var quotedTotal = parseFloat(appt.total_price || 0)
+            if (!quotedTotal && appt.appointment_pets && appt.appointment_pets.length > 0) {
+                quotedTotal = appt.appointment_pets.reduce(function (sum, ap) {
+                    return sum + parseFloat(ap.quoted_price || 0)
+                }, 0)
+            }
+            if (!quotedTotal) quotedTotal = parseFloat(appt.quoted_price || 0)
+            var discount = parseFloat(appt.discount_amount || 0)
+            var owed = Math.max(0, quotedTotal - discount)
+            isDoneAndPaid = owed <= 0.01 || paidNet >= owed - 0.01
+        }
+        const blockBg = isDoneAndPaid ? '#10b981' : groomerColor
+        const blockBorder = isDoneAndPaid ? '#047857' : groomerColor
+
         return (
             <div
                 key={appt.id}
@@ -5660,8 +5720,8 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                     height: 'calc(' + heightPct + '% - 6px)',
                     minHeight: '18px',
                     zIndex: 5,
-                    backgroundColor: groomerColor,
-                    borderLeft: '4px solid ' + groomerColor,
+                    backgroundColor: blockBg,
+                    borderLeft: '4px solid ' + blockBorder,
                     borderRadius: '6px',
                     cursor: isDraggable ? 'grab' : 'pointer',
                     opacity: isBeingDragged ? 0.4 : 1,
