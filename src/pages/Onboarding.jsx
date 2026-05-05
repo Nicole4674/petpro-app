@@ -44,6 +44,20 @@ function detectTimezone() {
   return 'America/Chicago'  // safe default
 }
 
+// Common services groomers offer — used as the pre-built menu in Step 4.
+// Pricing is industry-typical mid-range; users can edit before inserting.
+const COMMON_SERVICES = [
+  { id: 'fg_small',  service_name: 'Full Groom — Small',  category: 'full_groom',  price: 50,  time: 60,  weight_min: 0,  weight_max: 20, hint: 'Under 20 lbs' },
+  { id: 'fg_medium', service_name: 'Full Groom — Medium', category: 'full_groom',  price: 65,  time: 90,  weight_min: 20, weight_max: 50, hint: '20-50 lbs' },
+  { id: 'fg_large',  service_name: 'Full Groom — Large',  category: 'full_groom',  price: 80,  time: 120, weight_min: 50, weight_max: 90, hint: '50-90 lbs' },
+  { id: 'fg_xl',     service_name: 'Full Groom — XL',     category: 'full_groom',  price: 100, time: 150, weight_min: 90, weight_max: null, hint: '90+ lbs' },
+  { id: 'bath',      service_name: 'Bath & Tidy',         category: 'bath',        price: 35,  time: 45,  weight_min: null, weight_max: null, hint: 'Bath, brush, ear/nail trim' },
+  { id: 'nail',      service_name: 'Nail Trim',           category: 'nail_trim',   price: 15,  time: 15,  weight_min: null, weight_max: null, hint: 'Walk-in friendly' },
+  { id: 'teeth',     service_name: 'Teeth Brushing',      category: 'add_on',      price: 10,  time: 10,  weight_min: null, weight_max: null, hint: 'Add-on service' },
+  { id: 'deshed',    service_name: 'De-shed Treatment',   category: 'add_on',      price: 25,  time: 30,  weight_min: null, weight_max: null, hint: 'Add-on for heavy coats' },
+  { id: 'puppy',     service_name: 'Puppy Intro',         category: 'puppy_intro', price: 40,  time: 45,  weight_min: null, weight_max: null, hint: 'Under 6 months — gentle first visit' },
+]
+
 const TOTAL_STEPS = 8
 
 // Step labels for the progress bar
@@ -81,7 +95,22 @@ export default function Onboarding() {
   const [waitlistTimezone, setWaitlistTimezone] = useState(detectTimezone())
   // Step 3 — business hours (free-text, matches existing shop_settings.hours)
   const [hours, setHours] = useState('')
-  // Steps 4-7 fields will get added in subsequent iterations.
+
+  // Step 4 — services. selectedServices is a map of service-template-id → { enabled, price, time }
+  // Templates are defined in COMMON_SERVICES below. They get inserted into the
+  // services table (real rows) on Continue if checked.
+  const [selectedServices, setSelectedServices] = useState({})
+  const [existingServiceCount, setExistingServiceCount] = useState(0)
+
+  // Step 5 — staff: solo or team
+  const [staffMode, setStaffMode] = useState('solo')   // 'solo' or 'team'
+
+  // Step 6 — boarding
+  const [offersBoarding, setOffersBoarding] = useState(false)
+  const [kennelCounts, setKennelCounts] = useState({ small: 0, medium: 0, large: 0, xl: 0 })
+
+  // Step 7 — Stripe Connect (read-only — we just check if they're already connected)
+  const [stripeConnected, setStripeConnected] = useState(false)
 
   // On mount: get user, load existing progress (in case they bailed mid-wizard)
   useEffect(() => {
@@ -124,6 +153,27 @@ export default function Onboarding() {
         if (data && data.address) setAddress(data.address)
         if (data && data.hours) setHours(data.hours)
         if (data && data.waitlist_timezone) setWaitlistTimezone(data.waitlist_timezone)
+
+        // ─── Step 4 — count existing services so we can show "you already have X" ───
+        try {
+          const { count } = await supabase
+            .from('services')
+            .select('id', { count: 'exact', head: true })
+            .eq('groomer_id', user.id)
+          if (!cancelled && typeof count === 'number') setExistingServiceCount(count)
+        } catch (e) { /* non-critical */ }
+
+        // ─── Step 7 — check if they've already connected Stripe ───
+        try {
+          const { data: gData } = await supabase
+            .from('groomers')
+            .select('stripe_account_id, stripe_charges_enabled')
+            .eq('id', user.id)
+            .maybeSingle()
+          if (!cancelled && gData && gData.stripe_account_id && gData.stripe_charges_enabled) {
+            setStripeConnected(true)
+          }
+        } catch (e) { /* non-critical */ }
 
         setLoaded(true)
       } catch (e) {
@@ -216,9 +266,133 @@ export default function Onboarding() {
     } else if (currentStep === 3) {
       // Business Hours — optional, but encourage filling it in
       await goNext({ hours: hours ? hours.trim() : null })
-    } else {
-      // Steps 4-7 still placeholders — just advance
+    } else if (currentStep === 4) {
+      // Services — insert each checked one as a real services row
+      await handleStep4Services()
+    } else if (currentStep === 5) {
+      // Staff — just advance, nothing to write (it's informational)
       await goNext()
+    } else if (currentStep === 6) {
+      // Boarding — if they offer it, create the kennels
+      await handleStep6Boarding()
+    } else if (currentStep === 7) {
+      // Stripe Connect — Continue just advances; the actual connect happens via the inline button
+      await goNext()
+    } else {
+      await goNext()
+    }
+  }
+
+  // ─── Step 4: insert checked services as real rows in the services table ───
+  async function handleStep4Services() {
+    const checkedIds = Object.keys(selectedServices).filter(id => selectedServices[id] && selectedServices[id].enabled)
+    if (checkedIds.length === 0) {
+      // Nothing checked — that's fine, just advance
+      await goNext()
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    try {
+      const rows = checkedIds.map((id, idx) => {
+        const tpl = COMMON_SERVICES.find(s => s.id === id)
+        const sel = selectedServices[id] || {}
+        return {
+          groomer_id: userId,
+          service_name: tpl.service_name,
+          category: tpl.category,
+          price: parseFloat(sel.price != null ? sel.price : tpl.price),
+          price_type: 'fixed',
+          time_block_minutes: parseInt(sel.time != null ? sel.time : tpl.time, 10) || tpl.time,
+          weight_min: tpl.weight_min,
+          weight_max: tpl.weight_max,
+          sort_order: existingServiceCount + idx,
+        }
+      })
+      const { error: insErr } = await supabase.from('services').insert(rows)
+      if (insErr) throw insErr
+      // Bump count locally so a back→forward doesn't insert dupes immediately
+      setExistingServiceCount(existingServiceCount + rows.length)
+      // Clear selection so re-entering Step 4 doesn't show them as still-checked
+      setSelectedServices({})
+      await goNext()
+    } catch (e) {
+      console.error('[Onboarding] step 4 error:', e)
+      setError('Could not save services: ' + (e.message || 'unknown error'))
+      setSaving(false)
+    }
+  }
+
+  // ─── Step 6: if boarding is offered, create the kennels ───
+  async function handleStep6Boarding() {
+    if (!offersBoarding) {
+      // Skip — they don't board. Just advance.
+      await goNext()
+      return
+    }
+
+    const totalKennels = (kennelCounts.small || 0) + (kennelCounts.medium || 0) + (kennelCounts.large || 0) + (kennelCounts.xl || 0)
+    if (totalKennels === 0) {
+      // They said they offer boarding but didn't fill in counts — let them through anyway
+      await goNext()
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    try {
+      const rows = []
+      const sizes = [
+        { key: 'small',  label: 'Small',  base_price: 35 },
+        { key: 'medium', label: 'Medium', base_price: 45 },
+        { key: 'large',  label: 'Large',  base_price: 55 },
+        { key: 'xl',     label: 'XL',     base_price: 65 },
+      ]
+      let order = 0
+      sizes.forEach(s => {
+        const count = kennelCounts[s.key] || 0
+        for (let i = 1; i <= count; i++) {
+          rows.push({
+            groomer_id: userId,
+            name: `${s.label} ${i}`,
+            size_label: s.label,
+            base_price: s.base_price,
+            default_capacity: 1,
+            display_order: order++,
+          })
+        }
+      })
+      if (rows.length > 0) {
+        const { error: insErr } = await supabase.from('kennels').insert(rows)
+        if (insErr) throw insErr
+      }
+      await goNext()
+    } catch (e) {
+      console.error('[Onboarding] step 6 error:', e)
+      setError('Could not save kennels: ' + (e.message || 'unknown error'))
+      setSaving(false)
+    }
+  }
+
+  // ─── Step 7: Stripe Connect — opens onboarding in a new tab ───
+  async function startStripeOnboarding() {
+    setSaving(true)
+    setError(null)
+    try {
+      const { data, error: fnErr } = await supabase.functions.invoke('stripe-connect-onboard', {})
+      if (fnErr) throw fnErr
+      if (data && data.url) {
+        // Open Stripe in a new tab so they don't lose the wizard
+        window.open(data.url, '_blank', 'noopener')
+      } else {
+        throw new Error('No onboarding URL returned')
+      }
+    } catch (e) {
+      console.error('[Onboarding] stripe onboarding error:', e)
+      setError('Could not start Stripe setup. You can do this later from Shop Settings → Payments.')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -311,10 +485,29 @@ export default function Onboarding() {
           {currentStep === 3 && (
             <Step3Hours hours={hours} setHours={setHours} />
           )}
-          {currentStep === 4 && <PlaceholderStep title="Services + Pricing" />}
-          {currentStep === 5 && <PlaceholderStep title="Staff" />}
-          {currentStep === 6 && <PlaceholderStep title="Boarding" />}
-          {currentStep === 7 && <PlaceholderStep title="Stripe Connect" />}
+          {currentStep === 4 && (
+            <Step4Services
+              selectedServices={selectedServices}
+              setSelectedServices={setSelectedServices}
+              existingCount={existingServiceCount}
+            />
+          )}
+          {currentStep === 5 && (
+            <Step5Staff staffMode={staffMode} setStaffMode={setStaffMode} />
+          )}
+          {currentStep === 6 && (
+            <Step6Boarding
+              offersBoarding={offersBoarding} setOffersBoarding={setOffersBoarding}
+              kennelCounts={kennelCounts} setKennelCounts={setKennelCounts}
+            />
+          )}
+          {currentStep === 7 && (
+            <Step7Stripe
+              stripeConnected={stripeConnected}
+              onStartConnect={startStripeOnboarding}
+              saving={saving}
+            />
+          )}
           {currentStep === 8 && (
             <Step8Done onFinish={finishWizard} saving={saving} />
           )}
@@ -641,7 +834,359 @@ function Step3Hours({ hours, setHours }) {
   )
 }
 
-// ════════════ Placeholder for Steps 4-7 (built in next iterations) ════════════
+// ════════════ STEP 4 — Services + Pricing ════════════
+function Step4Services({ selectedServices, setSelectedServices, existingCount }) {
+  function toggle(id) {
+    setSelectedServices(prev => {
+      const next = { ...prev }
+      if (next[id] && next[id].enabled) {
+        delete next[id]
+      } else {
+        const tpl = COMMON_SERVICES.find(s => s.id === id)
+        next[id] = { enabled: true, price: tpl.price, time: tpl.time }
+      }
+      return next
+    })
+  }
+  function updateField(id, field, value) {
+    setSelectedServices(prev => ({
+      ...prev,
+      [id]: { ...(prev[id] || { enabled: true }), [field]: value },
+    }))
+  }
+
+  return (
+    <div style={{ padding: '10px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '20px' }}>
+        <img src="/suds-thinking.png" alt="Suds" style={{ width: '70px', height: 'auto', flexShrink: 0 }} />
+        <div>
+          <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#1f2937', margin: '0 0 4px' }}>What services do you offer?</h2>
+          <p style={{ fontSize: '13px', color: '#6b7280', margin: 0 }}>
+            Tick what you do and tweak the price/time. You can add more (or edit these) anytime from <strong>Pricing</strong>.
+          </p>
+        </div>
+      </div>
+
+      {existingCount > 0 && (
+        <div style={{
+          background: '#ecfdf5',
+          border: '1px solid #a7f3d0',
+          borderRadius: '8px',
+          padding: '10px 14px',
+          marginBottom: '14px',
+          fontSize: '13px',
+          color: '#065f46',
+        }}>
+          ✅ You already have <strong>{existingCount}</strong> service{existingCount === 1 ? '' : 's'} configured. Anything you check below will be ADDED to that list (no duplicates created automatically — pick wisely).
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {COMMON_SERVICES.map(svc => {
+          const checked = !!(selectedServices[svc.id] && selectedServices[svc.id].enabled)
+          const sel = selectedServices[svc.id] || {}
+          return (
+            <div
+              key={svc.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '12px 14px',
+                border: checked ? '1.5px solid #7c3aed' : '1.5px solid #e5e7eb',
+                borderRadius: '10px',
+                background: checked ? '#faf5ff' : '#fff',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => toggle(svc.id)}
+                style={{ width: '18px', height: '18px', accentColor: '#7c3aed', cursor: 'pointer', flexShrink: 0 }}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, color: '#1f2937', fontSize: '14px' }}>{svc.service_name}</div>
+                <div style={{ fontSize: '12px', color: '#6b7280' }}>{svc.hint}</div>
+              </div>
+              {checked && (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                    <span style={{ fontSize: '13px', color: '#6b7280' }}>$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={sel.price != null ? sel.price : svc.price}
+                      onChange={(e) => updateField(svc.id, 'price', e.target.value)}
+                      style={{ ...fieldInputStyle, width: '70px', padding: '6px 8px', textAlign: 'right' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                    <input
+                      type="number"
+                      min="5"
+                      step="5"
+                      value={sel.time != null ? sel.time : svc.time}
+                      onChange={(e) => updateField(svc.id, 'time', e.target.value)}
+                      style={{ ...fieldInputStyle, width: '60px', padding: '6px 8px', textAlign: 'right' }}
+                    />
+                    <span style={{ fontSize: '13px', color: '#6b7280' }}>min</span>
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '10px', textAlign: 'center' }}>
+        Don't see something? Add custom services anytime from the <strong>Pricing</strong> page.
+      </div>
+    </div>
+  )
+}
+
+// ════════════ STEP 5 — Staff (informational, no DB write) ════════════
+function Step5Staff({ staffMode, setStaffMode }) {
+  return (
+    <div style={{ padding: '10px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '20px' }}>
+        <img src="/suds-thinking.png" alt="Suds" style={{ width: '70px', height: 'auto', flexShrink: 0 }} />
+        <div>
+          <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#1f2937', margin: '0 0 4px' }}>Are you flying solo or do you have a team?</h2>
+          <p style={{ fontSize: '13px', color: '#6b7280', margin: 0 }}>
+            This just helps me give you the right tips. You can add staff anytime from the <strong>Staff List</strong> page.
+          </p>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+        <button
+          onClick={() => setStaffMode('solo')}
+          style={{
+            padding: '20px 18px',
+            border: staffMode === 'solo' ? '2px solid #7c3aed' : '1.5px solid #e5e7eb',
+            borderRadius: '12px',
+            background: staffMode === 'solo' ? '#faf5ff' : '#fff',
+            cursor: 'pointer',
+            textAlign: 'left',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <div style={{ fontSize: '28px', marginBottom: '6px' }}>✂️</div>
+          <div style={{ fontWeight: 800, color: '#1f2937', fontSize: '15px', marginBottom: '4px' }}>Solo Groomer</div>
+          <div style={{ fontSize: '13px', color: '#6b7280', lineHeight: 1.4 }}>
+            Just me. PetPro auto-assigns every appointment to me — no staff picker to slow things down.
+          </div>
+        </button>
+        <button
+          onClick={() => setStaffMode('team')}
+          style={{
+            padding: '20px 18px',
+            border: staffMode === 'team' ? '2px solid #7c3aed' : '1.5px solid #e5e7eb',
+            borderRadius: '12px',
+            background: staffMode === 'team' ? '#faf5ff' : '#fff',
+            cursor: 'pointer',
+            textAlign: 'left',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <div style={{ fontSize: '28px', marginBottom: '6px' }}>👥</div>
+          <div style={{ fontWeight: 800, color: '#1f2937', fontSize: '15px', marginBottom: '4px' }}>I have a team</div>
+          <div style={{ fontSize: '13px', color: '#6b7280', lineHeight: 1.4 }}>
+            More groomers, bathers, kennel staff. PetPro will ask "who's grooming?" on every booking.
+          </div>
+        </button>
+      </div>
+
+      {staffMode === 'team' && (
+        <div style={{
+          background: '#faf5ff',
+          border: '1px solid #e9d5ff',
+          borderRadius: '10px',
+          padding: '14px 16px',
+          fontSize: '13px',
+          color: '#5b21b6',
+          lineHeight: 1.5,
+        }}>
+          💡 <strong>Next:</strong> After setup, head to <strong>Staff List</strong> in the sidebar to add your team members. You can set their roles (groomer, bather, kennel), color codes for the calendar, and login access.
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ════════════ STEP 6 — Boarding ════════════
+function Step6Boarding({ offersBoarding, setOffersBoarding, kennelCounts, setKennelCounts }) {
+  function updateCount(size, val) {
+    var n = parseInt(val, 10)
+    if (isNaN(n) || n < 0) n = 0
+    if (n > 50) n = 50
+    setKennelCounts({ ...kennelCounts, [size]: n })
+  }
+
+  return (
+    <div style={{ padding: '10px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '20px' }}>
+        <img src="/suds-thinking.png" alt="Suds" style={{ width: '70px', height: 'auto', flexShrink: 0 }} />
+        <div>
+          <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#1f2937', margin: '0 0 4px' }}>Do you offer boarding?</h2>
+          <p style={{ fontSize: '13px', color: '#6b7280', margin: 0 }}>
+            Overnight stays — separate from grooming. You can configure more details later from <strong>Boarding Setup</strong>.
+          </p>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+        <button
+          onClick={() => setOffersBoarding(false)}
+          style={{
+            padding: '18px',
+            border: !offersBoarding ? '2px solid #7c3aed' : '1.5px solid #e5e7eb',
+            borderRadius: '12px',
+            background: !offersBoarding ? '#faf5ff' : '#fff',
+            cursor: 'pointer',
+            textAlign: 'center',
+            fontWeight: 700,
+            color: '#1f2937',
+            fontSize: '15px',
+          }}
+        >
+          🚫 No boarding<br />
+          <span style={{ fontSize: '12px', fontWeight: 500, color: '#6b7280' }}>Grooming only</span>
+        </button>
+        <button
+          onClick={() => setOffersBoarding(true)}
+          style={{
+            padding: '18px',
+            border: offersBoarding ? '2px solid #7c3aed' : '1.5px solid #e5e7eb',
+            borderRadius: '12px',
+            background: offersBoarding ? '#faf5ff' : '#fff',
+            cursor: 'pointer',
+            textAlign: 'center',
+            fontWeight: 700,
+            color: '#1f2937',
+            fontSize: '15px',
+          }}
+        >
+          🏠 Yes, I board<br />
+          <span style={{ fontSize: '12px', fontWeight: 500, color: '#6b7280' }}>Set up kennels below</span>
+        </button>
+      </div>
+
+      {offersBoarding && (
+        <div>
+          <div style={{ fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            How many kennels do you have?
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
+            {[
+              { key: 'small',  label: 'Small',  hint: 'Up to 25 lbs' },
+              { key: 'medium', label: 'Medium', hint: '25-50 lbs' },
+              { key: 'large',  label: 'Large',  hint: '50-90 lbs' },
+              { key: 'xl',     label: 'XL',     hint: '90+ lbs' },
+            ].map(s => (
+              <div key={s.key} style={{
+                border: '1.5px solid #e5e7eb',
+                borderRadius: '10px',
+                padding: '12px 14px',
+                background: '#fff',
+              }}>
+                <div style={{ fontWeight: 700, color: '#1f2937', fontSize: '13px' }}>{s.label}</div>
+                <div style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '6px' }}>{s.hint}</div>
+                <input
+                  type="number"
+                  min="0"
+                  max="50"
+                  value={kennelCounts[s.key] || 0}
+                  onChange={(e) => updateCount(s.key, e.target.value)}
+                  style={{ ...fieldInputStyle, padding: '6px 10px', fontSize: '14px' }}
+                />
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '8px' }}>
+            We'll auto-create kennels named "Small 1", "Small 2", etc. — you can rename them anytime from Boarding Setup.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ════════════ STEP 7 — Stripe Connect ════════════
+function Step7Stripe({ stripeConnected, onStartConnect, saving }) {
+  return (
+    <div style={{ padding: '10px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '20px' }}>
+        <img src="/suds-thinking.png" alt="Suds" style={{ width: '70px', height: 'auto', flexShrink: 0 }} />
+        <div>
+          <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#1f2937', margin: '0 0 4px' }}>Set up payments</h2>
+          <p style={{ fontSize: '13px', color: '#6b7280', margin: 0 }}>
+            PetPro takes payments through Stripe. Money lands in YOUR bank account — we never touch your funds.
+          </p>
+        </div>
+      </div>
+
+      {stripeConnected ? (
+        <div style={{
+          background: '#ecfdf5',
+          border: '1px solid #a7f3d0',
+          borderRadius: '12px',
+          padding: '20px 24px',
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: '32px', marginBottom: '6px' }}>✅</div>
+          <div style={{ fontWeight: 800, color: '#065f46', fontSize: '15px', marginBottom: '4px' }}>
+            Stripe is connected!
+          </div>
+          <div style={{ fontSize: '13px', color: '#047857' }}>
+            You're ready to take card payments and get paid out automatically.
+          </div>
+        </div>
+      ) : (
+        <div>
+          <div style={{
+            background: '#faf5ff',
+            border: '1px solid #e9d5ff',
+            borderRadius: '12px',
+            padding: '18px 20px',
+            marginBottom: '16px',
+          }}>
+            <div style={{ fontWeight: 700, color: '#5b21b6', marginBottom: '8px', fontSize: '14px' }}>
+              What you'll need (have these handy):
+            </div>
+            <ul style={{ margin: '0 0 0 18px', padding: 0, color: '#374151', fontSize: '13px', lineHeight: 1.7 }}>
+              <li>Your business name, EIN or SSN</li>
+              <li>Bank account info (routing + account #)</li>
+              <li>About 5 minutes of focused time</li>
+            </ul>
+          </div>
+
+          <button
+            onClick={onStartConnect}
+            disabled={saving}
+            style={{
+              ...btnPrimaryStyle,
+              width: '100%',
+              padding: '14px 20px',
+              fontSize: '15px',
+            }}
+          >
+            {saving ? 'Opening Stripe...' : '💳 Set Up Stripe Payments →'}
+          </button>
+
+          <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '10px', textAlign: 'center' }}>
+            Opens in a new tab so you don't lose your spot in the wizard. You can also skip and set this up later from <strong>Shop Settings → Payments</strong>.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ════════════ Placeholder (kept for safety, no longer used) ════════════
 function PlaceholderStep({ title }) {
   return (
     <div style={{ textAlign: 'center', padding: '40px 20px' }}>
@@ -653,9 +1198,6 @@ function PlaceholderStep({ title }) {
       <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#1f2937', margin: '0 0 8px' }}>
         {title}
       </h2>
-      <p style={{ fontSize: '14px', color: '#6b7280', margin: 0 }}>
-        This step is coming next — for now, click <strong>Continue</strong> to skip ahead, or <strong>Skip for now</strong> to exit.
-      </p>
     </div>
   )
 }
