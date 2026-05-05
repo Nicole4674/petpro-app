@@ -105,7 +105,7 @@ export default function AIChatWidget() {
 
   // Tip text per step (1-8). Step 0 = wizard exited, no tip.
   const WIZARD_TIPS = {
-    1: "Welcome! I'm Suds — I'll walk you through 8 quick steps. Most groomers finish in under 10 minutes!",
+    1: "Welcome! Just 3 quick questions and I'll know how to set up your shop. Pick your answers and hit Let's go!",
     2: "Just the basics — only your shop name is required. Address helps if you do mobile grooming.",
     3: "Pick a quick-fill or write your own hours. Totally optional — you can skip and add later!",
     4: "Tick what you offer and tweak the prices. You can add custom services anytime from Pricing.",

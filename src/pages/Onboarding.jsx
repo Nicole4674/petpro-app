@@ -101,6 +101,17 @@ export default function Onboarding() {
       } catch (e) { /* noop */ }
     }
   }, [])
+
+  // ─── Auto-skip Step 6 (Boarding) if the user said "no boarding" in Step 1 ───
+  // Avoids making them click through a step that doesn't apply to them.
+  useEffect(function () {
+    if (!loaded) return
+    if (currentStep === 6 && !offersBoarding && !saving) {
+      // Skip forward to Step 7 silently
+      setCurrentStep(7)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep, offersBoarding, loaded])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
@@ -124,7 +135,12 @@ export default function Onboarding() {
   // Step 5 — staff: solo or team
   const [staffMode, setStaffMode] = useState('solo')   // 'solo' or 'team'
 
-  // Step 6 — boarding
+  // Step 1 — mobile vs storefront (was previously a Shop Settings toggle).
+  // Flips shop_settings.is_mobile so the Route page appears in their sidebar.
+  const [isMobile, setIsMobile] = useState(false)
+
+  // Step 6 — boarding (now also asked in Step 1 so we can auto-skip step 6
+  // entirely if they don't board).
   const [offersBoarding, setOffersBoarding] = useState(false)
   const [kennelCounts, setKennelCounts] = useState({ small: 0, medium: 0, large: 0, xl: 0 })
 
@@ -143,7 +159,7 @@ export default function Onboarding() {
 
         const { data, error } = await supabase
           .from('shop_settings')
-          .select('onboarding_step, onboarding_completed_at, onboarding_migration_source, shop_name, phone, address, hours, waitlist_timezone')
+          .select('onboarding_step, onboarding_completed_at, onboarding_migration_source, shop_name, phone, address, hours, waitlist_timezone, is_mobile')
           .eq('groomer_id', user.id)
           .maybeSingle()
         if (cancelled) return
@@ -172,6 +188,7 @@ export default function Onboarding() {
         if (data && data.address) setAddress(data.address)
         if (data && data.hours) setHours(data.hours)
         if (data && data.waitlist_timezone) setWaitlistTimezone(data.waitlist_timezone)
+        if (data && typeof data.is_mobile === 'boolean') setIsMobile(data.is_mobile)
 
         // ─── Step 4 — count existing services so we can show "you already have X" ───
         try {
@@ -230,6 +247,8 @@ export default function Onboarding() {
   }
 
   // ─── Mark wizard fully complete + go to dashboard ───
+  // If they said they're migrating in Step 1, fire Suds in migration mode
+  // after navigation so he picks up the handoff and walks them through the import.
   async function finishWizard() {
     if (!userId) return
     setSaving(true)
@@ -240,8 +259,19 @@ export default function Onboarding() {
           groomer_id: userId,
           onboarding_step: TOTAL_STEPS,
           onboarding_completed_at: new Date().toISOString(),
+          onboarding_migration_source: migrationSource || null,
+          is_mobile: isMobile,
         }, { onConflict: 'groomer_id' })
       navigate('/')
+      // If they're migrating, hand off to Suds AFTER nav settles so the
+      // widget on the dashboard page is mounted and listening.
+      if (migrationSource) {
+        setTimeout(function () {
+          try {
+            window.dispatchEvent(new CustomEvent('petpro:start-migration', { detail: { source: migrationSource } }))
+          } catch (e) { /* noop */ }
+        }, 800)
+      }
     } catch (e) {
       console.error('[Onboarding] finishWizard error:', e)
       setError('Could not save. Try again.')
@@ -415,26 +445,14 @@ export default function Onboarding() {
     }
   }
 
-  // ─── Step 1 special-case: if they say "yes I'm migrating", we exit
-  //     the wizard, fire Suds in migration mode, and go to the dashboard. ───
-  async function handleMigrationYes(source) {
-    setMigrationSource(source)
-    // Save the source + mark wizard "complete" (they'll set up via Suds chat)
-    await supabase
-      .from('shop_settings')
-      .upsert({
-        groomer_id: userId,
-        onboarding_step: 1,
-        onboarding_completed_at: new Date().toISOString(),
-        onboarding_migration_source: source,
-      }, { onConflict: 'groomer_id' })
-
-    // Navigate to dashboard, then fire Suds in migration mode after the page loads
-    navigate('/')
-    setTimeout(() => {
-      try { window.dispatchEvent(new CustomEvent('petpro:start-migration', { detail: { source } })) }
-      catch (e) { /* noop */ }
-    }, 600)
+  // ─── Step 1 Continue handler: just records the 3 answers and advances.
+  //     Migration handoff happens at Step 8 (Done) instead of exiting here. ───
+  async function handleStep1Continue() {
+    await goNext({
+      onboarding_migration_source: migrationSource || null,
+      is_mobile: isMobile,
+      // Note: offersBoarding is in component state — Step 6 will skip itself if false
+    })
   }
 
   // ────────────────────────────────────────────────────────────────────────
@@ -488,8 +506,10 @@ export default function Onboarding() {
         <div style={{ minHeight: '320px' }}>
           {currentStep === 1 && (
             <Step1Welcome
-              onYesMigration={handleMigrationYes}
-              onNoStartFresh={() => goNext({ onboarding_migration_source: null })}
+              migrationSource={migrationSource} setMigrationSource={setMigrationSource}
+              isMobile={isMobile} setIsMobile={setIsMobile}
+              offersBoarding={offersBoarding} setOffersBoarding={setOffersBoarding}
+              onContinue={handleStep1Continue}
               saving={saving}
             />
           )}
@@ -528,7 +548,7 @@ export default function Onboarding() {
             />
           )}
           {currentStep === 8 && (
-            <Step8Done onFinish={finishWizard} saving={saving} />
+            <Step8Done onFinish={finishWizard} saving={saving} migrationSource={migrationSource} />
           )}
         </div>
 
@@ -571,140 +591,190 @@ export default function Onboarding() {
   )
 }
 
-// ════════════ STEP 1 — Welcome + migration check ════════════
-function Step1Welcome({ onYesMigration, onNoStartFresh, saving }) {
-  const [showMigrationOptions, setShowMigrationOptions] = useState(false)
-
-  if (!showMigrationOptions) {
-    // Initial welcome screen
-    return (
-      <div style={{ textAlign: 'center', padding: '20px 10px' }}>
-        <img
-          src="/suds-waving.png"
-          alt="Suds waving hello"
-          style={{ width: '140px', height: 'auto', margin: '0 auto 16px', display: 'block' }}
-        />
-        <h1 style={{ fontSize: '26px', fontWeight: 800, color: '#1f2937', margin: '0 0 8px' }}>
-          Welcome to PetPro!
-        </h1>
-        <p style={{ fontSize: '15px', color: '#6b7280', lineHeight: 1.6, maxWidth: '460px', margin: '0 auto 24px' }}>
-          I'm Suds 🦦 — your AI booking buddy. I'll walk you through 8 quick steps to get your shop set up. Most groomers finish in under 10 minutes.
-        </p>
-
-        <div style={{
-          background: '#faf5ff',
-          border: '1px solid #e9d5ff',
-          borderRadius: '12px',
-          padding: '18px 20px',
-          maxWidth: '460px',
-          margin: '0 auto 20px',
-          textAlign: 'left',
-        }}>
-          <div style={{ fontWeight: 700, color: '#5b21b6', marginBottom: '6px', fontSize: '14px' }}>
-            Quick question first:
-          </div>
-          <div style={{ fontSize: '14px', color: '#374151', lineHeight: 1.5 }}>
-            Are you coming from another grooming software (MoeGo, Gingr, Pawfinity, paper notebook, spreadsheet, etc.)?
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => setShowMigrationOptions(true)}
-            disabled={saving}
-            style={{ ...btnPrimaryStyle, minWidth: '180px' }}
-          >
-            Yes, I'm switching →
-          </button>
-          <button
-            onClick={onNoStartFresh}
-            disabled={saving}
-            style={{ ...btnSecondaryStyle, minWidth: '180px' }}
-          >
-            {saving ? 'Saving...' : 'No, brand new shop'}
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  // Migration source picker
+// ════════════ STEP 1 — Welcome + 3-question intake ════════════
+// Asks the 3 things that branch the rest of the wizard:
+//   1. Migration source (or "not migrating") — handoff to Suds happens at Step 8
+//   2. Mobile or storefront — sets is_mobile so the Route page appears in sidebar
+//   3. Offers boarding — Step 6 (Boarding) auto-skips if "No"
+function Step1Welcome({ migrationSource, setMigrationSource, isMobile, setIsMobile, offersBoarding, setOffersBoarding, onContinue, saving }) {
   const sources = [
-    { id: 'moego', label: 'MoeGo' },
-    { id: 'gingr', label: 'Gingr' },
-    { id: 'pawfinity', label: 'Pawfinity' },
-    { id: 'propet', label: 'ProPet' },
+    { id: '',               label: "No — I'm a brand new shop" },
+    { id: 'moego',          label: 'MoeGo' },
+    { id: 'gingr',          label: 'Gingr' },
+    { id: 'pawfinity',      label: 'Pawfinity' },
+    { id: 'propet',         label: 'ProPet' },
     { id: 'easy_busy_pets', label: 'Easy Busy Pets' },
-    { id: '123pet', label: '123Pet' },
-    { id: 'daysmart', label: 'Daysmart Pet' },
-    { id: 'spreadsheet', label: 'Spreadsheet (Excel/Sheets)' },
-    { id: 'paper', label: 'Paper notebook' },
-    { id: 'other', label: 'Something else' },
+    { id: '123pet',         label: '123Pet' },
+    { id: 'daysmart',       label: 'Daysmart Pet' },
+    { id: 'spreadsheet',    label: 'Spreadsheet (Excel/Sheets)' },
+    { id: 'paper',          label: 'Paper notebook' },
+    { id: 'other',          label: 'Something else' },
   ]
 
   return (
-    <div style={{ padding: '20px 10px' }}>
-      <img
-        src="/suds-thinking.png"
-        alt="Suds thinking"
-        style={{ width: '90px', height: 'auto', margin: '0 auto 12px', display: 'block' }}
-      />
-      <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#1f2937', textAlign: 'center', margin: '0 0 8px' }}>
-        Where are you coming from?
-      </h2>
-      <p style={{ fontSize: '14px', color: '#6b7280', textAlign: 'center', margin: '0 0 20px' }}>
-        Pick one and I'll switch into Migration Mode — I'll walk you through importing your clients, pets, and history at your pace.
-      </p>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '8px', marginBottom: '16px' }}>
-        {sources.map(s => (
-          <button
-            key={s.id}
-            onClick={() => onYesMigration(s.id)}
-            disabled={saving}
-            style={{
-              padding: '12px 14px',
-              border: '1.5px solid #e5e7eb',
-              borderRadius: '10px',
-              background: '#fff',
-              fontSize: '14px',
-              fontWeight: 600,
-              color: '#374151',
-              cursor: saving ? 'not-allowed' : 'pointer',
-              transition: 'all 0.15s ease',
-              textAlign: 'center',
-            }}
-            onMouseEnter={(e) => {
-              if (saving) return
-              e.currentTarget.style.borderColor = '#7c3aed'
-              e.currentTarget.style.background = '#faf5ff'
-              e.currentTarget.style.color = '#5b21b6'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = '#e5e7eb'
-              e.currentTarget.style.background = '#fff'
-              e.currentTarget.style.color = '#374151'
-            }}
-          >
-            {s.label}
-          </button>
-        ))}
+    <div style={{ padding: '10px 0' }}>
+      {/* Welcome header */}
+      <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+        <img
+          src="/suds-waving.png"
+          alt="Suds waving hello"
+          style={{ width: '120px', height: 'auto', margin: '0 auto 12px', display: 'block' }}
+        />
+        <h1 style={{ fontSize: '24px', fontWeight: 800, color: '#1f2937', margin: '0 0 6px' }}>
+          Welcome to PetPro!
+        </h1>
+        <p style={{ fontSize: '14px', color: '#6b7280', lineHeight: 1.5, maxWidth: '480px', margin: '0 auto' }}>
+          I'm Suds 🦦 — your AI booking buddy. Quick 3 questions so I know how to set up your shop. Then we'll fill in the details.
+        </p>
       </div>
 
+      {/* ─── Question 1: Migration ─── */}
+      <div style={{ marginBottom: '18px' }}>
+        <label style={fieldLabelStyle}>
+          1. Are you coming from another system?
+        </label>
+        <select
+          value={migrationSource}
+          onChange={(e) => setMigrationSource(e.target.value)}
+          style={fieldInputStyle}
+        >
+          {sources.map(s => (
+            <option key={s.id || 'none'} value={s.id}>{s.label}</option>
+          ))}
+        </select>
+        {migrationSource && (
+          <div style={{
+            marginTop: '6px',
+            fontSize: '12px',
+            color: '#5b21b6',
+            background: '#faf5ff',
+            border: '1px solid #e9d5ff',
+            borderRadius: '6px',
+            padding: '6px 10px',
+          }}>
+            🦦 Got it — at the end of setup, I'll switch to Migration Mode and walk you through importing your clients, pets, and history.
+          </div>
+        )}
+      </div>
+
+      {/* ─── Question 2: Mobile vs Storefront ─── */}
+      <div style={{ marginBottom: '18px' }}>
+        <label style={fieldLabelStyle}>
+          2. How do you groom?
+        </label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <button
+            type="button"
+            onClick={() => setIsMobile(false)}
+            style={{
+              padding: '14px 12px',
+              border: !isMobile ? '2px solid #7c3aed' : '1.5px solid #e5e7eb',
+              borderRadius: '10px',
+              background: !isMobile ? '#faf5ff' : '#fff',
+              cursor: 'pointer',
+              textAlign: 'center',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <div style={{ fontSize: '20px', marginBottom: '2px' }}>🏪</div>
+            <div style={{ fontWeight: 800, fontSize: '13px', color: '#1f2937' }}>Storefront</div>
+            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>Clients come to me</div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsMobile(true)}
+            style={{
+              padding: '14px 12px',
+              border: isMobile ? '2px solid #7c3aed' : '1.5px solid #e5e7eb',
+              borderRadius: '10px',
+              background: isMobile ? '#faf5ff' : '#fff',
+              cursor: 'pointer',
+              textAlign: 'center',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <div style={{ fontSize: '20px', marginBottom: '2px' }}>🚐</div>
+            <div style={{ fontWeight: 800, fontSize: '13px', color: '#1f2937' }}>Mobile</div>
+            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>I drive to clients</div>
+          </button>
+        </div>
+        {isMobile && (
+          <div style={{
+            marginTop: '6px',
+            fontSize: '12px',
+            color: '#5b21b6',
+            background: '#faf5ff',
+            border: '1px solid #e9d5ff',
+            borderRadius: '6px',
+            padding: '6px 10px',
+          }}>
+            🚐 Mobile mode on — your sidebar will show the <strong>Route</strong> page with drive-time warnings, multi-stop nav, and zone clustering.
+          </div>
+        )}
+      </div>
+
+      {/* ─── Question 3: Boarding ─── */}
+      <div style={{ marginBottom: '24px' }}>
+        <label style={fieldLabelStyle}>
+          3. Do you offer boarding (overnight stays)?
+        </label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <button
+            type="button"
+            onClick={() => setOffersBoarding(false)}
+            style={{
+              padding: '14px 12px',
+              border: !offersBoarding ? '2px solid #7c3aed' : '1.5px solid #e5e7eb',
+              borderRadius: '10px',
+              background: !offersBoarding ? '#faf5ff' : '#fff',
+              cursor: 'pointer',
+              textAlign: 'center',
+            }}
+          >
+            <div style={{ fontSize: '20px', marginBottom: '2px' }}>✂️</div>
+            <div style={{ fontWeight: 800, fontSize: '13px', color: '#1f2937' }}>Grooming only</div>
+            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>No overnight stays</div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setOffersBoarding(true)}
+            style={{
+              padding: '14px 12px',
+              border: offersBoarding ? '2px solid #7c3aed' : '1.5px solid #e5e7eb',
+              borderRadius: '10px',
+              background: offersBoarding ? '#faf5ff' : '#fff',
+              cursor: 'pointer',
+              textAlign: 'center',
+            }}
+          >
+            <div style={{ fontSize: '20px', marginBottom: '2px' }}>🏠</div>
+            <div style={{ fontWeight: 800, fontSize: '13px', color: '#1f2937' }}>Grooming + Boarding</div>
+            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>I have kennels too</div>
+          </button>
+        </div>
+        {offersBoarding && (
+          <div style={{
+            marginTop: '6px',
+            fontSize: '12px',
+            color: '#5b21b6',
+            background: '#faf5ff',
+            border: '1px solid #e9d5ff',
+            borderRadius: '6px',
+            padding: '6px 10px',
+          }}>
+            🏠 We'll set up your kennels in Step 6.
+          </div>
+        )}
+      </div>
+
+      {/* Continue button */}
       <div style={{ textAlign: 'center' }}>
         <button
-          onClick={() => setShowMigrationOptions(false)}
+          onClick={onContinue}
           disabled={saving}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: '#9ca3af',
-            fontSize: '13px',
-            cursor: 'pointer',
-            textDecoration: 'underline',
-          }}
+          style={{ ...btnPrimaryStyle, minWidth: '200px', padding: '14px 24px', fontSize: '15px' }}
         >
-          ← Actually, I'm not migrating
+          {saving ? 'Saving...' : "Let's go →"}
         </button>
       </div>
     </div>
@@ -1222,7 +1292,8 @@ function PlaceholderStep({ title }) {
 }
 
 // ════════════ STEP 8 — Done ════════════
-function Step8Done({ onFinish, saving }) {
+function Step8Done({ onFinish, saving, migrationSource }) {
+  const isMigrating = !!migrationSource
   return (
     <div style={{ textAlign: 'center', padding: '20px 10px' }}>
       <img
@@ -1233,16 +1304,34 @@ function Step8Done({ onFinish, saving }) {
       <h1 style={{ fontSize: '28px', fontWeight: 800, color: '#1f2937', margin: '0 0 8px' }}>
         You're all set!
       </h1>
-      <p style={{ fontSize: '15px', color: '#6b7280', lineHeight: 1.6, maxWidth: '460px', margin: '0 auto 28px' }}>
+      <p style={{ fontSize: '15px', color: '#6b7280', lineHeight: 1.6, maxWidth: '460px', margin: '0 auto 20px' }}>
         Your shop's ready to take bookings. I'll be in the corner if you need me — just call my name (Suds or PetPro) anytime.
       </p>
+
+      {isMigrating && (
+        <div style={{
+          background: '#faf5ff',
+          border: '1px solid #e9d5ff',
+          borderRadius: '12px',
+          padding: '14px 18px',
+          maxWidth: '460px',
+          margin: '0 auto 20px',
+        }}>
+          <div style={{ fontSize: '13px', fontWeight: 700, color: '#5b21b6', marginBottom: '4px' }}>
+            🦦 Next up — Migration Mode
+          </div>
+          <div style={{ fontSize: '13px', color: '#374151', lineHeight: 1.5 }}>
+            When you click below, I'll pop up in the corner with Migration Mode on. Just tell me what you've got (clients, pets, schedules) and I'll add them at your pace.
+          </div>
+        </div>
+      )}
 
       <button
         onClick={onFinish}
         disabled={saving}
         style={{ ...btnPrimaryStyle, fontSize: '15px', padding: '14px 32px' }}
       >
-        {saving ? 'Loading dashboard...' : 'Take me to my dashboard →'}
+        {saving ? 'Loading dashboard...' : (isMigrating ? "Take me to Suds for Migration →" : 'Take me to my dashboard →')}
       </button>
     </div>
   )
