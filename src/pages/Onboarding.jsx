@@ -51,11 +51,11 @@ const COMMON_SERVICES = [
   { id: 'fg_medium', service_name: 'Full Groom — Medium', category: 'full_groom',  price: 65,  time: 90,  weight_min: 20, weight_max: 50, hint: '20-50 lbs' },
   { id: 'fg_large',  service_name: 'Full Groom — Large',  category: 'full_groom',  price: 80,  time: 120, weight_min: 50, weight_max: 90, hint: '50-90 lbs' },
   { id: 'fg_xl',     service_name: 'Full Groom — XL',     category: 'full_groom',  price: 100, time: 150, weight_min: 90, weight_max: null, hint: '90+ lbs' },
-  { id: 'bath',      service_name: 'Bath & Tidy',         category: 'bath',        price: 35,  time: 45,  weight_min: null, weight_max: null, hint: 'Bath, brush, ear/nail trim' },
+  { id: 'bath',      service_name: 'Bath & Tidy',         category: 'bath_brush',  price: 35,  time: 45,  weight_min: null, weight_max: null, hint: 'Bath, brush, ear/nail trim' },
   { id: 'nail',      service_name: 'Nail Trim',           category: 'nail_trim',   price: 15,  time: 15,  weight_min: null, weight_max: null, hint: 'Walk-in friendly' },
-  { id: 'teeth',     service_name: 'Teeth Brushing',      category: 'add_on',      price: 10,  time: 10,  weight_min: null, weight_max: null, hint: 'Add-on service' },
-  { id: 'deshed',    service_name: 'De-shed Treatment',   category: 'add_on',      price: 25,  time: 30,  weight_min: null, weight_max: null, hint: 'Add-on for heavy coats' },
-  { id: 'puppy',     service_name: 'Puppy Intro',         category: 'puppy_intro', price: 40,  time: 45,  weight_min: null, weight_max: null, hint: 'Under 6 months — gentle first visit' },
+  { id: 'teeth',     service_name: 'Teeth Brushing',      category: 'teeth_brushing', price: 10, time: 10, weight_min: null, weight_max: null, hint: 'Add-on service' },
+  { id: 'deshed',    service_name: 'De-shed Treatment',   category: 'de_shed',     price: 25,  time: 30,  weight_min: null, weight_max: null, hint: 'Add-on for heavy coats' },
+  { id: 'puppy',     service_name: 'Puppy Intro',         category: 'puppy',       price: 40,  time: 45,  weight_min: null, weight_max: null, hint: 'Under 6 months — gentle first visit' },
 ]
 
 const TOTAL_STEPS = 8
