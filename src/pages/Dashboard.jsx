@@ -438,9 +438,18 @@ export default function Dashboard() {
   // Stats calculations
   var todayStr = formatDateISO(new Date())
   var todayAppts = appointments.filter(function(a) { return a.appointment_date === todayStr })
-  var checkedInGrooming = todayAppts.filter(function(a) { return a.status === 'checked_in' || a.status === 'in_progress' })
-  var completedToday = todayAppts.filter(function(a) { return a.status === 'completed' })
-  var stillComing = todayAppts.filter(function(a) { return a.status === 'scheduled' || a.status === 'confirmed' })
+  // "Done" = status flipped to completed OR checked_out_at is stamped.
+  // The manual "→ Check Out" button stamps checked_out_at without always flipping
+  // status — so we treat both as "completed" to match what shows green on Calendar.
+  var checkedInGrooming = todayAppts.filter(function(a) {
+    return (a.status === 'checked_in' || a.status === 'in_progress') && !a.checked_out_at
+  })
+  var completedToday = todayAppts.filter(function(a) {
+    return a.status === 'completed' || !!a.checked_out_at
+  })
+  var stillComing = todayAppts.filter(function(a) {
+    return (a.status === 'scheduled' || a.status === 'confirmed') && !a.checked_out_at
+  })
   var noShows = todayAppts.filter(function(a) { return a.status === 'no_show' })
 
   var todayBoarding = boardingRes.filter(function(b) {
