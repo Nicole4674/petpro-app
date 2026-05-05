@@ -476,7 +476,9 @@ export default function Sidebar({ onToggle }) {
           </div>
           {!collapsed && openSections.ai && (
             <div className="sidebar-subitems">
-              {canAccess('ai.voice_booking') && (
+              {/* Voice Mode hidden — Suds replaced this. Code/route kept intact in case
+                  we ever want to bring it back. To re-enable: change `false &&` to remove it. */}
+              {false && canAccess('ai.voice_booking') && (
               <div
                 className={'sidebar-subitem' + (isActive('/voice') ? ' sidebar-subitem-active' : '')}
                 onClick={function() { goTo('/voice') }}

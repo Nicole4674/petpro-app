@@ -276,16 +276,16 @@ var SECTIONS = [
     title: '🤖 AI & Automation',
     articles: [
       {
-        q: 'How do I use voice mode for hands-free booking?',
+        q: 'How do I use voice booking with Suds (hands-free)?',
         steps: [
-          'Open the left sidebar → under the AI section, click "Voice Mode".',
-          'You\'ll land on the Voice Mode page.',
-          'Hold the mic button and speak: "Book Bella for a full groom Thursday at 2."',
-          'PetPro transcribes, processes, and reads the proposed slot back to you.',
-          'Say "Yes" to confirm, or describe a change ("make it 3 instead").',
+          'Look for Suds 🦦 in the bottom-right corner of any page — he\'s always there.',
+          'Click the purple 🎤 mic button in the bar below Suds.',
+          'Speak naturally: "Book Bella for a full groom Thursday at 2."',
+          'Suds transcribes what you said, sends it to the AI, and replies in a speech bubble + voice.',
+          'Say "yes" or "confirm" to lock in the booking, or describe a change ("make it 3 instead").',
           'The booking lands on your calendar — hands stay clean, dog stays calm.',
         ],
-        tip: 'Voice mode is its own dedicated page, not the floating chat button. Especially useful for mobile groomers in the van or when your hands are wet.',
+        tip: 'Suds is voice + text in one — perfect for mobile groomers in the van or when your hands are wet. You can also call him by name: "Hey Suds" or "Hey PetPro" — both work.',
       },
       {
         q: 'How do I set up booking rules to prevent bad bookings?',

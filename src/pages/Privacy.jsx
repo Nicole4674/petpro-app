@@ -171,7 +171,7 @@ function Privacy() {
         <li><strong>Stripe</strong> — processes subscription payments and stores billing details.</li>
         <li><strong>Twilio</strong> — sends SMS messages (appointment reminders, confirmations, etc.) on behalf of PetPro subscribers to their own clients.</li>
         <li><strong>Anthropic</strong> — provides the Claude AI model that powers PetPro's AI-assisted booking validation and scheduling features.</li>
-        <li><strong>ElevenLabs</strong> — provides the text-to-speech voice synthesis used when PetPro reads responses aloud. Only the text to be spoken is sent to ElevenLabs; no customer audio or identifying information is transmitted.</li>
+        <li><strong>OpenAI</strong> — provides the text-to-speech voice synthesis used when PetPro reads responses aloud (Suds's voice). Only the text to be spoken is sent to OpenAI; no customer audio or identifying information is transmitted.</li>
         <li><strong>Browser Speech Recognition (built-in):</strong> voice input is transcribed locally on your device by your web browser. No audio is sent to PetPro or any third party.</li>
       </ul>
       <p>
@@ -183,7 +183,7 @@ function Privacy() {
       <p>
         PetPro's AI-assisted features (booking validation, scheduling suggestions, voice commands)
         send limited booking-related data to Anthropic (Claude) to generate a response. When voice
-        output is used, only the text to be spoken aloud is sent to ElevenLabs for voice synthesis.
+        output is used, only the text to be spoken aloud is sent to OpenAI for voice synthesis.
         Voice input is transcribed locally by your web browser and is never sent to a third-party
         server as audio. We do not send full client lists, financial records, or information that is
         not needed for the specific AI task. AI providers process this data to return a result and,

@@ -228,7 +228,7 @@ function Terms() {
       <p>
         PetPro uses third-party artificial intelligence services to power features such as booking
         validation, schedule suggestions, and voice commands. These features may be powered by
-        providers including Anthropic (Claude) for booking logic and ElevenLabs for voice (text-to-speech)
+        providers including Anthropic (Claude) for booking logic and OpenAI for voice (text-to-speech)
         output. Voice input is transcribed locally by your web browser's built-in speech recognition —
         audio is not sent to PetPro or a third-party server. AI output is generated automatically and
         may occasionally contain errors. You are responsible for reviewing and approving AI-assisted
@@ -249,7 +249,7 @@ function Terms() {
       <p>
         PetPro integrates with third-party services including (but not limited to) Stripe
         (payments), Twilio (SMS), Supabase (database and authentication), Vercel (hosting),
-        Anthropic (Claude AI), and ElevenLabs (text-to-speech voice output). Your use of features
+        Anthropic (Claude AI), and OpenAI (text-to-speech voice output). Your use of features
         that rely on these services is also subject to those providers' terms. We are not responsible
         for outages, errors, or changes in third-party services outside our control.
       </p>
