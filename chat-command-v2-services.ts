@@ -1531,6 +1531,20 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
             }]
           }
           var totalFromPets = petsList.reduce(function (s, p) { return s + p.quoted_price }, 0)
+          // Build a HUMAN-READABLE summary string Suds literally cannot ignore.
+          // This puts the multi-pet fact front-and-center in plain English.
+          var petSummary
+          if (petsList.length === 0) {
+            petSummary = 'No pets attached'
+          } else if (petsList.length === 1) {
+            petSummary = '1 pet: ' + petsList[0].name + ' (' + petsList[0].service + ' $' + petsList[0].quoted_price.toFixed(2) + ')'
+          } else {
+            // MULTI-PET — make it OBVIOUS
+            var lines = petsList.map(function (p) {
+              return p.name + ' (' + p.service + ' $' + p.quoted_price.toFixed(2) + ')'
+            })
+            petSummary = '⚠️ MULTI-PET (' + petsList.length + ' dogs): ' + lines.join(' + ')
+          }
           return {
             id: a.id,
             appointment_date: a.appointment_date,
@@ -1541,6 +1555,8 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
             checked_out_at: a.checked_out_at,
             client_name: a.clients ? (a.clients.first_name + ' ' + (a.clients.last_name || '')).trim() : 'Unknown',
             client_phone: a.clients ? a.clients.phone : null,
+            // ⚠️ READ THIS FIRST — plain-English summary of the booking ⚠️
+            pet_summary: petSummary,
             pets_on_appointment: petsList,
             pet_count: petsList.length,
             is_multi_pet: petsList.length > 1,
@@ -5311,6 +5327,7 @@ Deno.serve(async (req) => {
     var systemPrompt = [
       guardrails,
       'IDENTITY: Your name is Suds — a friendly otter mascot. The brand/product you live inside is called PetPro AI. Respond when called either "Suds" or "PetPro" (or PetPro AI). Introduce yourself as Suds when greeting someone new. Sign off / refer to yourself as Suds in casual conversation. NEVER say Sonnet, Claude, Anthropic, or any AI model name.',
+      '[Prompt v2026-05-06.multipet-fix]',  // cache-bust marker — bumps the prompt hash so Anthropic re-loads instead of serving stale cache
       '',
       'YOU HAVE TOOLS TO TAKE REAL ACTIONS:',
       '- Use search_clients to find any client by name or phone BEFORE editing or deleting',
@@ -5345,9 +5362,10 @@ Deno.serve(async (req) => {
       'BILLING & CHECKOUT RULES:',
       '- To close out an appointment fully, use mark_paid_in_full — it auto-computes the remaining balance (total − discount − prior payments), records a payment for it, and marks the appt completed. One step.',
       '- mark_paid_in_full IS multi-pet aware on the backend — it sums quoted_price across ALL appointment_pets rows automatically. You only pass appointment_id.',
-      '- MULTI-PET CHECKOUTS — CRITICAL: When get_schedule returns an appointment, the response gives you `pets_on_appointment` (an ARRAY of every dog with name + service + quoted_price), `pet_count`, and `is_multi_pet` flag. ALWAYS use these fields, NEVER assume a single pet.',
+      '- MULTI-PET — READ pet_summary FIRST: Every appointment from get_schedule has a `pet_summary` field that\'s a plain-English string. If it starts with "⚠️ MULTI-PET" — THERE ARE MULTIPLE DOGS. Read pet_summary literally before doing anything else.',
+      '- MULTI-PET CHECKOUTS — CRITICAL: When get_schedule returns an appointment, the response gives you `pet_summary` (the human-readable summary), `pets_on_appointment` (array of every dog with name + service + quoted_price), `pet_count`, and `is_multi_pet` flag. ALWAYS use these fields. NEVER assume single pet.',
       '- If `is_multi_pet` is true OR `pet_count` >= 2, you MUST read back EVERY pet by name + service + price when confirming the checkout. Example for 2 pets: "Closing out bella + shoes — bella full groom $55 + shoes full groom $55 = $110 total. Paying cash, OK?" Never confirm just one pet on a multi-pet appointment.',
-      '- The legacy `pets` field (singular) on an appointment ONLY shows the primary pet. IGNORE IT for checkouts. Use `pets_on_appointment` instead — it has all of them.',
+      '- The response NO LONGER includes the legacy `pets` field (singular). The ONLY source of truth for which pets are on an appointment is `pets_on_appointment` (and `pet_summary` for the readable form).',
       '- For PARTIAL payments (deposit, split pay, pay what they have on them), use record_payment.',
       '- When adding a tip, attach it to a payment via tip_amount — it is NOT a separate row.',
       '- Payment methods you accept: cash, zelle, venmo, check, card, other. If the user just says "they paid" — ASK the method. Never guess.',
