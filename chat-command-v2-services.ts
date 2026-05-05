@@ -1495,7 +1495,7 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
 
         var { data: appts } = await supabaseAdmin
           .from('appointments')
-          .select('id, appointment_date, start_time, end_time, status, quoted_price, service_notes, clients(first_name, last_name, phone), pets(name, breed, grooming_notes, special_notes, allergies, dog_aggressive, people_aggressive, collapsed_trachea), services(service_name, price, time_block_minutes)')
+          .select('id, appointment_date, start_time, end_time, status, quoted_price, total_price, discount_amount, checked_in_at, checked_out_at, service_notes, clients(first_name, last_name, phone), pets(name, breed, grooming_notes, special_notes, allergies, dog_aggressive, people_aggressive, collapsed_trachea), services(service_name, price, time_block_minutes), appointment_pets(id, quoted_price, pets:pet_id(name, breed, grooming_notes, allergies, dog_aggressive, people_aggressive), services:service_id(service_name, price, time_block_minutes))')
           .eq('groomer_id', groomerId)
           .gte('appointment_date', targetDate)
           .lte('appointment_date', endDate)
@@ -5298,6 +5298,9 @@ Deno.serve(async (req) => {
       '',
       'BILLING & CHECKOUT RULES:',
       '- To close out an appointment fully, use mark_paid_in_full — it auto-computes the remaining balance (total − discount − prior payments), records a payment for it, and marks the appt completed. One step.',
+      '- mark_paid_in_full IS multi-pet aware on the backend — it sums quoted_price across ALL appointment_pets rows automatically. You only pass appointment_id.',
+      '- MULTI-PET CHECKOUTS — CRITICAL: When get_schedule returns an appointment, ALWAYS check the appointment_pets array. If it has 2+ entries, that\'s a multi-pet booking. Read back EVERY pet by name + service + price when confirming the checkout. Example for 2 pets: "Closing out Bella + Milo — Bella full groom $55 + Milo full groom $55 = $110 total. Paying cash, OK?" Never confirm just one pet on a multi-pet appointment.',
+      '- If appointment_pets is empty/null, fall back to the legacy single pet (pets.name + services.service_name).',
       '- For PARTIAL payments (deposit, split pay, pay what they have on them), use record_payment.',
       '- When adding a tip, attach it to a payment via tip_amount — it is NOT a separate row.',
       '- Payment methods you accept: cash, zelle, venmo, check, card, other. If the user just says "they paid" — ASK the method. Never guess.',
