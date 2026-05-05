@@ -1505,7 +1505,53 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
 
         if (!appts || appts.length === 0) return { success: true, message: 'No appointments found for ' + targetDate + (endDate !== targetDate ? ' to ' + endDate : ''), appointments: [] }
 
-        return { success: true, date: targetDate, end_date: endDate, appointments: appts }
+        // ─── PRE-FORMAT each appointment so Suds can't miss multi-pet info ───
+        // Normalizes `pets` (legacy singular) and `appointment_pets` (new multi-pet)
+        // into a single `pets_on_appointment` array with explicit per-pet pricing.
+        // Also adds is_multi_pet + pet_count flags so Suds reads it correctly.
+        var formattedAppts = appts.map(function (a) {
+          var petsList = []
+          if (a.appointment_pets && a.appointment_pets.length > 0) {
+            // Multi-pet booking — read from appointment_pets junction table
+            petsList = a.appointment_pets.map(function (ap) {
+              return {
+                name: (ap.pets && ap.pets.name) || 'Pet',
+                breed: (ap.pets && ap.pets.breed) || null,
+                service: (ap.services && ap.services.service_name) || 'Service',
+                quoted_price: parseFloat(ap.quoted_price || 0),
+              }
+            })
+          } else if (a.pets && a.pets.name) {
+            // Legacy single-pet booking
+            petsList = [{
+              name: a.pets.name,
+              breed: a.pets.breed,
+              service: (a.services && a.services.service_name) || 'Service',
+              quoted_price: parseFloat(a.quoted_price || 0),
+            }]
+          }
+          var totalFromPets = petsList.reduce(function (s, p) { return s + p.quoted_price }, 0)
+          return {
+            id: a.id,
+            appointment_date: a.appointment_date,
+            start_time: a.start_time,
+            end_time: a.end_time,
+            status: a.status,
+            checked_in_at: a.checked_in_at,
+            checked_out_at: a.checked_out_at,
+            client_name: a.clients ? (a.clients.first_name + ' ' + (a.clients.last_name || '')).trim() : 'Unknown',
+            client_phone: a.clients ? a.clients.phone : null,
+            pets_on_appointment: petsList,
+            pet_count: petsList.length,
+            is_multi_pet: petsList.length > 1,
+            // Quoted total — prefer total_price column, fall back to sum of pets, fall back to legacy quoted_price
+            quoted_total: parseFloat(a.total_price || 0) || totalFromPets || parseFloat(a.quoted_price || 0),
+            discount_amount: parseFloat(a.discount_amount || 0),
+            service_notes: a.service_notes || null,
+          }
+        })
+
+        return { success: true, date: targetDate, end_date: endDate, appointments: formattedAppts }
       }
 
       // ====================================================================
@@ -5299,8 +5345,9 @@ Deno.serve(async (req) => {
       'BILLING & CHECKOUT RULES:',
       '- To close out an appointment fully, use mark_paid_in_full — it auto-computes the remaining balance (total − discount − prior payments), records a payment for it, and marks the appt completed. One step.',
       '- mark_paid_in_full IS multi-pet aware on the backend — it sums quoted_price across ALL appointment_pets rows automatically. You only pass appointment_id.',
-      '- MULTI-PET CHECKOUTS — CRITICAL: When get_schedule returns an appointment, ALWAYS check the appointment_pets array. If it has 2+ entries, that\'s a multi-pet booking. Read back EVERY pet by name + service + price when confirming the checkout. Example for 2 pets: "Closing out Bella + Milo — Bella full groom $55 + Milo full groom $55 = $110 total. Paying cash, OK?" Never confirm just one pet on a multi-pet appointment.',
-      '- If appointment_pets is empty/null, fall back to the legacy single pet (pets.name + services.service_name).',
+      '- MULTI-PET CHECKOUTS — CRITICAL: When get_schedule returns an appointment, the response gives you `pets_on_appointment` (an ARRAY of every dog with name + service + quoted_price), `pet_count`, and `is_multi_pet` flag. ALWAYS use these fields, NEVER assume a single pet.',
+      '- If `is_multi_pet` is true OR `pet_count` >= 2, you MUST read back EVERY pet by name + service + price when confirming the checkout. Example for 2 pets: "Closing out bella + shoes — bella full groom $55 + shoes full groom $55 = $110 total. Paying cash, OK?" Never confirm just one pet on a multi-pet appointment.',
+      '- The legacy `pets` field (singular) on an appointment ONLY shows the primary pet. IGNORE IT for checkouts. Use `pets_on_appointment` instead — it has all of them.',
       '- For PARTIAL payments (deposit, split pay, pay what they have on them), use record_payment.',
       '- When adding a tip, attach it to a payment via tip_amount — it is NOT a separate row.',
       '- Payment methods you accept: cash, zelle, venmo, check, card, other. If the user just says "they paid" — ASK the method. Never guess.',
