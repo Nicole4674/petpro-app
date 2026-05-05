@@ -219,7 +219,7 @@ export default function ClientPortalDashboard() {
       // not just the primary one.
       var { data: apptsData } = await supabase
         .from('appointments')
-        .select('*, pets(id, name, breed), services(id, service_name, price, time_block_minutes), appointment_pets(id, pets:pet_id(id, name, breed), services:service_id(id, service_name, price))')
+        .select('*, pets(id, name, breed), services(id, service_name, price, time_block_minutes), appointment_pets(id, quoted_price, pets:pet_id(id, name, breed), services:service_id(id, service_name, price))')
         .eq('client_id', clientData.id)
         .is('checked_out_at', null)
         .order('appointment_date', { ascending: true })
@@ -1684,13 +1684,83 @@ export default function ClientPortalDashboard() {
                                   ("ask owner about groom", "photo of finished cut", staff reminders, etc).
                                   Clients should NEVER see these. If a groomer wants to message a client,
                                   use the Messages feature instead. */}
+
+                              {/* ─── Per-pet price breakdown ───
+                                  Shows each dog with its service + price so multi-pet clients see
+                                  exactly what each is. Only renders when there are appointment_pets
+                                  rows AND at least one has a price set. */}
+                              {(function () {
+                                if (!appt.appointment_pets || appt.appointment_pets.length === 0) return null
+                                // Build the per-pet list with prices (prefer quoted_price, fallback to services.price)
+                                var rows = appt.appointment_pets.map(function (ap) {
+                                  var price = parseFloat(ap.quoted_price || 0)
+                                  if (!price) price = parseFloat((ap.services && ap.services.price) || 0)
+                                  return {
+                                    petName: (ap.pets && ap.pets.name) || 'Pet',
+                                    serviceName: (ap.services && ap.services.service_name) || 'Service',
+                                    price: price,
+                                  }
+                                })
+                                // Only show if at least one row has a real price (otherwise nothing to display)
+                                var anyPriced = rows.some(function (r) { return r.price > 0 })
+                                if (!anyPriced) return null
+                                var total = rows.reduce(function (sum, r) { return sum + r.price }, 0)
+                                return (
+                                  <div style={{
+                                    marginTop: '10px',
+                                    padding: '10px 12px',
+                                    background: '#f9fafb',
+                                    border: '1px solid #e5e7eb',
+                                    borderRadius: 8,
+                                    fontSize: 13,
+                                  }}>
+                                    {rows.map(function (r, i) {
+                                      return (
+                                        <div key={i} style={{
+                                          display: 'flex',
+                                          justifyContent: 'space-between',
+                                          alignItems: 'center',
+                                          padding: '4px 0',
+                                          borderBottom: i < rows.length - 1 ? '1px dashed #e5e7eb' : 'none',
+                                        }}>
+                                          <span style={{ color: '#374151' }}>
+                                            🐾 <strong>{r.petName}</strong> · {r.serviceName}
+                                          </span>
+                                          <span style={{ fontWeight: 700, color: '#111827' }}>
+                                            ${r.price.toFixed(2)}
+                                          </span>
+                                        </div>
+                                      )
+                                    })}
+                                    {rows.length > 1 && (
+                                      <div style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        marginTop: 6,
+                                        paddingTop: 8,
+                                        borderTop: '2px solid #d1d5db',
+                                        fontWeight: 800,
+                                        color: '#111827',
+                                      }}>
+                                        <span>Total</span>
+                                        <span>${total.toFixed(2)}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })()}
+
                               {/* Awaiting Payment banner — when booking is pending and balance is owed,
                                    this is a require-prepay shop. Tell client they need to pay to confirm. */}
                               {appt.status === 'pending' && (function () {
                                 var totalPrice = parseFloat(appt.total_price || 0)
                                 if (!totalPrice && appt.appointment_pets && appt.appointment_pets.length > 0) {
                                   totalPrice = appt.appointment_pets.reduce(function (sum, ap) {
-                                    return sum + parseFloat((ap.services && ap.services.price) || 0)
+                                    // Prefer quoted_price (the ACTUAL booked amount) over services.price (catalog default)
+                                    var p = parseFloat(ap.quoted_price || 0)
+                                    if (!p) p = parseFloat((ap.services && ap.services.price) || 0)
+                                    return sum + p
                                   }, 0)
                                 }
                                 if (!totalPrice && appt.services && appt.services.price) {
@@ -1724,12 +1794,16 @@ export default function ClientPortalDashboard() {
                               {(function () {
                                 // Compute the appointment total from whatever pricing data is available:
                                 //   1. Explicit total_price column (newer multi-pet bookings)
-                                //   2. Sum of service prices across appointment_pets (multi-pet)
-                                //   3. The legacy single service.price (one pet, one service)
+                                //   2. Sum of QUOTED_PRICE across appointment_pets (the actual booked amount)
+                                //   3. Fallback: sum service.price (catalog default — only used if quoted_price missing)
+                                //   4. Legacy single service.price (one pet, one service)
                                 var total = parseFloat(appt.total_price || 0)
                                 if (!total && appt.appointment_pets && appt.appointment_pets.length > 0) {
                                   total = appt.appointment_pets.reduce(function (sum, ap) {
-                                    return sum + parseFloat((ap.services && ap.services.price) || 0)
+                                    // Prefer quoted_price (what the groomer ACTUALLY booked at) over catalog price
+                                    var p = parseFloat(ap.quoted_price || 0)
+                                    if (!p) p = parseFloat((ap.services && ap.services.price) || 0)
+                                    return sum + p
                                   }, 0)
                                 }
                                 if (!total && appt.services && appt.services.price) {
