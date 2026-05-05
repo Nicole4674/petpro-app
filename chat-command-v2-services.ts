@@ -3099,7 +3099,7 @@ Deno.serve(async (req) => {
 
     var { data: todayAppts } = await supabaseAdmin
       .from('appointments')
-      .select('id, appointment_date, start_time, end_time, status, quoted_price, service_notes, clients(first_name, last_name), pets(name, breed), services(service_name)')
+      .select('id, appointment_date, start_time, end_time, status, quoted_price, total_price, service_notes, clients(first_name, last_name), pets(name, breed), services(service_name), appointment_pets(quoted_price, pets:pet_id(name, breed), services:service_id(service_name))')
       .eq('groomer_id', body.groomer_id)
       .eq('appointment_date', today)
       .neq('status', 'cancelled')
@@ -3233,12 +3233,42 @@ Deno.serve(async (req) => {
     contextParts.push('=== TODAY\'S SCHEDULE ===')
     if (todayAppts && todayAppts.length > 0) {
       for (var a of todayAppts) {
+        // ─── Build per-pet info (multi-pet aware) ───
+        // For multi-pet bookings, list EVERY pet by name + service + price.
+        // This is how Suds will know about Loke + Finley instead of just one.
+        var petInfo
+        var apptTotal = 0
+        if (a.appointment_pets && a.appointment_pets.length > 0) {
+          // Multi-pet — render each one explicitly
+          var petStrings = a.appointment_pets.map(function (ap) {
+            var nm = (ap.pets && ap.pets.name) || '?'
+            var br = (ap.pets && ap.pets.breed) || ''
+            var sv = (ap.services && ap.services.service_name) || 'Service'
+            var pr = parseFloat(ap.quoted_price || 0)
+            apptTotal += pr
+            return nm + ' (' + br + ') ' + sv + ' $' + pr.toFixed(2)
+          })
+          if (a.appointment_pets.length > 1) {
+            petInfo = '⚠️ MULTI-PET (' + a.appointment_pets.length + ' dogs): ' + petStrings.join(' + ')
+          } else {
+            petInfo = petStrings[0]
+          }
+        } else {
+          // Legacy single-pet fallback
+          petInfo = (a.pets ? a.pets.name : '?') + ' (' + (a.pets ? a.pets.breed : '') + ')'
+          if (a.services) petInfo += ' ' + a.services.service_name
+          if (a.quoted_price) {
+            petInfo += ' $' + parseFloat(a.quoted_price).toFixed(2)
+            apptTotal = parseFloat(a.quoted_price)
+          }
+        }
+
+        var totalDisplay = parseFloat(a.total_price || 0) || apptTotal || parseFloat(a.quoted_price || 0)
         var line = 'ID:' + a.id + ' | ' + formatTime(a.start_time) + '-' + formatTime(a.end_time)
-        line += ' | ' + (a.pets ? a.pets.name : '?') + ' (' + (a.pets ? a.pets.breed : '') + ')'
+        line += ' | ' + petInfo
         line += ' | ' + (a.clients ? a.clients.first_name + ' ' + a.clients.last_name : '?')
-        line += ' | ' + (a.services ? a.services.service_name : 'No service')
         line += ' | ' + a.status
-        if (a.quoted_price) line += ' | $' + a.quoted_price
+        if (totalDisplay) line += ' | TOTAL $' + totalDisplay.toFixed(2)
         if (a.service_notes) line += ' | ' + a.service_notes
         contextParts.push(line)
       }
