@@ -102,16 +102,6 @@ export default function Onboarding() {
     }
   }, [])
 
-  // ─── Auto-skip Step 6 (Boarding) if the user said "no boarding" in Step 1 ───
-  // Avoids making them click through a step that doesn't apply to them.
-  useEffect(function () {
-    if (!loaded) return
-    if (currentStep === 6 && !offersBoarding && !saving) {
-      // Skip forward to Step 7 silently
-      setCurrentStep(7)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStep, offersBoarding, loaded])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
@@ -146,6 +136,17 @@ export default function Onboarding() {
 
   // Step 7 — Stripe Connect (read-only — we just check if they're already connected)
   const [stripeConnected, setStripeConnected] = useState(false)
+
+  // ─── Auto-skip Step 6 (Boarding) if the user said "no boarding" in Step 1 ───
+  // Avoids making them click through a step that doesn't apply to them.
+  // Placed AFTER all state declarations so the deps array can read them safely.
+  useEffect(function () {
+    if (!loaded) return
+    if (currentStep === 6 && !offersBoarding && !saving) {
+      setCurrentStep(7)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep, offersBoarding, loaded])
 
   // On mount: get user, load existing progress (in case they bailed mid-wizard)
   useEffect(() => {
