@@ -19,6 +19,30 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { formatPhoneOnInput } from '../lib/phone'
+import AddressInput from '../components/AddressInput'
+
+// Common US timezones for the picker (matches what ShopSettings uses)
+const TIMEZONES = [
+  { value: 'America/New_York',    label: 'Eastern (New York)' },
+  { value: 'America/Chicago',     label: 'Central (Chicago)' },
+  { value: 'America/Denver',      label: 'Mountain (Denver)' },
+  { value: 'America/Phoenix',     label: 'Mountain - No DST (Phoenix)' },
+  { value: 'America/Los_Angeles', label: 'Pacific (Los Angeles)' },
+  { value: 'America/Anchorage',   label: 'Alaska (Anchorage)' },
+  { value: 'Pacific/Honolulu',    label: 'Hawaii (Honolulu)' },
+  { value: 'America/Toronto',     label: 'Canada Eastern (Toronto)' },
+  { value: 'America/Vancouver',   label: 'Canada Pacific (Vancouver)' },
+]
+
+// Auto-detect the browser's timezone so we can pre-select sanely
+function detectTimezone() {
+  try {
+    var tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (TIMEZONES.some(function (t) { return t.value === tz })) return tz
+  } catch (e) { /* fall through */ }
+  return 'America/Chicago'  // safe default
+}
 
 const TOTAL_STEPS = 8
 
@@ -50,7 +74,14 @@ export default function Onboarding() {
   // ─── Form data — accumulates across steps, saved to shop_settings ───
   // Each step writes its own subset on Continue.
   const [migrationSource, setMigrationSource] = useState('')   // step 1
-  // Steps 2-7 fields will get added in subsequent iterations.
+  // Step 2 — shop info
+  const [shopName, setShopName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [address, setAddress] = useState('')
+  const [waitlistTimezone, setWaitlistTimezone] = useState(detectTimezone())
+  // Step 3 — business hours (free-text, matches existing shop_settings.hours)
+  const [hours, setHours] = useState('')
+  // Steps 4-7 fields will get added in subsequent iterations.
 
   // On mount: get user, load existing progress (in case they bailed mid-wizard)
   useEffect(() => {
@@ -64,7 +95,7 @@ export default function Onboarding() {
 
         const { data, error } = await supabase
           .from('shop_settings')
-          .select('onboarding_step, onboarding_completed_at, onboarding_migration_source')
+          .select('onboarding_step, onboarding_completed_at, onboarding_migration_source, shop_name, phone, address, hours, waitlist_timezone')
           .eq('groomer_id', user.id)
           .maybeSingle()
         if (cancelled) return
@@ -87,6 +118,12 @@ export default function Onboarding() {
         if (data && data.onboarding_migration_source) {
           setMigrationSource(data.onboarding_migration_source)
         }
+        // Pre-fill any fields they've already entered (matches what ShopSettings would show)
+        if (data && data.shop_name) setShopName(data.shop_name)
+        if (data && data.phone) setPhone(data.phone)
+        if (data && data.address) setAddress(data.address)
+        if (data && data.hours) setHours(data.hours)
+        if (data && data.waitlist_timezone) setWaitlistTimezone(data.waitlist_timezone)
 
         setLoaded(true)
       } catch (e) {
@@ -159,6 +196,30 @@ export default function Onboarding() {
   async function goBack() {
     const prev = Math.max(currentStep - 1, 1)
     setCurrentStep(prev)
+  }
+
+  // ─── Per-step Continue handler — gathers the right fields for THIS step,
+  //     validates lightly, and calls goNext with the payload. ───
+  async function handleContinueFromCurrentStep() {
+    if (currentStep === 2) {
+      // Shop Info — shop_name is the only required field
+      if (!shopName || !shopName.trim()) {
+        setError('Please enter your shop name to continue.')
+        return
+      }
+      await goNext({
+        shop_name: shopName.trim(),
+        phone: phone || null,
+        address: address || null,
+        waitlist_timezone: waitlistTimezone || 'America/Chicago',
+      })
+    } else if (currentStep === 3) {
+      // Business Hours — optional, but encourage filling it in
+      await goNext({ hours: hours ? hours.trim() : null })
+    } else {
+      // Steps 4-7 still placeholders — just advance
+      await goNext()
+    }
   }
 
   // ─── Step 1 special-case: if they say "yes I'm migrating", we exit
@@ -239,8 +300,17 @@ export default function Onboarding() {
               saving={saving}
             />
           )}
-          {currentStep === 2 && <PlaceholderStep title="Shop Info" />}
-          {currentStep === 3 && <PlaceholderStep title="Business Hours" />}
+          {currentStep === 2 && (
+            <Step2ShopInfo
+              shopName={shopName} setShopName={setShopName}
+              phone={phone} setPhone={setPhone}
+              address={address} setAddress={setAddress}
+              waitlistTimezone={waitlistTimezone} setWaitlistTimezone={setWaitlistTimezone}
+            />
+          )}
+          {currentStep === 3 && (
+            <Step3Hours hours={hours} setHours={setHours} />
+          )}
           {currentStep === 4 && <PlaceholderStep title="Services + Pricing" />}
           {currentStep === 5 && <PlaceholderStep title="Staff" />}
           {currentStep === 6 && <PlaceholderStep title="Boarding" />}
@@ -276,7 +346,7 @@ export default function Onboarding() {
               ← Back
             </button>
             <button
-              onClick={() => goNext()}
+              onClick={handleContinueFromCurrentStep}
               disabled={saving}
               style={btnPrimaryStyle}
             >
@@ -429,7 +499,149 @@ function Step1Welcome({ onYesMigration, onNoStartFresh, saving }) {
   )
 }
 
-// ════════════ Placeholder for Steps 2-7 (built in next iterations) ════════════
+// ════════════ STEP 2 — Shop Info ════════════
+function Step2ShopInfo({ shopName, setShopName, phone, setPhone, address, setAddress, waitlistTimezone, setWaitlistTimezone }) {
+  return (
+    <div style={{ padding: '10px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '20px' }}>
+        <img src="/suds-thinking.png" alt="Suds" style={{ width: '70px', height: 'auto', flexShrink: 0 }} />
+        <div>
+          <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#1f2937', margin: '0 0 4px' }}>Tell me about your shop</h2>
+          <p style={{ fontSize: '13px', color: '#6b7280', margin: 0 }}>This shows up on receipts, client emails, and your dashboard. Only the shop name is required.</p>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        {/* Shop name */}
+        <div>
+          <label style={fieldLabelStyle}>Shop name <span style={{ color: '#dc2626' }}>*</span></label>
+          <input
+            type="text"
+            value={shopName}
+            onChange={(e) => setShopName(e.target.value)}
+            placeholder="e.g. Paws & Claws Grooming"
+            style={fieldInputStyle}
+          />
+        </div>
+
+        {/* Phone */}
+        <div>
+          <label style={fieldLabelStyle}>Shop phone</label>
+          <input
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(formatPhoneOnInput(e.target.value))}
+            placeholder="713-098-3746"
+            style={fieldInputStyle}
+          />
+        </div>
+
+        {/* Address (with autocomplete) */}
+        <div>
+          <label style={fieldLabelStyle}>Shop address</label>
+          <AddressInput
+            value={address}
+            onChange={setAddress}
+            onSelect={({ address: picked }) => setAddress(picked)}
+          />
+          <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
+            Mobile groomer? Use your home base address — clients will see your shop name, not the address.
+          </div>
+        </div>
+
+        {/* Timezone */}
+        <div>
+          <label style={fieldLabelStyle}>Your timezone</label>
+          <select
+            value={waitlistTimezone}
+            onChange={(e) => setWaitlistTimezone(e.target.value)}
+            style={fieldInputStyle}
+          >
+            {TIMEZONES.map(tz => (
+              <option key={tz.value} value={tz.value}>{tz.label}</option>
+            ))}
+          </select>
+          <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
+            We auto-detected this. We use it so reminders + waitlist offers go out at sensible hours.
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ════════════ STEP 3 — Business Hours ════════════
+function Step3Hours({ hours, setHours }) {
+  // Quick-fill presets — clicking one populates the textarea instantly
+  const presets = [
+    { label: 'Mon–Fri 9-5', text: 'Mon–Fri 9 AM–5 PM\nSat–Sun Closed' },
+    { label: 'Mon–Sat 8-6', text: 'Mon–Sat 8 AM–6 PM\nSun Closed' },
+    { label: 'Tue–Sat 9-7', text: 'Tue–Sat 9 AM–7 PM\nSun–Mon Closed' },
+    { label: '7 days a week', text: 'Mon–Sun 9 AM–6 PM' },
+    { label: 'Mobile (by appt)', text: 'By appointment only — Mon–Sat 8 AM–6 PM' },
+  ]
+
+  return (
+    <div style={{ padding: '10px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '20px' }}>
+        <img src="/suds-thinking.png" alt="Suds" style={{ width: '70px', height: 'auto', flexShrink: 0 }} />
+        <div>
+          <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#1f2937', margin: '0 0 4px' }}>When are you open?</h2>
+          <p style={{ fontSize: '13px', color: '#6b7280', margin: 0 }}>Pick a quick-fill below or write your own. Clients see this on your booking page. You can edit anytime in Shop Settings.</p>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '14px' }}>
+        <div style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Quick fill</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          {presets.map(p => (
+            <button
+              key={p.label}
+              onClick={() => setHours(p.text)}
+              style={{
+                padding: '8px 14px',
+                border: '1.5px solid #e5e7eb',
+                borderRadius: '999px',
+                background: '#fff',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: '#374151',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#7c3aed'
+                e.currentTarget.style.background = '#faf5ff'
+                e.currentTarget.style.color = '#5b21b6'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#e5e7eb'
+                e.currentTarget.style.background = '#fff'
+                e.currentTarget.style.color = '#374151'
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <label style={fieldLabelStyle}>Your hours</label>
+      <textarea
+        value={hours}
+        onChange={(e) => setHours(e.target.value)}
+        placeholder="Mon–Sat 8 AM–6 PM&#10;Sun Closed"
+        rows={5}
+        style={{ ...fieldInputStyle, resize: 'vertical', fontFamily: 'inherit', minHeight: '120px' }}
+      />
+      <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
+        Optional. You can leave this blank and add it later from Shop Settings.
+      </div>
+    </div>
+  )
+}
+
+// ════════════ Placeholder for Steps 4-7 (built in next iterations) ════════════
 function PlaceholderStep({ title }) {
   return (
     <div style={{ textAlign: 'center', padding: '40px 20px' }}>
@@ -520,4 +732,26 @@ const btnSecondaryStyle = {
   fontSize: '14px',
   fontWeight: 600,
   cursor: 'pointer',
+}
+
+const fieldLabelStyle = {
+  display: 'block',
+  fontSize: '12px',
+  fontWeight: 700,
+  color: '#374151',
+  marginBottom: '5px',
+  textTransform: 'uppercase',
+  letterSpacing: '0.5px',
+}
+
+const fieldInputStyle = {
+  width: '100%',
+  padding: '11px 14px',
+  border: '1.5px solid #d1d5db',
+  borderRadius: '8px',
+  fontSize: '14px',
+  background: '#fff',
+  color: '#1f2937',
+  boxSizing: 'border-box',
+  outline: 'none',
 }
