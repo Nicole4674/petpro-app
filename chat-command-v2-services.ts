@@ -1495,7 +1495,7 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
 
         var { data: appts } = await supabaseAdmin
           .from('appointments')
-          .select('id, appointment_date, start_time, end_time, status, quoted_price, total_price, discount_amount, checked_in_at, checked_out_at, service_notes, clients(first_name, last_name, phone), pets(name, breed, grooming_notes, special_notes, allergies, dog_aggressive, people_aggressive, collapsed_trachea), services(service_name, price, time_block_minutes), appointment_pets(id, quoted_price, pets:pet_id(name, breed, grooming_notes, allergies, dog_aggressive, people_aggressive), services:service_id(service_name, price, time_block_minutes))')
+          .select('id, appointment_date, start_time, end_time, status, quoted_price, final_price, discount_amount, checked_in_at, checked_out_at, service_notes, clients(first_name, last_name, phone), pets(name, breed, grooming_notes, special_notes, allergies, dog_aggressive, people_aggressive, collapsed_trachea), services(service_name, price, time_block_minutes), appointment_pets(id, quoted_price, pets:pet_id(name, breed, grooming_notes, allergies, dog_aggressive, people_aggressive), services:service_id(service_name, price, time_block_minutes))')
           .eq('groomer_id', groomerId)
           .gte('appointment_date', targetDate)
           .lte('appointment_date', endDate)
@@ -1560,8 +1560,8 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
             pets_on_appointment: petsList,
             pet_count: petsList.length,
             is_multi_pet: petsList.length > 1,
-            // Quoted total — prefer total_price column, fall back to sum of pets, fall back to legacy quoted_price
-            quoted_total: parseFloat(a.total_price || 0) || totalFromPets || parseFloat(a.quoted_price || 0),
+            // Quoted total — prefer final_price (set when locked in), fall back to sum of pets, fall back to legacy quoted_price
+            quoted_total: parseFloat(a.final_price || 0) || totalFromPets || parseFloat(a.quoted_price || 0),
             discount_amount: parseFloat(a.discount_amount || 0),
             service_notes: a.service_notes || null,
           }
@@ -3099,7 +3099,7 @@ Deno.serve(async (req) => {
 
     var { data: todayAppts } = await supabaseAdmin
       .from('appointments')
-      .select('id, appointment_date, start_time, end_time, status, quoted_price, total_price, service_notes, clients(first_name, last_name), pets(name, breed), services(service_name), appointment_pets(quoted_price, pets:pet_id(name, breed), services:service_id(service_name))')
+      .select('id, appointment_date, start_time, end_time, status, quoted_price, final_price, discount_amount, service_notes, clients(first_name, last_name), pets(name, breed), services(service_name), appointment_pets(quoted_price, pets:pet_id(name, breed), services:service_id(service_name))')
       .eq('groomer_id', body.groomer_id)
       .eq('appointment_date', today)
       .neq('status', 'cancelled')
@@ -3263,7 +3263,7 @@ Deno.serve(async (req) => {
           }
         }
 
-        var totalDisplay = parseFloat(a.total_price || 0) || apptTotal || parseFloat(a.quoted_price || 0)
+        var totalDisplay = parseFloat(a.final_price || 0) || apptTotal || parseFloat(a.quoted_price || 0)
         var line = 'ID:' + a.id + ' | ' + formatTime(a.start_time) + '-' + formatTime(a.end_time)
         line += ' | ' + petInfo
         line += ' | ' + (a.clients ? a.clients.first_name + ' ' + a.clients.last_name : '?')
