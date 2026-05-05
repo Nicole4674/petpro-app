@@ -82,6 +82,25 @@ export default function Onboarding() {
   // ─── Wizard state ───
   // currentStep is 1-indexed (1-8) to match what users see in the progress bar
   const [currentStep, setCurrentStep] = useState(1)
+
+  // Whenever the step changes, broadcast it so Suds can pop a relevant tip.
+  // We also fire on mount so the very first step gets a tip.
+  useEffect(function () {
+    if (!loaded) return
+    try {
+      window.dispatchEvent(new CustomEvent('petpro:onboarding-step', { detail: { step: currentStep } }))
+    } catch (e) { /* noop */ }
+  }, [currentStep, loaded])
+
+  // Fire a "wizard done" event when the user actually finishes (so Suds
+  // can stop showing wizard tips even if they navigate weirdly afterward)
+  useEffect(function () {
+    return function () {
+      try {
+        window.dispatchEvent(new CustomEvent('petpro:onboarding-step', { detail: { step: 0 } }))
+      } catch (e) { /* noop */ }
+    }
+  }, [])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 

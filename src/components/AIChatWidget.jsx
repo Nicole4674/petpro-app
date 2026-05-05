@@ -97,6 +97,50 @@ export default function AIChatWidget() {
     return function () { clearTimeout(t) }
   }, [])
 
+  // ════════════ ONBOARDING WIZARD TIPS ════════════
+  // The Onboarding page fires a 'petpro:onboarding-step' event whenever the
+  // user lands on (or moves to) a wizard step. Suds responds with a friendly,
+  // step-specific speech bubble — only ONCE per step (no spam if they back/forward).
+  const wizardTipsShownRef = useRef({})  // { 1: true, 2: true, ... }
+
+  // Tip text per step (1-8). Step 0 = wizard exited, no tip.
+  const WIZARD_TIPS = {
+    1: "Welcome! I'm Suds — I'll walk you through 8 quick steps. Most groomers finish in under 10 minutes!",
+    2: "Just the basics — only your shop name is required. Address helps if you do mobile grooming.",
+    3: "Pick a quick-fill or write your own hours. Totally optional — you can skip and add later!",
+    4: "Tick what you offer and tweak the prices. You can add custom services anytime from Pricing.",
+    5: "Solo or team? If solo, I'll auto-assign every appointment to you so booking is faster.",
+    6: "Boarding is optional! Just hit No if you only do grooming.",
+    7: "Money goes straight to your bank — I never touch it. Have your bank info handy.",
+    8: "You did it! Look for me in the corner anytime — just call my name (Suds OR PetPro).",
+  }
+
+  useEffect(function () {
+    function onStep(ev) {
+      var step = (ev && ev.detail && ev.detail.step) || 0
+      if (step === 0) {
+        // Wizard exited — clear the "shown" memory so they get tips again next time
+        wizardTipsShownRef.current = {}
+        return
+      }
+      if (wizardTipsShownRef.current[step]) return  // already showed this one
+      var tip = WIZARD_TIPS[step]
+      if (!tip) return
+      wizardTipsShownRef.current[step] = true
+      // Tiny delay so the tip appears AFTER the step transition finishes painting
+      setTimeout(function () {
+        showSpeech(tip, 11000)   // longer linger — wizard tips are useful
+        if (step === 1 || step === 8) {
+          // Welcome + finale get a wave / celebrate from Suds
+          flashMood(step === 8 ? 'celebrate' : 'waving', 2400)
+        }
+      }, 500)
+    }
+    window.addEventListener('petpro:onboarding-step', onStep)
+    return function () { window.removeEventListener('petpro:onboarding-step', onStep) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceEnabled])
+
   // ════════════ MILESTONE LISTENER — petpro:celebrate event ════════════
   // Any page can trigger Suds to jump + cheer by dispatching:
   //   window.dispatchEvent(new CustomEvent('petpro:celebrate',
