@@ -50,6 +50,43 @@ export default function Dashboard() {
   // Stripe payouts widget — net amount processed via Stripe today + this week
   var [stripeSummary, setStripeSummary] = useState({ todayNet: 0, todayCount: 0, weekNet: 0, weekCount: 0 })
 
+  // ─── Onboarding wizard banner state ───
+  // Shows a soft yellow banner at the top of the dashboard if the groomer
+  // hasn't finished the new-shop wizard yet. Dismissable per-session
+  // (sessionStorage) so it nags lightly but doesn't disappear forever.
+  var [onboardingStep, setOnboardingStep] = useState(null)        // 0-8 OR null = done
+  var [onboardingDismissed, setOnboardingDismissed] = useState(function () {
+    if (typeof window === 'undefined') return false
+    return window.sessionStorage.getItem('petpro_wizard_banner_dismissed') === '1'
+  })
+
+  useEffect(function () {
+    var cancelled = false
+    async function loadOnboardingProgress() {
+      try {
+        var { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+        var { data } = await supabase
+          .from('shop_settings')
+          .select('onboarding_step, onboarding_completed_at')
+          .eq('groomer_id', user.id)
+          .maybeSingle()
+        if (cancelled) return
+        // Only set step if NOT completed — banner shows when step != null
+        if (data && !data.onboarding_completed_at) {
+          setOnboardingStep(typeof data.onboarding_step === 'number' ? data.onboarding_step : 0)
+        }
+      } catch (e) { /* non-critical, no banner is fine */ }
+    }
+    loadOnboardingProgress()
+    return function () { cancelled = true }
+  }, [])
+
+  function dismissOnboardingBanner() {
+    setOnboardingDismissed(true)
+    try { window.sessionStorage.setItem('petpro_wizard_banner_dismissed', '1') } catch (e) { /* noop */ }
+  }
+
   useEffect(function() {
     fetchAll()
   }, [currentDate, view])
@@ -491,6 +528,66 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {/* ─── Onboarding wizard banner — soft nag for fresh shops ─── */}
+      {onboardingStep !== null && !onboardingDismissed && (
+        <div style={{
+          background: 'linear-gradient(90deg, #fef3c7, #fde68a)',
+          border: '1px solid #fcd34d',
+          borderRadius: '12px',
+          padding: '14px 18px',
+          margin: '0 0 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '14px',
+          boxShadow: '0 2px 8px rgba(251, 191, 36, 0.18)',
+        }}>
+          <img
+            src="/suds-waving.png"
+            alt="Suds"
+            style={{ width: '52px', height: 'auto', flexShrink: 0 }}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, color: '#78350f', fontSize: '14px', marginBottom: '2px' }}>
+              Finish your shop setup
+            </div>
+            <div style={{ fontSize: '13px', color: '#92400e' }}>
+              You're on step {Math.max(onboardingStep, 1)} of 8. Takes about 5 more minutes — Suds will walk you through it.
+            </div>
+          </div>
+          <button
+            onClick={function () { navigate('/onboarding') }}
+            style={{
+              background: '#7c3aed',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '8px 16px',
+              fontSize: '13px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              flexShrink: 0,
+              boxShadow: '0 2px 8px rgba(124, 58, 237, 0.3)',
+            }}
+          >
+            Continue setup →
+          </button>
+          <button
+            onClick={dismissOnboardingBanner}
+            title="Dismiss for this session"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#92400e',
+              fontSize: '20px',
+              cursor: 'pointer',
+              padding: '0 4px',
+              lineHeight: 1,
+              flexShrink: 0,
+            }}
+          >×</button>
+        </div>
+      )}
 
       {/* View Toggle + Date Navigation */}
       <div className="db-nav-bar">

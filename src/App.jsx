@@ -52,6 +52,7 @@ import StaffMe from './pages/StaffMe'
 import Route2 from './pages/Route'  // imported as Route2 to avoid clash with react-router-dom Route
 import PetProAI from './pages/PetProAI'
 import Expenses from './pages/Expenses'
+import Onboarding from './pages/Onboarding'
 
 // ─────────────────────────────────────────────────────────────────
 // RootRedirect — smart routing at "/" based on user type.
@@ -195,6 +196,7 @@ function App() {
                     <Route path="/portal/messages/:threadId" element={session ? <ClientPortalThread /> : <Navigate to="/portal/login" />} />
                     <Route path="/portal/cards" element={session ? <ClientPortalCards /> : <Navigate to="/portal/login" />} />
                     <Route path="/" element={<RootRedirect session={session} />} />
+                    <Route path="/onboarding" element={gate(session, <Onboarding />)} />
                     <Route path="/clients" element={gate(session, <Clients />)} />
                     <Route path="/clients/new" element={gate(session, <AddClient />)} />
                     <Route path="/clients/:id" element={gate(session, <ClientDetail />)} />
