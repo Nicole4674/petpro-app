@@ -99,14 +99,20 @@ serve(async (req) => {
     // For each matching client (could be multiple if same phone shared across shops),
     // find the soonest UPCOMING appointment that's still pending/scheduled/confirmed.
     // We act on the soonest one — that's what the reminder was about.
+    //
+    // ─── Timezone-friendly date filter ───
+    // We use YESTERDAY in UTC as the floor (instead of today) because Supabase
+    // runs in UTC but groomers' calendars are usually in local time. A late-night
+    // confirmation reply for "today's" appointment (Central) would be filtered out
+    // if we used UTC today's-date. Including yesterday safely handles all US timezones.
     const clientIds = clientHits.map((c) => c.id)
-    const todayIso = new Date().toISOString().slice(0, 10)
+    const yesterdayIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
     const { data: upcomingAppts } = await supabase
       .from("appointments")
       .select("id, appointment_date, start_time, status, client_id, groomer_id, pets:pet_id(name), appointment_pets(pets:pet_id(name))")
       .in("client_id", clientIds)
-      .gte("appointment_date", todayIso)
-      .in("status", ["scheduled", "confirmed", "pending", "unconfirmed"])
+      .gte("appointment_date", yesterdayIso)
+      .in("status", ["scheduled", "confirmed", "pending", "unconfirmed", "checked_in"])
       .is("checked_out_at", null)
       .order("appointment_date", { ascending: true })
       .order("start_time", { ascending: true })
