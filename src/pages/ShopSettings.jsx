@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import EnableNotifications from '../components/EnableNotifications'
 import AIUsageWidget from '../components/AIUsageWidget'
+import SMSBalanceWidget from '../components/SMSBalanceWidget'
 import { formatPhoneOnInput } from '../lib/phone'
 import AddressInput from '../components/AddressInput'
 
@@ -763,6 +764,9 @@ export default function ShopSettings() {
 
       {/* AI Usage widget — shows used / cap for current month */}
       <AIUsageWidget />
+
+      {/* SMS Balance widget — shows monthly SMS quota + reset date */}
+      <SMSBalanceWidget />
 
       {/* ─── Payments / Stripe Connect ──────────────────────────────────── */}
       {/* Gated until live Connect approval comes through — see canSeeStripeConnect */}

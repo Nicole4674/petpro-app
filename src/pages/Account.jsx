@@ -24,6 +24,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import Sidebar from '../components/Sidebar'
 import AIUsageWidget from '../components/AIUsageWidget'
+import SMSBalanceWidget from '../components/SMSBalanceWidget'
 
 // ── Stripe Customer Portal login link (LIVE mode) ──────────────────
 // Already configured for production — no change needed on launch day.
@@ -312,6 +313,7 @@ export default function Account() {
                   Usage This Month
                 </div>
                 <AIUsageWidget />
+                <SMSBalanceWidget />
               </div>
             )}
 
