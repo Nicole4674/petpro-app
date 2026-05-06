@@ -110,6 +110,19 @@ export default function ShopSettings() {
   var [notifyPhone, setNotifyPhone] = useState('')
   var [smsNotifyEnabled, setSmsNotifyEnabled] = useState(false)
 
+  // ─── Business hours — per-weekday open/close (used by Suds AI) ───
+  // JSONB structure on shop_settings.business_hours. Defaults: M-Sa 9-5, Sunday closed.
+  var DEFAULT_BUSINESS_HOURS = {
+    monday:    { is_open: true,  open: '09:00', close: '17:00' },
+    tuesday:   { is_open: true,  open: '09:00', close: '17:00' },
+    wednesday: { is_open: true,  open: '09:00', close: '17:00' },
+    thursday:  { is_open: true,  open: '09:00', close: '17:00' },
+    friday:    { is_open: true,  open: '09:00', close: '17:00' },
+    saturday:  { is_open: true,  open: '09:00', close: '17:00' },
+    sunday:    { is_open: false, open: null,    close: null    },
+  }
+  var [businessHours, setBusinessHours] = useState(DEFAULT_BUSINESS_HOURS)
+
   // Waitlist auto-notify quiet hours — per-shop config so shops in different
   // timezones don't text clients at 6 AM their time. Defaults match the old
   // hardcoded behavior (9 AM - 8 PM, America/Chicago).
@@ -276,6 +289,11 @@ export default function ShopSettings() {
         // Notification settings
         if (data.notify_phone) setNotifyPhone(data.notify_phone)
         if (typeof data.sms_notify_enabled === 'boolean') setSmsNotifyEnabled(data.sms_notify_enabled)
+        // Business hours (per-day) — used by Suds AI for booking validation
+        if (data.business_hours && typeof data.business_hours === 'object') {
+          // Merge with defaults to handle new days added in future versions
+          setBusinessHours({ ...DEFAULT_BUSINESS_HOURS, ...data.business_hours })
+        }
       }
 
       // Smart Nudges + Stripe Connect status — both live on the groomers
@@ -412,6 +430,8 @@ export default function ShopSettings() {
         // Notification settings (alerts on client self-book/reschedule)
         notify_phone: notifyPhone || null,
         sms_notify_enabled: smsNotifyEnabled,
+        // Business hours (per-day) — used by Suds AI to validate bookings
+        business_hours: businessHours,
       }
 
       var { error: upsertError } = await supabase
@@ -1412,7 +1432,100 @@ export default function ShopSettings() {
           </label>
         </div>
 
-        <TextArea label="Hours" value={hours} onChange={setHours} placeholder="Mon–Sat 8am–6pm, Closed Sundays" />
+        {/* ─── Per-day Business Hours (used by Suds AI for booking validation) ─── */}
+        <div style={{ marginTop: '16px', padding: '14px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+            <span style={{ fontSize: '18px' }}>🕐</span>
+            <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#1f2937' }}>Booking Hours (per day)</h3>
+          </div>
+          <p style={{ margin: '0 0 12px', fontSize: '12px', color: '#6b7280', lineHeight: 1.5 }}>
+            Suds AI uses these to refuse bookings outside hours or on closed days. Set Closed for any day you don't take appointments.
+          </p>
+          {[
+            ['monday', 'Monday'],
+            ['tuesday', 'Tuesday'],
+            ['wednesday', 'Wednesday'],
+            ['thursday', 'Thursday'],
+            ['friday', 'Friday'],
+            ['saturday', 'Saturday'],
+            ['sunday', 'Sunday'],
+          ].map(function (pair) {
+            var key = pair[0]
+            var label = pair[1]
+            var day = businessHours[key] || { is_open: false, open: null, close: null }
+            return (
+              <div key={key} style={{
+                display: 'grid',
+                gridTemplateColumns: '90px 90px 1fr 1fr',
+                gap: '8px',
+                alignItems: 'center',
+                marginBottom: '6px',
+                padding: '6px 8px',
+                background: day.is_open ? '#fff' : '#f3f4f6',
+                border: '1px solid #e5e7eb',
+                borderRadius: '6px',
+              }}>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>{label}</span>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px', color: day.is_open ? '#065f46' : '#6b7280' }}>
+                  <input
+                    type="checkbox"
+                    checked={day.is_open}
+                    onChange={(e) => setBusinessHours({
+                      ...businessHours,
+                      [key]: {
+                        is_open: e.target.checked,
+                        open: e.target.checked ? (day.open || '09:00') : null,
+                        close: e.target.checked ? (day.close || '17:00') : null,
+                      }
+                    })}
+                    style={{ width: '14px', height: '14px', accentColor: '#10b981', cursor: 'pointer' }}
+                  />
+                  {day.is_open ? 'Open' : 'Closed'}
+                </label>
+                {day.is_open ? (
+                  <>
+                    <select
+                      value={day.open || '09:00'}
+                      onChange={(e) => setBusinessHours({
+                        ...businessHours,
+                        [key]: { ...day, open: e.target.value }
+                      })}
+                      style={{ padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', background: '#fff' }}
+                    >
+                      {Array.from({ length: 48 }, (_, i) => {
+                        var h = Math.floor(i / 2)
+                        var m = i % 2 === 0 ? '00' : '30'
+                        var hStr = String(h).padStart(2, '0')
+                        var pretty = h === 0 ? `12:${m} AM` : h < 12 ? `${h}:${m} AM` : h === 12 ? `12:${m} PM` : `${h - 12}:${m} PM`
+                        return <option key={i} value={`${hStr}:${m}`}>Open {pretty}</option>
+                      })}
+                    </select>
+                    <select
+                      value={day.close || '17:00'}
+                      onChange={(e) => setBusinessHours({
+                        ...businessHours,
+                        [key]: { ...day, close: e.target.value }
+                      })}
+                      style={{ padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', background: '#fff' }}
+                    >
+                      {Array.from({ length: 48 }, (_, i) => {
+                        var h = Math.floor(i / 2)
+                        var m = i % 2 === 0 ? '00' : '30'
+                        var hStr = String(h).padStart(2, '0')
+                        var pretty = h === 0 ? `12:${m} AM` : h < 12 ? `${h}:${m} AM` : h === 12 ? `12:${m} PM` : `${h - 12}:${m} PM`
+                        return <option key={i} value={`${hStr}:${m}`}>Close {pretty}</option>
+                      })}
+                    </select>
+                  </>
+                ) : (
+                  <span style={{ gridColumn: '3 / 5', fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>Closed all day — Suds will refuse bookings on this day</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        <TextArea label="Hours (display text — what clients see)" value={hours} onChange={setHours} placeholder="Mon–Sat 9am–5pm, Closed Sundays" />
       </div>
 
       {/* Save button */}

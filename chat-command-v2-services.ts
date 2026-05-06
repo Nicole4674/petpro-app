@@ -3155,7 +3155,7 @@ Deno.serve(async (req) => {
       .eq('groomer_id', body.groomer_id)
 
     // ===== Pull shop-wide settings (groomer_settings) =====
-    var shopSettings = null
+    var shopSettings: any = null
     try {
       var { data: settingsData } = await supabaseAdmin
         .from('groomer_settings')
@@ -3165,6 +3165,21 @@ Deno.serve(async (req) => {
       shopSettings = settingsData
     } catch (e) {
       // No settings row yet
+    }
+
+    // Also merge in per-day business hours from shop_settings (new JSONB column)
+    try {
+      var { data: shopHrsRow } = await supabaseAdmin
+        .from('shop_settings')
+        .select('business_hours')
+        .eq('user_id', body.groomer_id)
+        .maybeSingle()
+      if (shopHrsRow && shopHrsRow.business_hours) {
+        if (!shopSettings) shopSettings = {}
+        shopSettings.business_hours = shopHrsRow.business_hours
+      }
+    } catch (e) {
+      // No shop_settings row — that's fine, groomer Suds will show defaults
     }
 
     // ===== Pull AI Personalization Settings =====
@@ -3342,7 +3357,24 @@ Deno.serve(async (req) => {
     if (shopSettings) {
       if (shopSettings.puppy_intro_max_months) contextParts.push('Puppy Intro Max Age: ' + shopSettings.puppy_intro_max_months + ' months')
       if (shopSettings.puppy_adult_cutoff_months) contextParts.push('Adult Pricing After: ' + shopSettings.puppy_adult_cutoff_months + ' months')
-      if (shopSettings.business_hours_start) contextParts.push('Shop Hours: ' + shopSettings.business_hours_start + ' - ' + (shopSettings.business_hours_end || '?'))
+      // Per-day business hours (the source of truth)
+      if (shopSettings.business_hours && typeof shopSettings.business_hours === 'object') {
+        contextParts.push('Shop Hours (per day):')
+        var dayKeysG = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+        for (var dKeyG of dayKeysG) {
+          var bhG = shopSettings.business_hours[dKeyG]
+          if (!bhG) continue
+          var dLabelG = dKeyG.charAt(0).toUpperCase() + dKeyG.slice(1)
+          if (bhG.is_open) {
+            contextParts.push('  ' + dLabelG + ': ' + bhG.open + ' - ' + bhG.close)
+          } else {
+            contextParts.push('  ' + dLabelG + ': CLOSED')
+          }
+        }
+        contextParts.push('  (Groomer can override hours for special bookings — warn but allow.)')
+      } else if (shopSettings.business_hours_start) {
+        contextParts.push('Shop Hours: ' + shopSettings.business_hours_start + ' - ' + (shopSettings.business_hours_end || '?'))
+      }
       if (shopSettings.slot_duration_minutes) contextParts.push('Default Slot: ' + shopSettings.slot_duration_minutes + ' min')
     } else {
       contextParts.push('No shop settings yet. Use update_shop_settings when the owner wants to configure puppy age thresholds, hours, or slot size.')

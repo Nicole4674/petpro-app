@@ -610,7 +610,7 @@ var toolDefinitions = [
   },
   {
     name: 'client_check_availability',
-    description: 'REQUIRED before suggesting a specific time to a client. Returns the list of ALREADY-BOOKED time slots on a given date so you can pick a time that does not overlap. Shop hours default to 8 AM - 5 PM. Any time NOT in booked_slots is available.',
+    description: 'REQUIRED before suggesting a specific time to a client. Returns the list of ALREADY-BOOKED time slots AND the shop\'s open/close hours for that specific weekday. Only suggest times within the open hours that do not overlap any booked slot. If the day is closed (is_open=false), refuse and offer the next open day instead.',
     input_schema: {
       type: 'object',
       properties: {
@@ -629,6 +629,40 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
   var clientId = ctx.clientId
   var groomerId = ctx.groomerId
   var toggles = ctx.toggles
+  var businessHours = ctx.businessHours || {
+    monday:    { is_open: true,  open: '09:00', close: '17:00' },
+    tuesday:   { is_open: true,  open: '09:00', close: '17:00' },
+    wednesday: { is_open: true,  open: '09:00', close: '17:00' },
+    thursday:  { is_open: true,  open: '09:00', close: '17:00' },
+    friday:    { is_open: true,  open: '09:00', close: '17:00' },
+    saturday:  { is_open: true,  open: '09:00', close: '17:00' },
+    sunday:    { is_open: false, open: null,    close: null    },
+  }
+
+  // Helper: get day-of-week key from YYYY-MM-DD
+  function getWeekdayKey(ymd: string): string {
+    var keys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+    var d = new Date(ymd + 'T12:00:00')
+    return keys[d.getDay()]
+  }
+  // Helper: check if HH:MM falls within the day's open/close window
+  function isTimeWithinHours(ymd: string, hhmm: string): { ok: boolean; reason: string } {
+    var key = getWeekdayKey(ymd)
+    var day = businessHours[key]
+    var dayLabel = key.charAt(0).toUpperCase() + key.slice(1)
+    if (!day || !day.is_open) {
+      return { ok: false, reason: 'We are closed on ' + dayLabel + 's. Please pick another day.' }
+    }
+    var hms = hhmm.split(':')
+    var t = parseInt(hms[0], 10) * 60 + parseInt(hms[1], 10)
+    var op = day.open.split(':')
+    var cl = day.close.split(':')
+    var oMin = parseInt(op[0], 10) * 60 + parseInt(op[1], 10)
+    var cMin = parseInt(cl[0], 10) * 60 + parseInt(cl[1], 10)
+    if (t < oMin) return { ok: false, reason: 'We do not open until ' + day.open + ' on ' + dayLabel + 's. Please pick a later time.' }
+    if (t >= cMin) return { ok: false, reason: 'We close at ' + day.close + ' on ' + dayLabel + 's. Please pick an earlier time.' }
+    return { ok: true, reason: '' }
+  }
 
   try {
     switch (toolName) {
@@ -638,6 +672,15 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         if (!toolInput.pet_id || !toolInput.appointment_date || !toolInput.start_time) {
           console.error('[BOOK] missing required fields:', JSON.stringify(toolInput))
           return { success: false, error: 'pet_id, appointment_date, and start_time required' }
+        }
+
+        // ─── HOURS GUARD ────────────────────────────────────────────────
+        // Refuse bookings outside shop hours, even if the AI tries to push
+        // through. This is the server-side safety net.
+        var hrsCheck = isTimeWithinHours(toolInput.appointment_date, toolInput.start_time)
+        if (!hrsCheck.ok) {
+          console.warn('[BOOK] hours guard blocked booking:', hrsCheck.reason)
+          return { success: false, error: hrsCheck.reason, outside_hours: true }
         }
 
         // Verify pet belongs to this client (also pulls fields needed for rule check)
@@ -1036,6 +1079,14 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           return { success: false, error: 'appointment_id, new_date, new_start_time required' }
         }
 
+        // ─── HOURS GUARD ────────────────────────────────────────────────
+        // Refuse reschedule into closed days or outside open hours.
+        var resHrsCheck = isTimeWithinHours(toolInput.new_date, toolInput.new_start_time)
+        if (!resHrsCheck.ok) {
+          console.warn('[RESCHED] hours guard blocked reschedule:', resHrsCheck.reason)
+          return { success: false, error: resHrsCheck.reason, outside_hours: true }
+        }
+
         // Verify appointment belongs to this client (also pull recurring info)
         var { data: apptCheck, error: apptErr } = await supabaseAdmin
           .from('appointments')
@@ -1266,27 +1317,36 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           .neq('status', 'cancelled')
           .order('start_time', { ascending: true })
 
-        // Also pull shop hours if configured
-        var { data: shopHoursRow } = await supabaseAdmin
-          .from('shop_settings')
-          .select('shop_open_time, shop_close_time')
-          .eq('groomer_id', groomerId)
-          .maybeSingle()
-        var openT = (shopHoursRow && shopHoursRow.shop_open_time) || '08:00'
-        var closeT = (shopHoursRow && shopHoursRow.shop_close_time) || '17:00'
+        // ─── Per-day business hours (the source of truth) ───
+        // Look up the weekday for this date and return ONLY that day's hours.
+        var dayKeyAvail = getWeekdayKey(toolInput.date)
+        var dayHrs = businessHours[dayKeyAvail] || { is_open: false }
 
         var bookedSlots = (availDayAppts || []).map(function (a: any) {
           return { start: a.start_time, end: a.end_time }
         })
 
+        if (!dayHrs.is_open) {
+          return {
+            success: true,
+            date: toolInput.date,
+            weekday: dayKeyAvail,
+            is_open: false,
+            booked_slots: [],
+            note: 'CLOSED on ' + dayKeyAvail + 's. Refuse any booking on this date and offer the next open day.',
+          }
+        }
+
         return {
           success: true,
           date: toolInput.date,
-          shop_open: openT,
-          shop_close: closeT,
+          weekday: dayKeyAvail,
+          is_open: true,
+          shop_open: dayHrs.open,
+          shop_close: dayHrs.close,
           booked_slots: bookedSlots,
           booked_count: bookedSlots.length,
-          note: 'These are the time ranges ALREADY BOOKED. Any time that does NOT overlap these is available. Shop hours are ' + openT + ' to ' + closeT + '. Pick a time within shop hours that does not overlap any booked slot.',
+          note: 'Open ' + dayHrs.open + ' to ' + dayHrs.close + ' on ' + dayKeyAvail + 's. These are the time ranges ALREADY BOOKED — any time that does NOT overlap is available, AS LONG AS it falls within open hours. Do NOT suggest times before ' + dayHrs.open + ' or after ' + dayHrs.close + '.',
         }
       }
 
@@ -1454,12 +1514,23 @@ Deno.serve(async function(req) {
       .eq('groomer_id', groomerId)
       .maybeSingle()
 
-    // Business hours for suggesting times
-    var { data: shopHours } = await supabaseAdmin
+    // Business hours — per-day JSONB (the SOURCE OF TRUTH for booking validation)
+    // Falls back to Mon-Sa 9-5 / Sun closed if column is null (matches SQL default).
+    var DEFAULT_BIZ_HOURS = {
+      monday:    { is_open: true,  open: '09:00', close: '17:00' },
+      tuesday:   { is_open: true,  open: '09:00', close: '17:00' },
+      wednesday: { is_open: true,  open: '09:00', close: '17:00' },
+      thursday:  { is_open: true,  open: '09:00', close: '17:00' },
+      friday:    { is_open: true,  open: '09:00', close: '17:00' },
+      saturday:  { is_open: true,  open: '09:00', close: '17:00' },
+      sunday:    { is_open: false, open: null,    close: null    },
+    }
+    var { data: shopHoursRow } = await supabaseAdmin
       .from('shop_settings')
-      .select('business_hours_start, business_hours_end')
+      .select('business_hours')
       .eq('groomer_id', groomerId)
       .maybeSingle()
+    var businessHours: any = (shopHoursRow && shopHoursRow.business_hours) || DEFAULT_BIZ_HOURS
 
     // ===========================================================
     // PRE-CHECK: Evaluate each pet against booking rules BEFORE
@@ -1576,12 +1647,21 @@ Deno.serve(async function(req) {
     }
     contextParts.push('')
 
-    contextParts.push('=== SHOP HOURS ===')
-    if (shopHours && shopHours.business_hours_start) {
-      contextParts.push('Open ' + shopHours.business_hours_start + ' - ' + shopHours.business_hours_end)
-    } else {
-      contextParts.push('Hours not set. Assume 9 AM - 5 PM.')
+    contextParts.push('=== SHOP HOURS (per day — STRICT, NEVER book outside these) ===')
+    var dayKeysOrdered = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+    for (var dKey of dayKeysOrdered) {
+      var dHrs = businessHours[dKey] || { is_open: false }
+      var dLabel = dKey.charAt(0).toUpperCase() + dKey.slice(1)
+      if (dHrs.is_open) {
+        contextParts.push('  ' + dLabel + ': ' + dHrs.open + ' - ' + dHrs.close)
+      } else {
+        contextParts.push('  ' + dLabel + ': CLOSED — refuse any booking on this day')
+      }
     }
+    contextParts.push('RULES:')
+    contextParts.push('  - Never suggest or accept a booking outside the open hours for that day.')
+    contextParts.push('  - If the client asks for a closed day, say so and offer the next open day.')
+    contextParts.push('  - When calling client_check_availability, only suggest times within open hours.')
     contextParts.push('')
 
     contextParts.push('=== FEATURE TOGGLES (what you can/can\'t do) ===')
@@ -1740,7 +1820,7 @@ Deno.serve(async function(req) {
     // --- Tool loop ---
     var maxLoops = 6
     var finalText = ''
-    var toolCtx = { clientId: clientId, groomerId: groomerId, toggles: toggles }
+    var toolCtx = { clientId: clientId, groomerId: groomerId, toggles: toggles, businessHours: businessHours }
 
     for (var loop = 0; loop < maxLoops; loop++) {
       var claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
