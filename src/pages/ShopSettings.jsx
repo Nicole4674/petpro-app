@@ -97,6 +97,13 @@ export default function ShopSettings() {
   // Agreements toggle — opt-in. Some groomers (like Nicole) don't use waivers
   // and don't want clients prompted to sign at portal login. Off by default.
   var [agreementsEnabled, setAgreementsEnabled] = useState(false)
+  // ─── Appointment reminder settings (Phase: SMS #9) ───
+  // Per-shop opt-in for automated daily reminders. The cron edge function
+  // (send-reminders-cron) reads these to decide whether/when to fire.
+  var [reminderEnabled, setReminderEnabled] = useState(false)
+  var [reminderSendHour, setReminderSendHour] = useState(17)   // 5 PM default
+  var [reminderLeadDays, setReminderLeadDays] = useState(1)     // 1 day before default
+
   // Waitlist auto-notify quiet hours — per-shop config so shops in different
   // timezones don't text clients at 6 AM their time. Defaults match the old
   // hardcoded behavior (9 AM - 8 PM, America/Chicago).
@@ -256,6 +263,10 @@ export default function ShopSettings() {
         if (typeof data.waitlist_quiet_start_hour === 'number') setWaitlistQuietStartHour(data.waitlist_quiet_start_hour)
         if (typeof data.waitlist_quiet_end_hour === 'number') setWaitlistQuietEndHour(data.waitlist_quiet_end_hour)
         if (data.waitlist_timezone) setWaitlistTimezone(data.waitlist_timezone)
+        // Reminder settings
+        if (typeof data.reminder_enabled === 'boolean') setReminderEnabled(data.reminder_enabled)
+        if (typeof data.reminder_send_hour_local === 'number') setReminderSendHour(data.reminder_send_hour_local)
+        if (typeof data.reminder_lead_days === 'number') setReminderLeadDays(data.reminder_lead_days)
       }
 
       // Smart Nudges + Stripe Connect status — both live on the groomers
@@ -384,6 +395,10 @@ export default function ShopSettings() {
         // Waitlist quiet hours
         waitlist_quiet_start_hour: waitlistQuietStartHour,
         waitlist_quiet_end_hour: waitlistQuietEndHour,
+        // Appointment reminder settings
+        reminder_enabled: reminderEnabled,
+        reminder_send_hour_local: reminderSendHour,
+        reminder_lead_days: reminderLeadDays,
         waitlist_timezone: waitlistTimezone,
       }
 
@@ -693,6 +708,100 @@ export default function ShopSettings() {
         }}>
           ✅ Currently sending waitlist offers from <strong>{waitlistQuietStartHour === 0 ? '12 AM' : waitlistQuietStartHour < 12 ? `${waitlistQuietStartHour} AM` : waitlistQuietStartHour === 12 ? '12 PM' : `${waitlistQuietStartHour - 12} PM`}</strong> to <strong>{waitlistQuietEndHour === 0 ? '12 AM' : waitlistQuietEndHour < 12 ? `${waitlistQuietEndHour} AM` : waitlistQuietEndHour === 12 ? '12 PM' : `${waitlistQuietEndHour - 12} PM`}</strong> ({waitlistTimezone.split('/').pop().replace('_', ' ')} time). Click <strong>Save Settings</strong> below to apply changes.
         </div>
+      </div>
+
+      {/* ─── Appointment Reminders — automated daily Y/N reminder texts ─── */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+          <span style={{ fontSize: '22px' }}>📬</span>
+          <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#1f2937' }}>Appointment Reminders</h2>
+        </div>
+        <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#6b7280', lineHeight: 1.5 }}>
+          Automatically send each client a reminder SMS the day before (or X days before) their appointment. Includes a Y/N prompt — clients can reply <strong>Y</strong> to confirm or <strong>N</strong> to cancel, and PetPro updates the appointment automatically.
+        </p>
+
+        {/* Master toggle */}
+        <label style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '12px 14px',
+          background: reminderEnabled ? '#ecfdf5' : '#f9fafb',
+          border: '1px solid ' + (reminderEnabled ? '#a7f3d0' : '#e5e7eb'),
+          borderRadius: '10px',
+          cursor: 'pointer',
+          marginBottom: '14px',
+        }}>
+          <input
+            type="checkbox"
+            checked={reminderEnabled}
+            onChange={(e) => setReminderEnabled(e.target.checked)}
+            style={{ width: '18px', height: '18px', accentColor: '#10b981', cursor: 'pointer' }}
+          />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '14px', color: reminderEnabled ? '#065f46' : '#374151' }}>
+              {reminderEnabled ? '✅ Reminders are ON' : 'Send appointment reminders automatically'}
+            </div>
+            <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+              {reminderEnabled
+                ? 'Each upcoming appointment gets a Y/N reminder text at the time below.'
+                : 'Toggle on to start sending reminders. Counts against your monthly SMS quota.'}
+            </div>
+          </div>
+        </label>
+
+        {/* Configuration — only show when enabled */}
+        {reminderEnabled && (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+              {/* Send hour */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                  Send time of day
+                </label>
+                <select
+                  value={reminderSendHour}
+                  onChange={(e) => setReminderSendHour(parseInt(e.target.value, 10))}
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', background: '#fff' }}
+                >
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <option key={h} value={h}>
+                      {h === 0 ? '12 AM (midnight)' : h < 12 ? `${h} AM` : h === 12 ? '12 PM (noon)' : `${h - 12} PM`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Lead days */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                  Send how far ahead?
+                </label>
+                <select
+                  value={reminderLeadDays}
+                  onChange={(e) => setReminderLeadDays(parseInt(e.target.value, 10))}
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', background: '#fff' }}
+                >
+                  <option value={1}>1 day before</option>
+                  <option value={2}>2 days before</option>
+                  <option value={3}>3 days before</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{
+              padding: '10px 14px',
+              background: '#f0fdf4',
+              border: '1px solid #86efac',
+              borderRadius: '8px',
+              fontSize: '13px',
+              color: '#166534',
+              lineHeight: 1.5,
+            }}>
+              ✅ Reminders will go out at <strong>{reminderSendHour === 0 ? '12 AM' : reminderSendHour < 12 ? `${reminderSendHour} AM` : reminderSendHour === 12 ? '12 PM' : `${reminderSendHour - 12} PM`}</strong>, <strong>{reminderLeadDays === 1 ? 'the day before' : `${reminderLeadDays} days before`}</strong> each appointment ({waitlistTimezone.split('/').pop().replace('_', ' ')} time). Each reminder counts as 1 SMS from your monthly quota.
+            </div>
+          </>
+        )}
       </div>
 
       {/* ─── Test SMS — verify Twilio + quota wiring works ─── */}
