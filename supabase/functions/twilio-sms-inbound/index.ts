@@ -63,14 +63,7 @@ serve(async (req) => {
     const isYes = /^(y|yes|yeah|yep|confirm|confirmed|ok|okay|sure)\b/i.test(replyText)
     const isNo = /^(n|no|nope|cancel|cancelled|cant|can\'?t|reschedule)\b/i.test(replyText)
 
-    if (!isYes && !isNo) {
-      // Not a confirm/cancel reply — log it for the groomer to read manually later
-      // (could expand this to save to a messages table for the chat history feature)
-      console.log(`[sms-inbound] Non-Y/N reply from ${fromPhone}: ${bodyRaw}`)
-      return twimlResponse("")
-    }
-
-    // ─── 3. Find the matching appointment ───
+    // ─── 3. Build Supabase client (needed regardless of Y/N or casual reply) ───
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -90,6 +83,29 @@ serve(async (req) => {
       const cl10 = c.phone.replace(/\D/g, "").slice(-10)
       return cl10 === last10
     })
+
+    // ─── 2.5. ALWAYS log the inbound to the inbox FIRST ───
+    // (whether it's Y/N or casual chat — groomer needs to see all replies)
+    if (clientHits.length > 0) {
+      const primaryClient = clientHits[0]
+      const inboundType = isYes ? "inbound_yes" : isNo ? "inbound_no" : "inbound_chat"
+      await logInboundMessage(
+        supabase,
+        primaryClient.groomer_id,
+        primaryClient.id,
+        fromPhone,
+        bodyRaw,
+        messageSid,
+        inboundType
+      )
+    }
+
+    // ─── 2.6. If it's NOT a Y/N reply, just acknowledge and bail ───
+    // The message is already in the inbox for the groomer to read & reply manually.
+    if (!isYes && !isNo) {
+      console.log(`[sms-inbound] Casual reply from ${fromPhone} logged to inbox: ${bodyRaw}`)
+      return twimlResponse("")
+    }
 
     if (clientHits.length === 0) {
       console.warn(`[sms-inbound] No client matches phone ${fromPhone}`)
@@ -135,20 +151,7 @@ serve(async (req) => {
       petName = appt.pets.name
     }
 
-    // ─── 3.5. Log the inbound message to the inbox ───
-    // Use the first client hit to attribute (groomer + client_id).
-    // If multiple matches across shops, this picks one — could be smarter later.
-    const primaryClient = clientHits[0]
-    const inboundType = isYes ? "inbound_yes" : "inbound_no"
-    await logInboundMessage(
-      supabase,
-      primaryClient.groomer_id,
-      primaryClient.id,
-      fromPhone,
-      bodyRaw,
-      messageSid,
-      inboundType
-    )
+    // (Inbound was already logged to inbox above in step 2.5)
 
     // ─── 4. Apply the action ───
     if (isYes) {
