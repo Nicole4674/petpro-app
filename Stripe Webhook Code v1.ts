@@ -115,6 +115,37 @@ async function syncTokenAllocationForTier(groomerId: string, tier: string | null
   }
 }
 
+// ════════════ Per-Tier Monthly SMS Allocation ════════════
+// How many SMS each plan gets per billing cycle.
+// Basic intentionally has 0 — SMS is an upgrade incentive starting at Pro.
+const TIER_TO_MONTHLY_SMS: Record<string, number> = {
+  'basic':    0,     // No SMS on Basic — upgrade prompt only
+  'pro':      1000,
+  'pro_plus': 1500,
+  'growing':  3000,
+}
+
+// Helper — sets the groomer's monthly SMS allocation based on their tier.
+// Uses the sync_sms_allocation_for_tier RPC (same logic as token sync but for SMS).
+// Called from handleCheckoutCompleted + handleSubscriptionUpdated.
+async function syncSmsAllocationForTier(groomerId: string, tier: string | null) {
+  if (!tier) return
+  if (TIER_TO_MONTHLY_SMS[tier] === undefined) {
+    console.warn(`[sms-tier-sync] Unknown tier "${tier}" — skipping SMS allocation update`)
+    return
+  }
+  // Call the SQL RPC — handles upsert + refill on tier change atomically
+  const { error: rpcErr } = await supabase.rpc('sync_sms_allocation_for_tier', {
+    p_groomer_id: groomerId,
+    p_tier: tier,
+  })
+  if (rpcErr) {
+    console.error(`[sms-tier-sync] RPC failed for ${groomerId}:`, rpcErr)
+    return
+  }
+  console.log(`[sms-tier-sync] Synced ${groomerId} → ${TIER_TO_MONTHLY_SMS[tier]} SMS (${tier})`)
+}
+
 // Helper: convert Stripe's unix-second timestamp to an ISO string (or null)
 function tsToIso(ts: number | null | undefined): string | null {
   return ts ? new Date(ts * 1000).toISOString() : null
@@ -367,6 +398,13 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   } catch (tokenErr) {
     console.error('[stripe-webhook] Token allocation sync failed (non-fatal):', tokenErr)
   }
+
+  // Sync SMS allocation to match the new tier (Pro+ tiers get SMS, Basic gets 0)
+  try {
+    await syncSmsAllocationForTier(groomerId, tier)
+  } catch (smsErr) {
+    console.error('[stripe-webhook] SMS allocation sync failed (non-fatal):', smsErr)
+  }
 }
 
 // ─── WELCOME EMAIL HELPER ──────────────────────────────────────────────
@@ -532,7 +570,7 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
   if (error) throw error
   console.log(`Subscription updated for customer ${customerId}: ${tier} / ${subscription.status}`)
 
-  // Sync token allocation to match the new tier (handles plan upgrades + downgrades).
+  // Sync token + SMS allocations to match the new tier (handles plan upgrades + downgrades).
   // Look up the groomer_id by customer ID since this handler doesn't get it directly.
   if (tier) {
     try {
@@ -543,6 +581,12 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
         .maybeSingle()
       if (groomerRow?.id) {
         await syncTokenAllocationForTier(groomerRow.id, tier)
+        // Also sync SMS allocation — Pro upgrade unlocks SMS, downgrade reduces it
+        try {
+          await syncSmsAllocationForTier(groomerRow.id, tier)
+        } catch (smsErr) {
+          console.error('[stripe-webhook] SMS allocation sync failed on update (non-fatal):', smsErr)
+        }
       }
     } catch (tokenErr) {
       console.error('[stripe-webhook] Token allocation sync failed on update (non-fatal):', tokenErr)
@@ -569,8 +613,9 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
   if (error) throw error
   console.log(`Subscription canceled for customer ${customerId}`)
 
-  // Zero out monthly token allocation — canceled users shouldn't get free AI forever.
-  // Keep top-up tokens intact (they paid for those, that's fair to keep).
+  // Zero out monthly token + SMS allocations — canceled users shouldn't get free
+  // AI or SMS forever. Keep top-up tokens intact (they paid for those, fair to keep).
+  // Founder unlimited SMS flag is also preserved (they keep founder perks even if canceled).
   try {
     const { data: groomerRow } = await supabase
       .from('groomers')
@@ -578,6 +623,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
       .eq('stripe_customer_id', customerId)
       .maybeSingle()
     if (groomerRow?.id) {
+      // Tokens
       await supabase
         .from('groomer_token_balance')
         .update({
@@ -587,9 +633,29 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
         })
         .eq('groomer_id', groomerRow.id)
       console.log(`[stripe-webhook] Zeroed monthly tokens for canceled groomer ${groomerRow.id}`)
+
+      // SMS — only zero if NOT a founder (founders keep unlimited even if canceled)
+      const { data: smsRow } = await supabase
+        .from('groomer_sms_balance')
+        .select('founder_unlimited_sms')
+        .eq('groomer_id', groomerRow.id)
+        .maybeSingle()
+      if (smsRow && smsRow.founder_unlimited_sms === true) {
+        console.log(`[stripe-webhook] Skipped SMS zero-out for founder ${groomerRow.id}`)
+      } else {
+        await supabase
+          .from('groomer_sms_balance')
+          .update({
+            monthly_sms_remaining: 0,
+            monthly_sms_total: 0,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('groomer_id', groomerRow.id)
+        console.log(`[stripe-webhook] Zeroed monthly SMS for canceled groomer ${groomerRow.id}`)
+      }
     }
   } catch (tokenErr) {
-    console.error('[stripe-webhook] Token zero-out failed (non-fatal):', tokenErr)
+    console.error('[stripe-webhook] Token/SMS zero-out failed (non-fatal):', tokenErr)
   }
 }
 
