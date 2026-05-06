@@ -231,7 +231,7 @@ export default function Calendar() {
                        ' at ' + timeStr + '. See you then! 🐾'
             case 'reminder':
                 return 'Hi ' + clientFirst + '! Friendly reminder — ' + petName + "'s grooming appointment is " +
-                       dateStr + ' at ' + timeStr + '. Reply if you need to reschedule.'
+                       dateStr + ' at ' + timeStr + '. Please reply Y to confirm or N to cancel.'
             case 'pickup':
                 return 'Hi ' + clientFirst + '! ' + petName + ' is all done and ready for pickup whenever you can swing by! 🐾'
             case 'custom':
