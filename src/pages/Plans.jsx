@@ -29,12 +29,12 @@ var TIERS = [
       'Smart calendar & booking',
       'Payment tracking (Cash, Zelle, Venmo, Card)',
       'Outstanding balance tracker',
-      'Automated text reminders & rebook nudges',
       'Multi-pet booking',
       'Recurring appointments',
       'Boarding & kennel management',
       'Printable intake & check-in forms',
       { text: '500 AI actions / month', founder: true },  // ← FOUNDER DEAL: remove after first 100 signups
+      'No SMS — upgrade to Pro for texts',
     ],
   },
   {
@@ -54,6 +54,8 @@ var TIERS = [
       'Online vaccine records + health info',
       'Clients request appointments (you approve)',
       { text: '800 AI actions / month', founder: true },  // ← FOUNDER DEAL: remove after first 100 signups
+      '1,000 SMS / month — reminders, alerts, replies 📱',
+      '📞 Suds answers calls (coming soon)',
     ],
   },
   {
@@ -72,6 +74,8 @@ var TIERS = [
       'Smart AI booking rules (breed / vaccine / allergy)',
       'Auto conflict & double-booking prevention',
       '1,000 AI actions / month',
+      '1,500 SMS / month 📱',
+      '📞 Suds answers calls (coming soon)',
     ],
   },
   {
@@ -92,6 +96,8 @@ var TIERS = [
       'AI reads chat photos (tangles, skin issues)',
       'Auto-rebook reminder cycles',
       '3,000 AI actions / month',
+      '3,000 SMS / month 📱',
+      '📞 Suds answers calls (coming soon)',
     ],
   },
   {
@@ -106,6 +112,8 @@ var TIERS = [
     features: [
       'Everything in Growing',
       '10,000+ AI actions / month (custom)',
+      'Custom SMS allocation 📱',
+      '📞 Suds answers calls (coming soon)',
       'Priority support',
       'Dedicated onboarding',
     ],
@@ -135,7 +143,8 @@ var COMPARISON_SECTIONS = [
       { feature: 'Boarding & kennel mgmt', included: ['✓', '✓', '✓', '✓', '✓'] },
       { feature: 'Payment tracking', included: ['✓', '✓', '✓', '✓', '✓'] },
       { feature: 'Outstanding balance tracker', included: ['✓', '✓', '✓', '✓', '✓'] },
-      { feature: 'Automated text reminders', included: ['✓', '✓', '✓', '✓', '✓'] },
+      { feature: 'SMS allocation / month', included: ['—', '1,000', '1,500', '3,000', 'Custom'] },
+      { feature: '📞 Suds answers calls', included: ['—', 'Coming soon', 'Coming soon', 'Coming soon', 'Coming soon'] },
       { feature: 'Recurring appointments', included: ['✓', '✓', '✓', '✓', '✓'] },
       { feature: 'Printable intake forms', included: ['✓', '✓', '✓', '✓', '✓'] },
     ],
