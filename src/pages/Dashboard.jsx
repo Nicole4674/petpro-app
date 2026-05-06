@@ -72,15 +72,23 @@ export default function Dashboard() {
           .eq('groomer_id', user.id)
           .maybeSingle()
         if (cancelled) return
-        // Only set step if NOT completed — banner shows when step != null
-        if (data && !data.onboarding_completed_at) {
+        // ─── Brand-new user (no shop_settings row yet) → redirect to wizard ───
+        // First-time signups land on the dashboard but should be walked through
+        // setup. Once they complete the wizard (or click Skip), the row exists
+        // with onboarding_completed_at set, and this redirect doesn't fire.
+        if (!data) {
+          navigate('/onboarding')
+          return
+        }
+        // Has a row, hasn't finished — show banner (set step so banner renders)
+        if (!data.onboarding_completed_at) {
           setOnboardingStep(typeof data.onboarding_step === 'number' ? data.onboarding_step : 0)
         }
       } catch (e) { /* non-critical, no banner is fine */ }
     }
     loadOnboardingProgress()
     return function () { cancelled = true }
-  }, [])
+  }, [navigate])
 
   function dismissOnboardingBanner() {
     setOnboardingDismissed(true)
