@@ -5690,13 +5690,21 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                 : isDoneAndPaid
                                                     ? '#10b981'   // green — done & paid
                                                     : groomerColor
+                                        // ─── Confirm-status border (MoeGo-style at-a-glance) ───
+                                        // Red border = unconfirmed (needs follow-up)
+                                        // Green border = confirmed
+                                        // Other states (pending/cancelled/done) keep their own color
                                         const blockBorder = isPending
                                             ? '#d97706'
                                             : isCancelled
                                                 ? '#9ca3af'
                                                 : isDoneAndPaid
                                                     ? '#047857'   // darker green border
-                                                    : groomerColor
+                                                    : appt.status === 'confirmed'
+                                                        ? '#10b981'   // bright green — client confirmed
+                                                        : appt.status === 'unconfirmed'
+                                                            ? '#dc2626'   // bright red — needs confirmation
+                                                            : groomerColor
                                         // Badge label + colors (only shown pre-check-in, except DONE handled below)
                                         let statusBadge = null
                                         if (!appt.checked_in_at && !appt.checked_out_at) {
@@ -5739,7 +5747,7 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                     minHeight: '18px',
                                                     zIndex: 5,
                                                     backgroundColor: blockBg,
-                                                    borderLeft: '4px solid ' + blockBorder,
+                                                    borderLeft: '6px solid ' + blockBorder,
                                                     borderRadius: '6px',
                                                     cursor: isDraggable ? 'grab' : 'pointer',
                                                     opacity: isBeingDragged ? 0.4 : (isCancelled ? 0.6 : 1),
@@ -5971,7 +5979,15 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
             isDoneAndPaid = owed <= 0.01 || paidNet >= owed - 0.01
         }
         const blockBg = isDoneAndPaid ? '#10b981' : groomerColor
-        const blockBorder = isDoneAndPaid ? '#047857' : groomerColor
+        // ─── Confirm-status border (MoeGo-style at-a-glance) ───
+        // Red = unconfirmed, Green = confirmed, otherwise groomer color
+        const blockBorder = isDoneAndPaid
+            ? '#047857'
+            : appt.status === 'confirmed'
+                ? '#10b981'   // bright green — client confirmed
+                : appt.status === 'unconfirmed'
+                    ? '#dc2626'   // bright red — needs confirmation
+                    : groomerColor
 
         return (
             <div
@@ -6004,7 +6020,7 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                     minHeight: '18px',
                     zIndex: 5,
                     backgroundColor: blockBg,
-                    borderLeft: '4px solid ' + blockBorder,
+                    borderLeft: '6px solid ' + blockBorder,
                     borderRadius: '6px',
                     cursor: isDraggable ? 'grab' : 'pointer',
                     opacity: isBeingDragged ? 0.4 : 1,
