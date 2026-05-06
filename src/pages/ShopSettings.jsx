@@ -104,6 +104,12 @@ export default function ShopSettings() {
   var [reminderSendHour, setReminderSendHour] = useState(17)   // 5 PM default
   var [reminderLeadDays, setReminderLeadDays] = useState(1)     // 1 day before default
 
+  // ─── Notification settings — alerts when client books/reschedules ───
+  // The groomer's own phone for "client just booked / rescheduled / cancelled"
+  // SMS alerts. Must be entered + toggle on for notifications to fire.
+  var [notifyPhone, setNotifyPhone] = useState('')
+  var [smsNotifyEnabled, setSmsNotifyEnabled] = useState(false)
+
   // Waitlist auto-notify quiet hours — per-shop config so shops in different
   // timezones don't text clients at 6 AM their time. Defaults match the old
   // hardcoded behavior (9 AM - 8 PM, America/Chicago).
@@ -267,6 +273,9 @@ export default function ShopSettings() {
         if (typeof data.reminder_enabled === 'boolean') setReminderEnabled(data.reminder_enabled)
         if (typeof data.reminder_send_hour_local === 'number') setReminderSendHour(data.reminder_send_hour_local)
         if (typeof data.reminder_lead_days === 'number') setReminderLeadDays(data.reminder_lead_days)
+        // Notification settings
+        if (data.notify_phone) setNotifyPhone(data.notify_phone)
+        if (typeof data.sms_notify_enabled === 'boolean') setSmsNotifyEnabled(data.sms_notify_enabled)
       }
 
       // Smart Nudges + Stripe Connect status — both live on the groomers
@@ -400,6 +409,9 @@ export default function ShopSettings() {
         reminder_send_hour_local: reminderSendHour,
         reminder_lead_days: reminderLeadDays,
         waitlist_timezone: waitlistTimezone,
+        // Notification settings (alerts on client self-book/reschedule)
+        notify_phone: notifyPhone || null,
+        sms_notify_enabled: smsNotifyEnabled,
       }
 
       var { error: upsertError } = await supabase
@@ -802,6 +814,67 @@ export default function ShopSettings() {
             </div>
           </>
         )}
+      </div>
+
+      {/* ─── Client Action Alerts — notify groomer when client self-books / reschedules ─── */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+          <span style={{ fontSize: '22px' }}>🔔</span>
+          <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#1f2937' }}>Client Action Alerts</h2>
+        </div>
+        <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#6b7280', lineHeight: 1.5 }}>
+          Get an instant SMS to your phone when a client books, reschedules, or cancels through the portal or Suds AI. So you never miss a change. The calendar also shows colored badges (🤖 AI, 👤 portal, 🔄 rescheduled, ❌ cancelled) — and a red pulse until you open the appointment.
+        </p>
+
+        {/* Phone input */}
+        <div style={{ marginBottom: '14px' }}>
+          <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+            Your phone number (where alerts go)
+          </label>
+          <input
+            type="tel"
+            value={notifyPhone}
+            onChange={(e) => setNotifyPhone(e.target.value)}
+            placeholder="+1 281 555 1234"
+            style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px' }}
+          />
+          <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
+            Use E.164 format (+1 followed by 10 digits). Same one Twilio uses.
+          </div>
+        </div>
+
+        {/* Toggle */}
+        <label style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '12px 14px',
+          background: smsNotifyEnabled ? '#ecfdf5' : '#f9fafb',
+          border: '1px solid ' + (smsNotifyEnabled ? '#a7f3d0' : '#e5e7eb'),
+          borderRadius: '10px',
+          cursor: notifyPhone ? 'pointer' : 'not-allowed',
+          opacity: notifyPhone ? 1 : 0.5,
+        }}>
+          <input
+            type="checkbox"
+            checked={smsNotifyEnabled}
+            disabled={!notifyPhone}
+            onChange={(e) => setSmsNotifyEnabled(e.target.checked)}
+            style={{ width: '18px', height: '18px', accentColor: '#10b981', cursor: notifyPhone ? 'pointer' : 'not-allowed' }}
+          />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '14px', color: smsNotifyEnabled ? '#065f46' : '#374151' }}>
+              {smsNotifyEnabled ? '✅ SMS alerts are ON' : 'Send me an SMS when a client books or changes'}
+            </div>
+            <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+              {!notifyPhone
+                ? 'Add your phone number above first.'
+                : smsNotifyEnabled
+                  ? 'Counts as 1 SMS from your monthly quota each time.'
+                  : 'You\'ll still see the badges + red pulse on the calendar — this just adds a text to your phone.'}
+            </div>
+          </div>
+        </label>
       </div>
 
       {/* ─── Test SMS — verify Twilio + quota wiring works ─── */}

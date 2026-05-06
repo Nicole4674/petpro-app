@@ -1380,6 +1380,11 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
           start_time: toolInput.start_time,
           end_time: endTime,
           status: 'confirmed',
+          // Source tracking — the calendar badge will show "🤖 booked by Suds (groomer)"
+          booked_via: 'groomer_ai',
+          last_action: 'created',
+          last_action_at: new Date().toISOString(),
+          action_seen_by_groomer: true,  // groomer was the one talking to AI, so already "seen"
         }
         if (parentServiceId) apptData.service_id = parentServiceId
         if (parentQuotedPrice) apptData.quoted_price = parentQuotedPrice

@@ -960,6 +960,25 @@ export default function Calendar() {
             setNewNoteText('')
 
             setSelectedAppt({ ...fullAppt, groomingNotes: groomNotes, clientNotes: clientNotes })
+
+            // ─── Mark as seen — clears the red dot on the calendar block ───
+            // Only fire if action is unseen (saves an unnecessary update query)
+            if (fullAppt.action_seen_by_groomer === false) {
+                try {
+                    await supabase
+                        .from('appointments')
+                        .update({ action_seen_by_groomer: true })
+                        .eq('id', fullAppt.id)
+                    // Update local state so the badge stops pulsing immediately
+                    setAppointments(function (prev) {
+                        return (prev || []).map(function (a) {
+                            return a.id === fullAppt.id ? { ...a, action_seen_by_groomer: true } : a
+                        })
+                    })
+                } catch (markErr) {
+                    console.warn('mark-seen failed (non-fatal):', markErr)
+                }
+            }
         } catch (err) {
             console.error('Error loading appointment:', err)
         } finally {
@@ -5713,6 +5732,20 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                             else if (apptStatus === 'confirmed') statusBadge = { label: '✓ CONFIRMED', bg: '#065f46', fg: '#d1fae5' }
                                             else if (apptStatus === 'unconfirmed') statusBadge = { label: '❓ UNCONFIRMED', bg: '#92400e', fg: '#fef3c7' }
                                         }
+                                        // ─── Booking-source badge ───
+                                        // Shows when a client (or AI) created/changed the appointment
+                                        // so groomer can spot it at a glance. Red dot if not yet seen.
+                                        let sourceBadge = null
+                                        if (appt.last_action === 'rescheduled_by_client_ai' || appt.last_action === 'rescheduled_by_client') {
+                                            sourceBadge = { label: '🔄 CLIENT MOVED', bg: '#7c2d12', fg: '#fed7aa' }
+                                        } else if (appt.last_action === 'cancelled_by_client_ai' || appt.last_action === 'cancelled_by_client') {
+                                            sourceBadge = { label: '❌ CLIENT CANCELLED', bg: '#7f1d1d', fg: '#fecaca' }
+                                        } else if (appt.booked_via === 'client_ai') {
+                                            sourceBadge = { label: '🤖 BOOKED VIA AI', bg: '#5b21b6', fg: '#ede9fe' }
+                                        } else if (appt.booked_via === 'client_portal') {
+                                            sourceBadge = { label: '👤 CLIENT BOOKED', bg: '#1e40af', fg: '#dbeafe' }
+                                        }
+                                        const needsReview = appt.action_seen_by_groomer === false
                                         const isDraggable = !isCancelled && apptStatus !== 'completed' && !appt.checked_out_at
                                         const isBeingDragged = draggedApptId === appt.id
                                         return (
@@ -5811,6 +5844,28 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                                         }}
                                                     >
                                                         {statusBadge.label}
+                                                    </span>
+                                                )}
+                                                {/* Source/action badge — shows when a client (not groomer) booked or modified */}
+                                                {sourceBadge && (
+                                                    <span
+                                                        style={{
+                                                            display: 'inline-block',
+                                                            marginTop: '3px',
+                                                            padding: '2px 8px',
+                                                            fontSize: '10px',
+                                                            fontWeight: 700,
+                                                            borderRadius: '4px',
+                                                            background: sourceBadge.bg,
+                                                            color: sourceBadge.fg,
+                                                            letterSpacing: '0.3px',
+                                                            alignSelf: 'flex-start',
+                                                            border: needsReview ? '2px solid #ef4444' : 'none',
+                                                            animation: needsReview ? 'pulse 2s ease-in-out infinite' : 'none',
+                                                        }}
+                                                        title={needsReview ? 'New — tap to review' : sourceBadge.label}
+                                                    >
+                                                        {needsReview && '🔴 '}{sourceBadge.label}
                                                     </span>
                                                 )}
                                                 {appt.appointment_pets && appt.appointment_pets.length > 1 && <span className="appt-multi-pet-badge" title={appt.appointment_pets.length + ' pets'}>×{appt.appointment_pets.length}</span>}
@@ -5958,6 +6013,18 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
         const isCancelled = apptStatus === 'cancelled'
         const isDraggable = !isCancelled && apptStatus !== 'completed' && !appt.checked_out_at
         const isBeingDragged = draggedApptId === appt.id
+        // ─── Source/action badge for week/month view ───
+        let sourceBadgeWk = null
+        if (appt.last_action === 'rescheduled_by_client_ai' || appt.last_action === 'rescheduled_by_client') {
+            sourceBadgeWk = { label: '🔄', title: 'Client rescheduled — needs review', bg: '#7c2d12' }
+        } else if (appt.last_action === 'cancelled_by_client_ai' || appt.last_action === 'cancelled_by_client') {
+            sourceBadgeWk = { label: '❌', title: 'Client cancelled', bg: '#7f1d1d' }
+        } else if (appt.booked_via === 'client_ai') {
+            sourceBadgeWk = { label: '🤖', title: 'Booked via Suds AI', bg: '#5b21b6' }
+        } else if (appt.booked_via === 'client_portal') {
+            sourceBadgeWk = { label: '👤', title: 'Booked through portal', bg: '#1e40af' }
+        }
+        const needsReviewWk = appt.action_seen_by_groomer === false
 
         // ─── "Done & Paid" green — same logic as the day view ───
         let isDoneAndPaid = false
@@ -6032,7 +6099,25 @@ function renderApptBlocks(slotAppts, onApptClick, onCheckIn, onCheckOut, checkin
                 title={'Groomer: ' + groomerName + (isRecurring ? ' · Recurring appointment' : '') + (hasConflict ? ' · ⚠️ Conflict' : '') + (isFlaggedPending ? ' · ⏳ Needs approval' : '') + (isDraggable ? ' · Drag to reschedule' : '')}
             >
                 <span className="appt-time" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
-                    <span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        {/* Source badge — shows when client (not groomer) booked/changed */}
+                        {sourceBadgeWk && (
+                            <span
+                                title={sourceBadgeWk.title}
+                                style={{
+                                    display: 'inline-block',
+                                    padding: '1px 5px',
+                                    fontSize: '11px',
+                                    background: sourceBadgeWk.bg,
+                                    color: '#fff',
+                                    borderRadius: '4px',
+                                    border: needsReviewWk ? '2px solid #ef4444' : 'none',
+                                    animation: needsReviewWk ? 'pulse 2s ease-in-out infinite' : 'none',
+                                }}
+                            >
+                                {sourceBadgeWk.label}
+                            </span>
+                        )}
                         {formatTime(appt.start_time)}
                         {appt.end_time ? ' – ' + formatTime(appt.end_time) : ''}
                     </span>
@@ -6668,6 +6753,11 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                         recurring_sequence: g.sequence,
                         recurring_conflict: conflict,
                         is_mobile_visit: isMobileVisit,
+                        // Source tracking — calendar shows no badge for groomer-created appts
+                        booked_via: 'recurring',
+                        last_action: 'created',
+                        last_action_at: new Date().toISOString(),
+                        action_seen_by_groomer: true,
                     }
                 })
 
@@ -6768,6 +6858,11 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                 flag_details: flagDetails,
                 flag_status: flagStatus,
                 is_mobile_visit: isMobileVisit,
+                // Source tracking — groomer-side manual booking
+                booked_via: 'groomer',
+                last_action: 'created',
+                last_action_at: new Date().toISOString(),
+                action_seen_by_groomer: true,
             })
             .select()
             .single()
@@ -7916,6 +8011,9 @@ function RescheduleModal({ appt, appointments, onClose, onSaved }) {
                     appointment_date: newDate,
                     start_time: newTime,
                     end_time: newEndTime,
+                    last_action: 'rescheduled_by_groomer',
+                    last_action_at: new Date().toISOString(),
+                    action_seen_by_groomer: true,
                 })
                 .eq('id', appt.id)
 

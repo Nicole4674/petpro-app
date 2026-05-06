@@ -55,6 +55,54 @@ async function sendPushToUser(userId: string, title: string, body: string, url: 
   }
 }
 
+// ─── notifyGroomerSms ───────────────────────────────────────────────────────
+// Sends an SMS to the groomer's own phone when a client takes action through
+// the portal (book / reschedule / cancel). Uses the existing send-sms edge
+// function so quota gating + logging applies.
+//
+// Best-effort — never throws. If the groomer hasn't put their own phone in
+// shop_settings, or if SMS quota is out, we silently skip.
+async function notifyGroomerSms(supabaseAdmin: any, groomerId: string, message: string) {
+  if (!groomerId || !message) return
+  try {
+    // Look up groomer's notification phone (stored on shop_settings.notify_phone)
+    var { data: shop } = await supabaseAdmin
+      .from('shop_settings')
+      .select('notify_phone, sms_notify_enabled')
+      .eq('user_id', groomerId)
+      .maybeSingle()
+    if (!shop || !shop.notify_phone) {
+      console.log('[notifySms] groomer', groomerId, 'has no notify_phone set — skipping')
+      return
+    }
+    if (shop.sms_notify_enabled === false) {
+      console.log('[notifySms] groomer', groomerId, 'has sms_notify_enabled=false — skipping')
+      return
+    }
+    var supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+    var serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    var smsRes = await fetch(supabaseUrl + '/functions/v1/send-sms', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + serviceKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to: shop.notify_phone,
+        message: message,
+        groomer_id: groomerId,
+        sms_type: 'client_action_notification',
+      }),
+    })
+    if (!smsRes.ok) {
+      var smsTxt = await smsRes.text().catch(function () { return '' })
+      console.warn('[notifySms] send-sms returned', smsRes.status, smsTxt)
+    }
+  } catch (err) {
+    console.warn('[notifySms] failed (non-fatal):', err)
+  }
+}
+
 // Format a 24h "HH:MM" time into "h:MM am/pm" for notification previews
 function formatTimeForPush(hhmm: string): string {
   if (!hhmm) return ''
@@ -528,13 +576,14 @@ var toolDefinitions = [
   },
   {
     name: 'client_reschedule_appointment',
-    description: 'Move an existing appointment for the CURRENT client to a new date/time. Only works on their own appointments. If groomer has reschedule toggle off, this tool will refuse.',
+    description: 'Move an existing appointment for the CURRENT client to a new date/time. Only works on their own appointments. If the appointment is part of a recurring series, the tool will refuse on the FIRST call and return needs_recurring_confirmation=true. You MUST then ask the client: "This is part of your recurring weekly/biweekly series. I can move JUST this one appointment to the new time, but your future appointments will stay on the original schedule. Want me to do that?" If they say yes, call this tool again with move_only_this=true. If they say no, suggest they call/text the groomer directly.',
     input_schema: {
       type: 'object',
       properties: {
         appointment_id: { type: 'string', description: 'Must be one of the client\'s own appointments.' },
         new_date: { type: 'string', description: 'YYYY-MM-DD' },
         new_start_time: { type: 'string', description: 'HH:MM 24-hour' },
+        move_only_this: { type: 'boolean', description: 'Set to true ONLY after the client has explicitly confirmed they want to move just this one appointment from a recurring series. Decouples this appt from the series. Default false.' },
       },
       required: ['appointment_id', 'new_date', 'new_start_time'],
     },
@@ -817,8 +866,13 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           appointment_date: toolInput.appointment_date,
           start_time: toolInput.start_time,
           end_time: endTime,
-          status: 'confirmed',
+          status: 'unconfirmed',  // client-AI bookings start unconfirmed (groomer can verify)
           service_notes: toolInput.service_notes || null,
+          // ─── Source tracking — so calendar can show "🤖 booked by client AI" badge
+          booked_via: 'client_ai',
+          last_action: 'created',
+          last_action_at: new Date().toISOString(),
+          action_seen_by_groomer: false,  // red dot until groomer opens it
         }
         if (regularStaffId) apptPayload.staff_id = regularStaffId
 
@@ -932,6 +986,8 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
             + ' — ' + whenForPush
 
           await sendPushToUser(groomerId, pushTitle, pushBody, pushUrl, pushTag)
+          // Also send SMS to groomer's own phone (controlled by shop_settings.sms_notify_enabled)
+          await notifyGroomerSms(supabaseAdmin, groomerId, pushTitle + '\n' + pushBody)
         } catch (pushErr) {
           console.warn('[push] notify groomer of booking failed (non-fatal):', pushErr)
         }
@@ -958,10 +1014,10 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           return { success: false, error: 'appointment_id, new_date, new_start_time required' }
         }
 
-        // Verify appointment belongs to this client
+        // Verify appointment belongs to this client (also pull recurring info)
         var { data: apptCheck, error: apptErr } = await supabaseAdmin
           .from('appointments')
-          .select('id, start_time, end_time, status')
+          .select('id, start_time, end_time, status, appointment_date, recurring_series_id, pets:pet_id(name)')
           .eq('id', toolInput.appointment_id)
           .eq('client_id', clientId)
           .eq('groomer_id', groomerId)
@@ -970,6 +1026,21 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         if (!apptCheck) return { success: false, error: 'That appointment isn\'t yours or doesn\'t exist.' }
         if (apptCheck.status === 'cancelled' || apptCheck.status === 'completed') {
           return { success: false, error: 'That appointment is already ' + apptCheck.status + '.' }
+        }
+
+        // ─── RECURRING GUARD ─────────────────────────────────────────────
+        // If this appointment is part of a recurring series and the client
+        // hasn't explicitly confirmed "just this one", refuse and ask.
+        // This prevents the cascade bug where rescheduling one breaks the
+        // whole series schedule.
+        if (apptCheck.recurring_series_id && toolInput.move_only_this !== true) {
+          return {
+            success: false,
+            needs_recurring_confirmation: true,
+            error: 'This appointment is part of a recurring series. To prevent breaking your whole schedule, ask the client: "This is part of your recurring series. I can move JUST this one appointment, but your future recurring appointments will stay on their original schedule. Want me to do that?" If yes, call this tool again with move_only_this=true. If no, tell them to call/text the groomer directly to adjust the whole series.',
+            original_date: apptCheck.appointment_date,
+            original_time: apptCheck.start_time,
+          }
         }
 
         // Compute duration from existing start/end times, then new end
@@ -1029,9 +1100,18 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           appointment_date: toolInput.new_date,
           start_time: toolInput.new_start_time,
           end_time: rEndTime,
+          // ─── Source tracking — calendar shows "🔄 rescheduled by client AI" ───
+          last_action: 'rescheduled_by_client_ai',
+          last_action_at: new Date().toISOString(),
+          action_seen_by_groomer: false,  // red dot until groomer opens it
         }
         if (!toggles.client_auto_book_enabled) {
           resUpdate.flag_status = 'pending'
+        }
+        // If client confirmed "just this one" of a recurring series → decouple
+        if (apptCheck.recurring_series_id && toolInput.move_only_this === true) {
+          resUpdate.recurring_series_id = null
+          resUpdate.recurring_sequence = null
         }
 
         console.log('[RESCHED] updating appt:', toolInput.appointment_id, JSON.stringify(resUpdate))
@@ -1045,10 +1125,35 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           return { success: false, error: updErr.message }
         }
 
+        // ────────────────────────────────────────────────────────────────
+        // NOTIFY GROOMER — push + SMS — fire-and-forget, never block
+        // ────────────────────────────────────────────────────────────────
+        try {
+          var petNameRes = (apptCheck.pets && (apptCheck.pets as any).name) || 'pet'
+          var oldDateRes = formatDateForPush(apptCheck.appointment_date)
+          var oldTimeRes = formatTimeForPush(apptCheck.start_time)
+          var newDateRes = formatDateForPush(toolInput.new_date)
+          var newTimeRes = formatTimeForPush(toolInput.new_start_time)
+
+          var resPushTitle = '🔄 Client rescheduled — ' + petNameRes
+          var resPushBody = oldDateRes + ' ' + oldTimeRes + ' → ' + newDateRes + ' ' + newTimeRes
+          if (apptCheck.recurring_series_id && toolInput.move_only_this === true) {
+            resPushBody += ' (recurring — only this one moved)'
+          }
+          await sendPushToUser(groomerId, resPushTitle, resPushBody, '/calendar', 'reschedule-' + toolInput.appointment_id)
+
+          // SMS notification — uses send-sms (deducts from groomer's quota,
+          // free for founders). Best-effort, don't fail the reschedule on SMS error.
+          await notifyGroomerSms(supabaseAdmin, groomerId, resPushTitle + '\n' + resPushBody)
+        } catch (notifyErr) {
+          console.warn('[RESCHED] notify groomer failed (non-fatal):', notifyErr)
+        }
+
         return {
           success: true,
           appointment_id: toolInput.appointment_id,
           needs_groomer_review: !toggles.client_auto_book_enabled,
+          decoupled_from_series: !!(apptCheck.recurring_series_id && toolInput.move_only_this === true),
         }
       }
 
@@ -1059,10 +1164,10 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         }
         if (!toolInput.appointment_id) return { success: false, error: 'appointment_id required' }
 
-        // Verify ownership
+        // Verify ownership (also pull pet name + date for notification)
         var { data: cancelCheck } = await supabaseAdmin
           .from('appointments')
-          .select('id, status')
+          .select('id, status, appointment_date, start_time, pets:pet_id(name)')
           .eq('id', toolInput.appointment_id)
           .eq('client_id', clientId)
           .eq('groomer_id', groomerId)
@@ -1072,10 +1177,28 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
 
         var { error: cancelErr } = await supabaseAdmin
           .from('appointments')
-          .update({ status: 'cancelled' })
+          .update({
+            status: 'cancelled',
+            // ─── Source tracking — calendar shows "❌ cancelled by client AI" ───
+            last_action: 'cancelled_by_client_ai',
+            last_action_at: new Date().toISOString(),
+            action_seen_by_groomer: false,
+          })
           .eq('id', toolInput.appointment_id)
           .eq('client_id', clientId)
         if (cancelErr) return { success: false, error: cancelErr.message }
+
+        // Notify groomer (push + SMS) that client cancelled — they need to know!
+        try {
+          var petNameCx = (cancelCheck.pets && (cancelCheck.pets as any).name) || 'pet'
+          var whenCx = formatDateForPush(cancelCheck.appointment_date) + ' ' + formatTimeForPush(cancelCheck.start_time)
+          var cancelTitle = '❌ Client cancelled — ' + petNameCx
+          var cancelBody = whenCx + ' — open PetPro to see details'
+          await sendPushToUser(groomerId, cancelTitle, cancelBody, '/calendar', 'cancel-' + toolInput.appointment_id)
+          await notifyGroomerSms(supabaseAdmin, groomerId, cancelTitle + '\n' + cancelBody)
+        } catch (notifyErr) {
+          console.warn('[CANCEL] notify groomer failed (non-fatal):', notifyErr)
+        }
 
         return { success: true, appointment_id: toolInput.appointment_id }
       }
