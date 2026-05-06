@@ -110,9 +110,12 @@ export default function AIChatWidget() {
   // — no code change needed (the SudsAnimator detects + uses it automatically).
   // Each path can end in .lottie (compressed dotLottie) OR .json (raw Lottie)
   // — DotLottieReact loads both. Pick whatever format your downloaded file is.
+  // Currently all set to .lottie paths that DON'T exist yet — Suds falls back
+  // to his original PNG poses. When custom otter Lottie animations are made
+  // (later, after launch), drop them in /public/lottie/ matching these names.
   const LOTTIE_POSES = {
     idle:      '/lottie/suds-idle.lottie',
-    waving:    '/lottie/suds-waving.json',
+    waving:    '/lottie/suds-waving.lottie',
     thinking:  '/lottie/suds-thinking.lottie',
     celebrate: '/lottie/suds-celebrate.lottie',
     sleeping:  '/lottie/suds-sleeping.lottie',
