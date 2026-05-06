@@ -145,15 +145,24 @@ export default function AIChatWidget() {
   // Any page can trigger Suds to jump + cheer by dispatching:
   //   window.dispatchEvent(new CustomEvent('petpro:celebrate',
   //     { detail: { message: 'Booked $1,200 today! Way to go!' } }))
-  // We celebrate via pose AND voice (if voice is on). The message is what Suds says.
+  //
+  // SILENT-BY-DEFAULT for high-volume shops:
+  // A receptionist booking 30+ dogs/day means Suds would be talking over
+  // staff and clients all day → annoying + drives up TTS costs. So we keep
+  // the visual celebration (pose flash + speech bubble) but skip audio.
+  // Voice still works for everything else (chat replies, onboarding tips).
+  //
+  // Pass detail.audio = true to opt back in for specific high-value events.
   useEffect(function () {
     function onCelebrate(ev) {
       var detail = (ev && ev.detail) || {}
       var message = detail.message || 'Way to go! That\'s another win for the books!'
       flashMood('celebrate', 3000)
-      // Speak the celebration line — fire-and-forget, voice toggle still respected
-      speakSuds(message)
-      // Pop a speech bubble too so it's visible even with voice off
+      // Audio is OPT-IN per event — bookings are silent by default
+      if (detail.audio === true) {
+        speakSuds(message)
+      }
+      // Speech bubble always pops (free + visible feedback)
       showSpeech(message, 5500)
     }
     window.addEventListener('petpro:celebrate', onCelebrate)
