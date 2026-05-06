@@ -199,6 +199,99 @@ export default function Calendar() {
     const [selectedTime, setSelectedTime] = useState(null)
     const [selectedAppt, setSelectedAppt] = useState(null) // appointment detail popup
     const [apptDetailLoading, setApptDetailLoading] = useState(false)
+
+    // ─── Quick-text dropdown state (MoeGo-style SMS from appt popup) ───
+    // Click "💬 Text" next to client phone → menu of preset templates →
+    // pick one → modal with editable prefilled text → Send via send-sms.
+    const [showQuickTextMenu, setShowQuickTextMenu] = useState(false)
+    const [quickTextDraft, setQuickTextDraft] = useState(null)  // { type, body } | null
+    const [quickTextSending, setQuickTextSending] = useState(false)
+    const [quickTextResult, setQuickTextResult] = useState(null)  // { ok, text } | null
+
+    // Build the prefilled message body for a given template type.
+    // Uses simple personalization from selectedAppt — first pet name, client first name.
+    function buildQuickText(templateType, appt) {
+        if (!appt) return ''
+        var clientFirst = (appt.clients && appt.clients.first_name) || 'there'
+        // Pet name: prefer appointment_pets[0], fall back to legacy pets, fall back to "your pet"
+        var petName = 'your pet'
+        if (appt.appointment_pets && appt.appointment_pets.length > 0) {
+            var firstPet = appt.appointment_pets[0]
+            if (firstPet && firstPet.pets && firstPet.pets.name) petName = firstPet.pets.name
+        } else if (appt.pets && appt.pets.name) {
+            petName = appt.pets.name
+        }
+        // Format date/time nicely
+        var dateStr = appt.appointment_date || ''
+        var timeStr = appt.start_time ? formatTime(appt.start_time) : ''
+
+        switch (templateType) {
+            case 'confirmation':
+                return 'Hi ' + clientFirst + '! Just confirming ' + petName + "'s appointment on " + dateStr +
+                       ' at ' + timeStr + '. See you then! 🐾'
+            case 'reminder':
+                return 'Hi ' + clientFirst + '! Friendly reminder — ' + petName + "'s grooming appointment is " +
+                       dateStr + ' at ' + timeStr + '. Reply if you need to reschedule.'
+            case 'pickup':
+                return 'Hi ' + clientFirst + '! ' + petName + ' is all done and ready for pickup whenever you can swing by! 🐾'
+            case 'custom':
+            default:
+                return ''
+        }
+    }
+
+    function openQuickText(templateType) {
+        setShowQuickTextMenu(false)
+        setQuickTextResult(null)
+        setQuickTextDraft({
+            type: templateType,
+            body: buildQuickText(templateType, selectedAppt),
+        })
+    }
+
+    async function sendQuickText() {
+        if (!selectedAppt || !selectedAppt.clients || !selectedAppt.clients.phone) {
+            setQuickTextResult({ ok: false, text: 'No phone number on file for this client.' })
+            return
+        }
+        if (!quickTextDraft || !quickTextDraft.body || !quickTextDraft.body.trim()) {
+            setQuickTextResult({ ok: false, text: 'Message is empty.' })
+            return
+        }
+        setQuickTextSending(true)
+        setQuickTextResult(null)
+        try {
+            var { data: { user } } = await supabase.auth.getUser()
+            var { data, error } = await supabase.functions.invoke('send-sms', {
+                body: {
+                    to: selectedAppt.clients.phone,
+                    message: quickTextDraft.body.trim(),
+                    groomer_id: user.id,
+                    sms_type: 'quick_' + (quickTextDraft.type || 'custom'),
+                },
+            })
+            if (error) {
+                setQuickTextResult({ ok: false, text: 'Send failed: ' + error.message })
+            } else if (data && data.success) {
+                var bal = data.source === 'founder_unlimited'
+                    ? '(unlimited)'
+                    : '(' + data.remaining + ' SMS left)'
+                setQuickTextResult({ ok: true, text: '✅ Sent! ' + bal })
+                // Auto-close the modal after 2 seconds on success
+                setTimeout(function () {
+                    setQuickTextDraft(null)
+                    setQuickTextResult(null)
+                }, 2000)
+            } else {
+                setQuickTextResult({ ok: false, text: (data && data.error) || 'Unknown error' })
+            }
+        } catch (e) {
+            setQuickTextResult({ ok: false, text: 'Send failed: ' + (e.message || 'unknown') })
+        } finally {
+            setQuickTextSending(false)
+        }
+    }
+
     const [statusDropdownOpen, setStatusDropdownOpen] = useState(false) // click-to-change status pill
     const [showAddPetToApptModal, setShowAddPetToApptModal] = useState(false) // multi-pet: + Add Pet to existing appt
     // Multi-pet: in-popup "change service" editor — tracks which appointment_pet is being edited + the pending new service_id
@@ -3997,7 +4090,7 @@ export default function Calendar() {
                                             </button>
                                         </div>
                                         {selectedAppt.clients.phone && (
-                                            <div className="appt-detail-owner-row">
+                                            <div className="appt-detail-owner-row" style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                                                 <a
                                                     href={telUrl(selectedAppt.clients.phone)}
                                                     style={{ color: '#7c3aed', textDecoration: 'none', fontWeight: 600 }}
@@ -4005,6 +4098,192 @@ export default function Calendar() {
                                                 >
                                                     📱 {formatPhone(selectedAppt.clients.phone)}
                                                 </a>
+                                                {/* MoeGo-style "💬 Text" quick-action menu */}
+                                                <button
+                                                    type="button"
+                                                    onClick={function () { setShowQuickTextMenu(function (v) { return !v }) }}
+                                                    style={{
+                                                        background: '#f3f4f6',
+                                                        border: '1px solid #d1d5db',
+                                                        borderRadius: '8px',
+                                                        padding: '4px 10px',
+                                                        fontSize: '12px',
+                                                        fontWeight: 600,
+                                                        color: '#374151',
+                                                        cursor: 'pointer',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '4px',
+                                                    }}
+                                                    title="Send a text message"
+                                                >
+                                                    💬 Text ▾
+                                                </button>
+                                                {showQuickTextMenu && (
+                                                    <div
+                                                        style={{
+                                                            position: 'absolute',
+                                                            top: '100%',
+                                                            left: '120px',
+                                                            marginTop: '4px',
+                                                            background: '#fff',
+                                                            border: '1px solid #e5e7eb',
+                                                            borderRadius: '10px',
+                                                            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                                                            zIndex: 100,
+                                                            minWidth: '200px',
+                                                            overflow: 'hidden',
+                                                        }}
+                                                    >
+                                                        {[
+                                                            { type: 'confirmation', label: '📅 Booking confirmation' },
+                                                            { type: 'reminder',     label: '🔔 Appointment reminder' },
+                                                            { type: 'pickup',       label: '✂️ Ready for pickup' },
+                                                            { type: 'custom',       label: '✏️ Custom message…' },
+                                                        ].map(function (opt) {
+                                                            return (
+                                                                <button
+                                                                    key={opt.type}
+                                                                    type="button"
+                                                                    onClick={function () { openQuickText(opt.type) }}
+                                                                    style={{
+                                                                        display: 'block',
+                                                                        width: '100%',
+                                                                        textAlign: 'left',
+                                                                        padding: '10px 14px',
+                                                                        background: 'transparent',
+                                                                        border: 'none',
+                                                                        borderBottom: '1px solid #f3f4f6',
+                                                                        fontSize: '13px',
+                                                                        color: '#374151',
+                                                                        cursor: 'pointer',
+                                                                    }}
+                                                                    onMouseEnter={function (e) { e.currentTarget.style.background = '#faf5ff' }}
+                                                                    onMouseLeave={function (e) { e.currentTarget.style.background = 'transparent' }}
+                                                                >
+                                                                    {opt.label}
+                                                                </button>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* Quick-text editor modal */}
+                                        {quickTextDraft && (
+                                            <div
+                                                style={{
+                                                    position: 'fixed',
+                                                    inset: 0,
+                                                    background: 'rgba(0,0,0,0.5)',
+                                                    zIndex: 9999,
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    padding: '20px',
+                                                }}
+                                                onClick={function () {
+                                                    if (!quickTextSending) { setQuickTextDraft(null); setQuickTextResult(null) }
+                                                }}
+                                            >
+                                                <div
+                                                    onClick={function (e) { e.stopPropagation() }}
+                                                    style={{
+                                                        background: '#fff',
+                                                        borderRadius: '14px',
+                                                        padding: '22px',
+                                                        width: '100%',
+                                                        maxWidth: '460px',
+                                                        boxShadow: '0 25px 60px rgba(0,0,0,0.35)',
+                                                    }}
+                                                >
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                        <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: '#1f2937' }}>
+                                                            💬 Text {selectedAppt.clients.first_name || 'Client'}
+                                                        </h3>
+                                                        <button
+                                                            type="button"
+                                                            onClick={function () { setQuickTextDraft(null); setQuickTextResult(null) }}
+                                                            disabled={quickTextSending}
+                                                            style={{ background: 'transparent', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#9ca3af' }}
+                                                        >×</button>
+                                                    </div>
+                                                    <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
+                                                        To: <strong>{formatPhone(selectedAppt.clients.phone)}</strong>
+                                                    </div>
+                                                    <textarea
+                                                        value={quickTextDraft.body}
+                                                        onChange={function (e) { setQuickTextDraft({ ...quickTextDraft, body: e.target.value }) }}
+                                                        rows={6}
+                                                        style={{
+                                                            width: '100%',
+                                                            padding: '12px',
+                                                            border: '1px solid #d1d5db',
+                                                            borderRadius: '8px',
+                                                            fontSize: '14px',
+                                                            fontFamily: 'inherit',
+                                                            resize: 'vertical',
+                                                            boxSizing: 'border-box',
+                                                        }}
+                                                        placeholder="Type your message…"
+                                                    />
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '11px', color: '#9ca3af' }}>
+                                                        <span>{(quickTextDraft.body || '').length} / 1600 chars</span>
+                                                        <span>1 SMS = up to ~160 chars</span>
+                                                    </div>
+
+                                                    {quickTextResult && (
+                                                        <div style={{
+                                                            marginTop: '10px',
+                                                            padding: '8px 12px',
+                                                            background: quickTextResult.ok ? '#ecfdf5' : '#fef2f2',
+                                                            border: '1px solid ' + (quickTextResult.ok ? '#a7f3d0' : '#fecaca'),
+                                                            borderRadius: '8px',
+                                                            fontSize: '13px',
+                                                            color: quickTextResult.ok ? '#065f46' : '#991b1b',
+                                                        }}>
+                                                            {quickTextResult.text}
+                                                        </div>
+                                                    )}
+
+                                                    <div style={{ display: 'flex', gap: '8px', marginTop: '14px', justifyContent: 'flex-end' }}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={function () { setQuickTextDraft(null); setQuickTextResult(null) }}
+                                                            disabled={quickTextSending}
+                                                            style={{
+                                                                background: '#fff',
+                                                                color: '#374151',
+                                                                border: '1.5px solid #d1d5db',
+                                                                borderRadius: '8px',
+                                                                padding: '10px 16px',
+                                                                fontSize: '13px',
+                                                                fontWeight: 600,
+                                                                cursor: quickTextSending ? 'wait' : 'pointer',
+                                                            }}
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={sendQuickText}
+                                                            disabled={quickTextSending || !quickTextDraft.body.trim()}
+                                                            style={{
+                                                                background: quickTextSending ? '#9ca3af' : '#7c3aed',
+                                                                color: '#fff',
+                                                                border: 'none',
+                                                                borderRadius: '8px',
+                                                                padding: '10px 20px',
+                                                                fontSize: '13px',
+                                                                fontWeight: 700,
+                                                                cursor: quickTextSending ? 'wait' : 'pointer',
+                                                            }}
+                                                        >
+                                                            {quickTextSending ? 'Sending…' : '📤 Send Text'}
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             </div>
                                         )}
                                         {selectedAppt.clients.email && (
