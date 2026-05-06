@@ -680,6 +680,12 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         }
 
         // ---- Look up regular staff BEFORE rule check (daily cap needs it) ----
+        // Priority order:
+        //   1. Client's last assigned staff (their "regular" groomer)
+        //   2. The shop's first active staff member (so we never leave it
+        //      unassigned — groomers often hide unassigned column to avoid
+        //      double-booking, which means unassigned appts go invisible)
+        //   3. As an absolute last resort, leave unassigned
         var regularStaffId: string | null = null
         var { data: lastAppt } = await supabaseAdmin
           .from('appointments')
@@ -694,7 +700,23 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           regularStaffId = lastAppt.staff_id
           console.log('[BOOK] assigning to regular staff:', regularStaffId)
         } else {
-          console.log('[BOOK] no prior staff found, leaving unassigned')
+          // No prior appointment → fall back to first ACTIVE staff member.
+          // For solo shops this is always the owner. For multi-staff shops
+          // this picks any active groomer; the groomer can reassign after.
+          var { data: anyActiveStaff } = await supabaseAdmin
+            .from('staff_members')
+            .select('id, first_name')
+            .eq('groomer_id', groomerId)
+            .eq('status', 'active')
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle()
+          if (anyActiveStaff && anyActiveStaff.id) {
+            regularStaffId = anyActiveStaff.id
+            console.log('[BOOK] no prior staff — defaulting to first active staff:', anyActiveStaff.first_name, regularStaffId)
+          } else {
+            console.warn('[BOOK] NO ACTIVE STAFF FOUND for groomer', groomerId, '— this booking will be unassigned')
+          }
         }
 
         // ---- Compute Chicago-TZ timestamps for Rule 7 (same-day cutoff) ----
@@ -866,7 +888,7 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           appointment_date: toolInput.appointment_date,
           start_time: toolInput.start_time,
           end_time: endTime,
-          status: 'unconfirmed',  // client-AI bookings start unconfirmed (groomer can verify)
+          status: 'confirmed',  // matches original behavior — appears on calendar immediately
           service_notes: toolInput.service_notes || null,
           // ─── Source tracking — so calendar can show "🤖 booked by client AI" badge
           booked_via: 'client_ai',
