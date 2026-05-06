@@ -446,9 +446,13 @@ export default function Calendar() {
         }
         const DONE_STATUSES = ['completed', 'checked_out']
         const DEAD_STATUSES = ['cancelled', 'no_show', 'rescheduled']
-        const completed = filtered.filter((a) => DONE_STATUSES.indexOf(a.status) >= 0)
+        // "Done" = status flipped to completed/checked_out OR checked_out_at is stamped.
+        // The manual "→ Check Out" button stamps checked_out_at without always changing
+        // status — so we treat both signals as "done" to match what shows green on the calendar.
+        const isDone = (a) => DONE_STATUSES.indexOf(a.status) >= 0 || !!a.checked_out_at
+        const completed = filtered.filter(isDone)
         const expected = filtered.filter((a) =>
-            DONE_STATUSES.indexOf(a.status) < 0 && DEAD_STATUSES.indexOf(a.status) < 0
+            !isDone(a) && DEAD_STATUSES.indexOf(a.status) < 0
         )
         const active = filtered.filter((a) => DEAD_STATUSES.indexOf(a.status) < 0)
         const totalCompleted = completed.reduce((sum, a) => sum + (parseFloat(a.final_price) || parseFloat(a.quoted_price) || 0), 0)
