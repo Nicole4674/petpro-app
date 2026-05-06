@@ -133,6 +133,8 @@ export default function Onboarding() {
   // entirely if they don't board).
   const [offersBoarding, setOffersBoarding] = useState(false)
   const [kennelCounts, setKennelCounts] = useState({ small: 0, medium: 0, large: 0, xl: 0 })
+  // Per-size nightly rate (in dollars) — defaults are mid-range US grooming-shop pricing
+  const [kennelRates, setKennelRates] = useState({ small: 35, medium: 45, large: 55, xl: 65 })
 
   // Step 7 — Stripe Connect (read-only — we just check if they're already connected)
   const [stripeConnected, setStripeConnected] = useState(false)
@@ -282,7 +284,7 @@ export default function Onboarding() {
 
   // ─── Skip-the-rest button: marks wizard complete now, sends to dashboard ───
   async function skipAll() {
-    if (!confirm('Skip the rest of setup? You can finish anytime from Shop Settings.')) return
+    if (!confirm('Skip the rest of setup?\n\nYou can come back to Shop Settings anytime to fill in the rest. Recommended for experienced groomers comfortable jumping straight to the dashboard.')) return
     await finishWizard()
   }
 
@@ -394,20 +396,21 @@ export default function Onboarding() {
     try {
       const rows = []
       const sizes = [
-        { key: 'small',  label: 'Small',  base_price: 35 },
-        { key: 'medium', label: 'Medium', base_price: 45 },
-        { key: 'large',  label: 'Large',  base_price: 55 },
-        { key: 'xl',     label: 'XL',     base_price: 65 },
+        { key: 'small',  label: 'Small'  },
+        { key: 'medium', label: 'Medium' },
+        { key: 'large',  label: 'Large'  },
+        { key: 'xl',     label: 'XL'     },
       ]
       let order = 0
       sizes.forEach(s => {
         const count = kennelCounts[s.key] || 0
+        const rate = parseFloat(kennelRates[s.key]) || 0
         for (let i = 1; i <= count; i++) {
           rows.push({
             groomer_id: userId,
             name: `${s.label} ${i}`,
             size_label: s.label,
-            base_price: s.base_price,
+            base_price: rate,
             default_capacity: 1,
             display_order: order++,
           })
@@ -481,16 +484,32 @@ export default function Onboarding() {
               onClick={skipAll}
               disabled={saving}
               style={{
-                background: 'transparent',
-                border: 'none',
-                color: '#9ca3af',
+                background: '#fff',
+                border: '1.5px solid #e5e7eb',
+                color: '#6b7280',
                 fontSize: '13px',
+                fontWeight: 600,
                 cursor: 'pointer',
-                textDecoration: 'underline',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.15s',
               }}
-              title="Skip the rest of setup — you can finish later from Shop Settings"
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#7c3aed'
+                e.currentTarget.style.color = '#7c3aed'
+                e.currentTarget.style.background = '#faf5ff'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#e5e7eb'
+                e.currentTarget.style.color = '#6b7280'
+                e.currentTarget.style.background = '#fff'
+              }}
+              title="Skip the wizard — recommended for experienced groomers"
             >
-              Skip for now
+              Skip wizard →
             </button>
           </div>
           <div style={{ height: '6px', background: '#f3f4f6', borderRadius: '999px', overflow: 'hidden' }}>
@@ -512,6 +531,7 @@ export default function Onboarding() {
               offersBoarding={offersBoarding} setOffersBoarding={setOffersBoarding}
               onContinue={handleStep1Continue}
               saving={saving}
+              onSkipAll={skipAll}
             />
           )}
           {currentStep === 2 && (
@@ -539,6 +559,7 @@ export default function Onboarding() {
             <Step6Boarding
               offersBoarding={offersBoarding} setOffersBoarding={setOffersBoarding}
               kennelCounts={kennelCounts} setKennelCounts={setKennelCounts}
+              kennelRates={kennelRates} setKennelRates={setKennelRates}
             />
           )}
           {currentStep === 7 && (
@@ -597,7 +618,7 @@ export default function Onboarding() {
 //   1. Migration source (or "not migrating") — handoff to Suds happens at Step 8
 //   2. Mobile or storefront — sets is_mobile so the Route page appears in sidebar
 //   3. Offers boarding — Step 6 (Boarding) auto-skips if "No"
-function Step1Welcome({ migrationSource, setMigrationSource, isMobile, setIsMobile, offersBoarding, setOffersBoarding, onContinue, saving }) {
+function Step1Welcome({ migrationSource, setMigrationSource, isMobile, setIsMobile, offersBoarding, setOffersBoarding, onContinue, saving, onSkipAll }) {
   const sources = [
     { id: '',               label: "No — I'm a brand new shop" },
     { id: 'moego',          label: 'MoeGo' },
@@ -615,7 +636,7 @@ function Step1Welcome({ migrationSource, setMigrationSource, isMobile, setIsMobi
   return (
     <div style={{ padding: '10px 0' }}>
       {/* Welcome header */}
-      <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+      <div style={{ textAlign: 'center', marginBottom: '20px' }}>
         <img
           src="/suds-waving.png"
           alt="Suds waving hello"
@@ -628,6 +649,62 @@ function Step1Welcome({ migrationSource, setMigrationSource, isMobile, setIsMobi
           I'm Suds 🦦 — your AI booking buddy. Quick 3 questions so I know how to set up your shop. Then we'll fill in the details.
         </p>
       </div>
+
+      {/* ─── Experienced-groomer fast-path: skip the entire wizard ─── */}
+      {/* For users who already know their way around grooming software and */}
+      {/* don't need to be walked through. Sends them straight to dashboard. */}
+      {onSkipAll && (
+        <div style={{
+          marginBottom: '20px',
+          padding: '12px 14px',
+          background: '#f9fafb',
+          border: '1px dashed #d1d5db',
+          borderRadius: '10px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          flexWrap: 'wrap',
+        }}>
+          <div style={{ flex: 1, minWidth: '180px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#374151', marginBottom: '2px' }}>
+              💼 Already a seasoned groomer?
+            </div>
+            <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: 1.4 }}>
+              Jump straight to the dashboard — you can set everything up later from Shop Settings.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onSkipAll}
+            disabled={saving}
+            style={{
+              background: '#fff',
+              border: '1.5px solid #d1d5db',
+              color: '#374151',
+              padding: '8px 14px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = '#7c3aed'
+              e.currentTarget.style.color = '#7c3aed'
+              e.currentTarget.style.background = '#faf5ff'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = '#d1d5db'
+              e.currentTarget.style.color = '#374151'
+              e.currentTarget.style.background = '#fff'
+            }}
+          >
+            Skip wizard →
+          </button>
+        </div>
+      )}
 
       {/* ─── Question 1: Migration ─── */}
       <div style={{ marginBottom: '18px' }}>
@@ -1108,13 +1185,29 @@ function Step5Staff({ staffMode, setStaffMode }) {
 }
 
 // ════════════ STEP 6 — Boarding ════════════
-function Step6Boarding({ offersBoarding, setOffersBoarding, kennelCounts, setKennelCounts }) {
+function Step6Boarding({ offersBoarding, setOffersBoarding, kennelCounts, setKennelCounts, kennelRates, setKennelRates }) {
   function updateCount(size, val) {
     var n = parseInt(val, 10)
     if (isNaN(n) || n < 0) n = 0
     if (n > 50) n = 50
     setKennelCounts({ ...kennelCounts, [size]: n })
   }
+  function updateRate(size, val) {
+    var n = parseFloat(val)
+    if (isNaN(n) || n < 0) n = 0
+    if (n > 999) n = 999
+    setKennelRates({ ...kennelRates, [size]: n })
+  }
+  // Revenue projections — helps groomers see the upside of boarding
+  var totalKennels = (kennelCounts.small || 0) + (kennelCounts.medium || 0) + (kennelCounts.large || 0) + (kennelCounts.xl || 0)
+  var nightlyMax = (
+    (kennelCounts.small || 0) * (parseFloat(kennelRates.small) || 0) +
+    (kennelCounts.medium || 0) * (parseFloat(kennelRates.medium) || 0) +
+    (kennelCounts.large || 0) * (parseFloat(kennelRates.large) || 0) +
+    (kennelCounts.xl || 0) * (parseFloat(kennelRates.xl) || 0)
+  )
+  var monthlyMax = nightlyMax * 30
+  var monthly70pct = nightlyMax * 30 * 0.7  // realistic 70% occupancy estimate
 
   return (
     <div style={{ padding: '10px 0' }}>
@@ -1168,9 +1261,9 @@ function Step6Boarding({ offersBoarding, setOffersBoarding, kennelCounts, setKen
       {offersBoarding && (
         <div>
           <div style={{ fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            How many kennels do you have?
+            Kennels — count & nightly rate per size
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
             {[
               { key: 'small',  label: 'Small',  hint: 'Up to 25 lbs' },
               { key: 'medium', label: 'Medium', hint: '25-50 lbs' },
@@ -1184,20 +1277,72 @@ function Step6Boarding({ offersBoarding, setOffersBoarding, kennelCounts, setKen
                 background: '#fff',
               }}>
                 <div style={{ fontWeight: 700, color: '#1f2937', fontSize: '13px' }}>{s.label}</div>
-                <div style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '6px' }}>{s.hint}</div>
-                <input
-                  type="number"
-                  min="0"
-                  max="50"
-                  value={kennelCounts[s.key] || 0}
-                  onChange={(e) => updateCount(s.key, e.target.value)}
-                  style={{ ...fieldInputStyle, padding: '6px 10px', fontSize: '14px' }}
-                />
+                <div style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '8px' }}>{s.hint}</div>
+                <div style={{ marginBottom: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '10px', fontWeight: 600, color: '#6b7280', marginBottom: '2px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                    Count
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="50"
+                    value={kennelCounts[s.key] || 0}
+                    onChange={(e) => updateCount(s.key, e.target.value)}
+                    style={{ ...fieldInputStyle, padding: '6px 10px', fontSize: '14px' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', fontWeight: 600, color: '#6b7280', marginBottom: '2px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                    Nightly rate
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '13px', color: '#6b7280', fontWeight: 600 }}>$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="999"
+                      step="5"
+                      value={kennelRates[s.key] || 0}
+                      onChange={(e) => updateRate(s.key, e.target.value)}
+                      style={{ ...fieldInputStyle, padding: '6px 10px 6px 22px', fontSize: '14px' }}
+                    />
+                  </div>
+                </div>
               </div>
             ))}
           </div>
-          <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '8px' }}>
-            We'll auto-create kennels named "Small 1", "Small 2", etc. — you can rename them anytime from Boarding Setup.
+
+          {/* ─── Revenue projection — shows the upside of boarding ─── */}
+          {totalKennels > 0 && nightlyMax > 0 && (
+            <div style={{
+              marginTop: '14px',
+              padding: '14px 16px',
+              background: 'linear-gradient(135deg, #faf5ff 0%, #f0fdf4 100%)',
+              border: '1.5px solid #c4b5fd',
+              borderRadius: '12px',
+            }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: '#5b21b6', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                💰 Boarding revenue potential
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', fontSize: '13px' }}>
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: '11px' }}>Total kennels</div>
+                  <div style={{ fontSize: '20px', fontWeight: 800, color: '#1f2937' }}>{totalKennels}</div>
+                </div>
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: '11px' }}>Max nightly</div>
+                  <div style={{ fontSize: '20px', fontWeight: 800, color: '#1f2937' }}>${nightlyMax.toFixed(0)}</div>
+                </div>
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: '11px' }}>Realistic monthly (70% full)</div>
+                  <div style={{ fontSize: '20px', fontWeight: 800, color: '#059669' }}>${monthly70pct.toFixed(0)}</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '10px', lineHeight: 1.5 }}>
+            We'll auto-create kennels named "Small 1", "Small 2", etc. with your default rates. You can rename them, change rates, mark maintenance days, or add holiday surcharges from <strong>Boarding Setup</strong> anytime.
           </div>
         </div>
       )}
@@ -1295,6 +1440,19 @@ function PlaceholderStep({ title }) {
 // ════════════ STEP 8 — Done ════════════
 function Step8Done({ onFinish, saving, migrationSource }) {
   const isMigrating = !!migrationSource
+
+  function startWithWalkthrough() {
+    // Set the walkthrough flag — WalkthroughGuide.jsx (mounted globally in App)
+    // reads this on every page and shows the right tip for where they are.
+    try { window.localStorage.setItem('petpro_walkthrough_step', '1') } catch (e) {}
+    onFinish()
+  }
+  function startNoWalkthrough() {
+    // Make sure no leftover flag triggers it on dashboard
+    try { window.localStorage.removeItem('petpro_walkthrough_step') } catch (e) {}
+    onFinish()
+  }
+
   return (
     <div style={{ textAlign: 'center', padding: '20px 10px' }}>
       <img
@@ -1306,7 +1464,7 @@ function Step8Done({ onFinish, saving, migrationSource }) {
         You're all set!
       </h1>
       <p style={{ fontSize: '15px', color: '#6b7280', lineHeight: 1.6, maxWidth: '460px', margin: '0 auto 20px' }}>
-        Your shop's ready to take bookings. I'll be in the corner if you need me — just call my name (Suds or PetPro) anytime.
+        Your shop's ready to take bookings. Want me to give you a quick tour first, or are you ready to roll?
       </p>
 
       {isMigrating && (
@@ -1327,13 +1485,74 @@ function Step8Done({ onFinish, saving, migrationSource }) {
         </div>
       )}
 
-      <button
-        onClick={onFinish}
-        disabled={saving}
-        style={{ ...btnPrimaryStyle, fontSize: '15px', padding: '14px 32px' }}
-      >
-        {saving ? 'Loading dashboard...' : (isMigrating ? "Take me to Suds for Migration →" : 'Take me to my dashboard →')}
-      </button>
+      {/* Two paths — guided walkthrough OR straight to dashboard */}
+      {!isMigrating && (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: '12px',
+          maxWidth: '500px',
+          margin: '0 auto 16px',
+        }}>
+          {/* Walkthrough path — recommended for first-timers */}
+          <button
+            onClick={startWithWalkthrough}
+            disabled={saving}
+            style={{
+              background: '#7c3aed',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '12px',
+              padding: '16px 18px',
+              fontSize: '14px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              textAlign: 'left',
+              lineHeight: 1.4,
+            }}
+          >
+            <div style={{ fontSize: '20px', marginBottom: '4px' }}>🎯</div>
+            <div>Walk me through it</div>
+            <div style={{ fontSize: '11px', fontWeight: 500, opacity: 0.9, marginTop: '4px' }}>
+              Recommended — Suds shows you the calendar, dashboard, and settings
+            </div>
+          </button>
+
+          {/* Skip walkthrough — for experienced groomers */}
+          <button
+            onClick={startNoWalkthrough}
+            disabled={saving}
+            style={{
+              background: '#fff',
+              color: '#374151',
+              border: '1.5px solid #d1d5db',
+              borderRadius: '12px',
+              padding: '16px 18px',
+              fontSize: '14px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              textAlign: 'left',
+              lineHeight: 1.4,
+            }}
+          >
+            <div style={{ fontSize: '20px', marginBottom: '4px' }}>🚀</div>
+            <div>I got this — dashboard please</div>
+            <div style={{ fontSize: '11px', fontWeight: 500, color: '#6b7280', marginTop: '4px' }}>
+              Skip the tour. You can ask Suds anything anytime.
+            </div>
+          </button>
+        </div>
+      )}
+
+      {isMigrating && (
+        <button
+          onClick={onFinish}
+          disabled={saving}
+          style={{ ...btnPrimaryStyle, fontSize: '15px', padding: '14px 32px' }}
+        >
+          {saving ? 'Loading dashboard...' : 'Take me to Suds for Migration →'}
+        </button>
+      )}
     </div>
   )
 }

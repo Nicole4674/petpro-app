@@ -101,6 +101,7 @@ import AIChatWidget from './components/AIChatWidget'
 import ClientChatWidget from './components/ClientChatWidget'
 import Sidebar from './components/Sidebar'
 import SubscriptionGate from './components/SubscriptionGate'
+import WalkthroughGuide from './components/WalkthroughGuide'
 import './App.css'
 
 // Helper — every groomer-side route runs through this. Three checks in order:
@@ -139,6 +140,7 @@ function AppLayout({ children }) {
                 {children}
             </div>
             <AIChatWidget />
+            <WalkthroughGuide />
         </div>
     )
 }
