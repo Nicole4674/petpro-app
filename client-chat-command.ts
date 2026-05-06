@@ -610,7 +610,7 @@ var toolDefinitions = [
   },
   {
     name: 'client_check_availability',
-    description: 'REQUIRED before suggesting a specific time to a client. Returns the list of ALREADY-BOOKED time slots AND the shop\'s open/close hours for that specific weekday. Only suggest times within the open hours that do not overlap any booked slot. If the day is closed (is_open=false), refuse and offer the next open day instead.',
+    description: 'REQUIRED before suggesting a specific time to a client. Returns: (a) booked_slots — appointments already on the calendar, (b) blocked_slots — groomer-blocked time (lunch, personal, closed afternoons), (c) the shop\'s open/close hours for that weekday. Only suggest times within the open hours that overlap NEITHER booked_slots NOR blocked_slots. If the day is closed (is_open=false), refuse and offer the next open day instead.',
     input_schema: {
       type: 'object',
       properties: {
@@ -681,6 +681,35 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         if (!hrsCheck.ok) {
           console.warn('[BOOK] hours guard blocked booking:', hrsCheck.reason)
           return { success: false, error: hrsCheck.reason, outside_hours: true }
+        }
+
+        // ─── BLOCKED-TIME GUARD ─────────────────────────────────────────
+        // Groomers block off lunch, personal time, closed afternoons, etc.
+        // Refuse any booking that overlaps a blocked window.
+        var { data: bookBlockedRows } = await supabaseAdmin
+          .from('blocked_times')
+          .select('start_time, end_time, note')
+          .eq('groomer_id', groomerId)
+          .eq('block_date', toolInput.appointment_date)
+        if (bookBlockedRows && bookBlockedRows.length > 0) {
+          var bkStartParts = String(toolInput.start_time).split(':')
+          var bkStartMin = parseInt(bkStartParts[0], 10) * 60 + parseInt(bkStartParts[1], 10)
+          // Default to 60 min if duration is unspecified (matches the rest of the flow)
+          var bkDur = (typeof toolInput.duration_minutes === 'number') ? toolInput.duration_minutes : 60
+          var bkEndMin = bkStartMin + bkDur
+          for (var bk of bookBlockedRows) {
+            var blkSP = String(bk.start_time).split(':')
+            var blkEP = String(bk.end_time).split(':')
+            var blkSM = parseInt(blkSP[0], 10) * 60 + parseInt(blkSP[1], 10)
+            var blkEM = parseInt(blkEP[0], 10) * 60 + parseInt(blkEP[1], 10)
+            if (bkStartMin < blkEM && bkEndMin > blkSM) {
+              var blkReason = 'That time overlaps a block on the groomer\'s calendar' +
+                (bk.note ? ' (' + bk.note + ')' : '') +
+                '. Please pick a different time.'
+              console.warn('[BOOK] blocked-time guard refused:', blkReason)
+              return { success: false, error: blkReason, blocked_time: true }
+            }
+          }
         }
 
         // Verify pet belongs to this client (also pulls fields needed for rule check)
@@ -1087,6 +1116,33 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           return { success: false, error: resHrsCheck.reason, outside_hours: true }
         }
 
+        // ─── BLOCKED-TIME GUARD (reschedule) ─────────────────────────────
+        var { data: resBlockedRows } = await supabaseAdmin
+          .from('blocked_times')
+          .select('start_time, end_time, note')
+          .eq('groomer_id', groomerId)
+          .eq('block_date', toolInput.new_date)
+        if (resBlockedRows && resBlockedRows.length > 0) {
+          var resBkSP = String(toolInput.new_start_time).split(':')
+          var resBkSM = parseInt(resBkSP[0], 10) * 60 + parseInt(resBkSP[1], 10)
+          // Use 60 min default — actual duration is computed from old appt below,
+          // but at this point we don't have it yet; the bigger window is safer.
+          var resBkEM = resBkSM + 60
+          for (var rbk of resBlockedRows) {
+            var rblkSP = String(rbk.start_time).split(':')
+            var rblkEP = String(rbk.end_time).split(':')
+            var rblkSM = parseInt(rblkSP[0], 10) * 60 + parseInt(rblkSP[1], 10)
+            var rblkEM = parseInt(rblkEP[0], 10) * 60 + parseInt(rblkEP[1], 10)
+            if (resBkSM < rblkEM && resBkEM > rblkSM) {
+              var rblkReason = 'That new time overlaps a block on the groomer\'s calendar' +
+                (rbk.note ? ' (' + rbk.note + ')' : '') +
+                '. Please pick a different time.'
+              console.warn('[RESCHED] blocked-time guard refused:', rblkReason)
+              return { success: false, error: rblkReason, blocked_time: true }
+            }
+          }
+        }
+
         // Verify appointment belongs to this client (also pull recurring info)
         var { data: apptCheck, error: apptErr } = await supabaseAdmin
           .from('appointments')
@@ -1317,6 +1373,16 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           .neq('status', 'cancelled')
           .order('start_time', { ascending: true })
 
+        // ─── Also pull blocked_times for that date ───
+        // Groomers block off lunch breaks, vacations, days off mid-day, etc.
+        // Suds MUST treat these as unbookable, same as existing appointments.
+        var { data: blockedRows } = await supabaseAdmin
+          .from('blocked_times')
+          .select('start_time, end_time, note')
+          .eq('groomer_id', groomerId)
+          .eq('block_date', toolInput.date)
+          .order('start_time', { ascending: true })
+
         // ─── Per-day business hours (the source of truth) ───
         // Look up the weekday for this date and return ONLY that day's hours.
         var dayKeyAvail = getWeekdayKey(toolInput.date)
@@ -1324,6 +1390,9 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
 
         var bookedSlots = (availDayAppts || []).map(function (a: any) {
           return { start: a.start_time, end: a.end_time }
+        })
+        var blockedSlots = (blockedRows || []).map(function (b: any) {
+          return { start: b.start_time, end: b.end_time, note: b.note || 'blocked' }
         })
 
         if (!dayHrs.is_open) {
@@ -1333,6 +1402,7 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
             weekday: dayKeyAvail,
             is_open: false,
             booked_slots: [],
+            blocked_slots: [],
             note: 'CLOSED on ' + dayKeyAvail + 's. Refuse any booking on this date and offer the next open day.',
           }
         }
@@ -1346,7 +1416,9 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           shop_close: dayHrs.close,
           booked_slots: bookedSlots,
           booked_count: bookedSlots.length,
-          note: 'Open ' + dayHrs.open + ' to ' + dayHrs.close + ' on ' + dayKeyAvail + 's. These are the time ranges ALREADY BOOKED — any time that does NOT overlap is available, AS LONG AS it falls within open hours. Do NOT suggest times before ' + dayHrs.open + ' or after ' + dayHrs.close + '.',
+          blocked_slots: blockedSlots,
+          blocked_count: blockedSlots.length,
+          note: 'Open ' + dayHrs.open + ' to ' + dayHrs.close + ' on ' + dayKeyAvail + 's. UNBOOKABLE TIME RANGES: (a) booked_slots — appointments already on the calendar, (b) blocked_slots — groomer blocked these off for lunch/personal/closed time. NEVER offer a time that overlaps EITHER list. Only suggest times within open hours that overlap NEITHER booked_slots NOR blocked_slots.',
         }
       }
 
