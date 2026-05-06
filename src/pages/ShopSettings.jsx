@@ -34,6 +34,49 @@ export default function ShopSettings() {
   var isPlatformOwner = userEmail && PLATFORM_OWNER_EMAILS.indexOf(userEmail.toLowerCase()) >= 0
   var canSeeStripeConnect = STRIPE_CONNECT_LIVE || isPlatformOwner
 
+  // ─── Test SMS state ───
+  // Lets the groomer fire a one-off SMS to verify Twilio + quota wiring works.
+  var [testSmsTo, setTestSmsTo] = useState('')
+  var [testSmsBody, setTestSmsBody] = useState("Test from PetPro 🦦 — your SMS setup is working!")
+  var [testSmsSending, setTestSmsSending] = useState(false)
+  var [testSmsResult, setTestSmsResult] = useState(null)  // { ok, text } | null
+
+  async function sendTestSMS() {
+    setTestSmsResult(null)
+    if (!testSmsTo || !testSmsTo.trim()) {
+      setTestSmsResult({ ok: false, text: 'Enter a phone number to test.' })
+      return
+    }
+    setTestSmsSending(true)
+    try {
+      var { data: { user } } = await supabase.auth.getUser()
+      if (!user) { setTestSmsResult({ ok: false, text: 'You must be signed in.' }); setTestSmsSending(false); return }
+
+      var { data, error } = await supabase.functions.invoke('send-sms', {
+        body: {
+          to: testSmsTo.trim(),
+          message: testSmsBody.trim() || 'Test from PetPro',
+          groomer_id: user.id,
+          sms_type: 'test',
+        },
+      })
+      if (error) {
+        setTestSmsResult({ ok: false, text: 'Send failed: ' + error.message })
+      } else if (data && data.success) {
+        var bal = data.source === 'founder_unlimited'
+          ? '(unlimited — founder)'
+          : '(' + data.remaining + ' left this month)'
+        setTestSmsResult({ ok: true, text: '✅ Sent! Check your phone in 5-30 sec. ' + bal + ' Message SID: ' + data.sid })
+      } else {
+        setTestSmsResult({ ok: false, text: (data && data.error) || 'Unknown error' })
+      }
+    } catch (e) {
+      setTestSmsResult({ ok: false, text: 'Send failed: ' + (e.message || 'unknown error') })
+    } finally {
+      setTestSmsSending(false)
+    }
+  }
+
   // Form fields
   var [shopName, setShopName] = useState('')
   var [tagline, setTagline] = useState('')
@@ -649,6 +692,73 @@ export default function ShopSettings() {
         }}>
           ✅ Currently sending waitlist offers from <strong>{waitlistQuietStartHour === 0 ? '12 AM' : waitlistQuietStartHour < 12 ? `${waitlistQuietStartHour} AM` : waitlistQuietStartHour === 12 ? '12 PM' : `${waitlistQuietStartHour - 12} PM`}</strong> to <strong>{waitlistQuietEndHour === 0 ? '12 AM' : waitlistQuietEndHour < 12 ? `${waitlistQuietEndHour} AM` : waitlistQuietEndHour === 12 ? '12 PM' : `${waitlistQuietEndHour - 12} PM`}</strong> ({waitlistTimezone.split('/').pop().replace('_', ' ')} time). Click <strong>Save Settings</strong> below to apply changes.
         </div>
+      </div>
+
+      {/* ─── Test SMS — verify Twilio + quota wiring works ─── */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+          <span style={{ fontSize: '22px' }}>📱</span>
+          <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#1f2937' }}>Test SMS</h2>
+        </div>
+        <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#6b7280', lineHeight: 1.5 }}>
+          Send a test SMS to verify Twilio is wired up correctly. This counts against your monthly SMS quota (or is free if you're on the founders plan).
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+              Send to phone number
+            </label>
+            <input
+              type="tel"
+              value={testSmsTo}
+              onChange={(e) => setTestSmsTo(e.target.value)}
+              placeholder="281-555-1234 or +12815551234"
+              style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }}
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+              Message
+            </label>
+            <input
+              type="text"
+              value={testSmsBody}
+              onChange={(e) => setTestSmsBody(e.target.value)}
+              placeholder="Test message"
+              style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }}
+            />
+          </div>
+        </div>
+        <button
+          onClick={sendTestSMS}
+          disabled={testSmsSending}
+          style={{
+            background: testSmsSending ? '#9ca3af' : '#7c3aed',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '8px',
+            padding: '10px 20px',
+            fontSize: '14px',
+            fontWeight: 600,
+            cursor: testSmsSending ? 'wait' : 'pointer',
+          }}
+        >
+          {testSmsSending ? 'Sending…' : '📤 Send Test SMS'}
+        </button>
+        {testSmsResult && (
+          <div style={{
+            marginTop: '12px',
+            padding: '10px 14px',
+            background: testSmsResult.ok ? '#ecfdf5' : '#fef2f2',
+            border: '1px solid ' + (testSmsResult.ok ? '#a7f3d0' : '#fecaca'),
+            borderRadius: '8px',
+            fontSize: '13px',
+            color: testSmsResult.ok ? '#065f46' : '#991b1b',
+            lineHeight: 1.5,
+          }}>
+            {testSmsResult.text}
+          </div>
+        )}
       </div>
 
       {/* AI Usage widget — shows used / cap for current month */}
