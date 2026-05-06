@@ -93,6 +93,8 @@ serve(async (req) => {
 
     if (clientHits.length === 0) {
       console.warn(`[sms-inbound] No client matches phone ${fromPhone}`)
+      // Still log the inbound for the inbox (no client_id match — orphan message)
+      await logInboundMessage(supabase, null, null, fromPhone, bodyRaw, messageSid, "inbound_unmatched")
       return twimlResponse("Hi! We didn't recognize this number. Please reply to your groomer directly to update your appointment.")
     }
 
@@ -133,6 +135,21 @@ serve(async (req) => {
       petName = appt.pets.name
     }
 
+    // ─── 3.5. Log the inbound message to the inbox ───
+    // Use the first client hit to attribute (groomer + client_id).
+    // If multiple matches across shops, this picks one — could be smarter later.
+    const primaryClient = clientHits[0]
+    const inboundType = isYes ? "inbound_yes" : "inbound_no"
+    await logInboundMessage(
+      supabase,
+      primaryClient.groomer_id,
+      primaryClient.id,
+      fromPhone,
+      bodyRaw,
+      messageSid,
+      inboundType
+    )
+
     // ─── 4. Apply the action ───
     if (isYes) {
       const { error: confirmErr } = await supabase
@@ -166,6 +183,40 @@ serve(async (req) => {
 })
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// Log an inbound SMS to the sms_messages table so the inbox UI can show it.
+// Best-effort — never throws. Uses the env's TWILIO_PHONE_NUMBER as the to_phone.
+async function logInboundMessage(
+  supabase: any,
+  groomerId: string | null,
+  clientId: string | null,
+  fromPhone: string,
+  body: string,
+  twilioSid: string,
+  smsType: string
+) {
+  try {
+    if (!groomerId) {
+      // If no groomer match, we can't log it (groomer_id is NOT NULL).
+      // Still write to console for debugging.
+      console.log(`[sms-inbound] Unmatched inbound from ${fromPhone}: ${body}`)
+      return
+    }
+    await supabase.from("sms_messages").insert({
+      groomer_id: groomerId,
+      client_id: clientId,
+      direction: "inbound",
+      from_phone: fromPhone,
+      to_phone: Deno.env.get("TWILIO_PHONE_NUMBER") || "",
+      body: body,
+      twilio_sid: twilioSid,
+      sms_type: smsType,
+      is_read: false,   // groomer hasn't seen it yet
+    })
+  } catch (logErr) {
+    console.error("[sms-inbound] sms_messages log failed (non-fatal):", logErr)
+  }
+}
 
 function normalizePhone(raw: string): string {
   let p = raw.replace(/[^\d+]/g, "")

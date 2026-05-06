@@ -3,10 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import MessageBubble from '../components/MessageBubble'
 import MessageComposer from '../components/MessageComposer'
+import SMSInboxView from '../components/SMSInboxView'
 import { notifyUser } from '../lib/push'
 
 export default function Messages() {
   var navigate = useNavigate()
+  // Tab switcher: 'inapp' = existing client portal threads, 'sms' = Twilio SMS inbox
+  var [activeTab, setActiveTab] = useState('inapp')
   var [user, setUser] = useState(null)
   var [threads, setThreads] = useState([]) // each: { id, groomer_id, client_id, subject, last_message_at, client_name, last_preview, last_sender, unread_count }
   var [selectedThreadId, setSelectedThreadId] = useState(null)
@@ -642,6 +645,48 @@ export default function Messages() {
   if (loading) return <div style={{ padding: '20px' }}>Loading messages...</div>
 
   return (
+    <div style={{ padding: '16px', maxWidth: '1400px', margin: '0 auto' }}>
+      {/* ─── Tab switcher: In-App vs SMS ─── */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '12px', borderBottom: '2px solid #e5e7eb' }}>
+        <button
+          onClick={function () { setActiveTab('inapp') }}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'inapp' ? '3px solid #7c3aed' : '3px solid transparent',
+            padding: '10px 20px',
+            fontSize: '14px',
+            fontWeight: 700,
+            color: activeTab === 'inapp' ? '#7c3aed' : '#6b7280',
+            cursor: 'pointer',
+            marginBottom: '-2px',
+          }}
+        >
+          💬 In-App Messages
+        </button>
+        <button
+          onClick={function () { setActiveTab('sms') }}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'sms' ? '3px solid #7c3aed' : '3px solid transparent',
+            padding: '10px 20px',
+            fontSize: '14px',
+            fontWeight: 700,
+            color: activeTab === 'sms' ? '#7c3aed' : '#6b7280',
+            cursor: 'pointer',
+            marginBottom: '-2px',
+          }}
+        >
+          📱 SMS Inbox
+        </button>
+      </div>
+
+      {/* ─── SMS tab — renders the SMS inbox ─── */}
+      {activeTab === 'sms' && <SMSInboxView />}
+
+      {/* ─── In-App tab — original Messages UI (unchanged) ─── */}
+      {activeTab === 'inapp' && (
     <div style={pageStyle}>
       {/* LEFT: Thread list */}
       <div style={leftColStyle}>
@@ -871,6 +916,8 @@ export default function Messages() {
             </div>
           </div>
         </div>
+      )}
+    </div>
       )}
     </div>
   )
