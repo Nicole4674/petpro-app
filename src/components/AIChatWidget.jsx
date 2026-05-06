@@ -108,9 +108,11 @@ export default function AIChatWidget() {
   // to its PNG if no Lottie file exists yet (so we can ship animations one at
   // a time, no big-bang). To turn one ON, just add the file at the listed path
   // — no code change needed (the SudsAnimator detects + uses it automatically).
+  // Each path can end in .lottie (compressed dotLottie) OR .json (raw Lottie)
+  // — DotLottieReact loads both. Pick whatever format your downloaded file is.
   const LOTTIE_POSES = {
     idle:      '/lottie/suds-idle.lottie',
-    waving:    '/lottie/suds-waving.lottie',
+    waving:    '/lottie/suds-waving.json',
     thinking:  '/lottie/suds-thinking.lottie',
     celebrate: '/lottie/suds-celebrate.lottie',
     sleeping:  '/lottie/suds-sleeping.lottie',
