@@ -110,16 +110,19 @@ export default function AIChatWidget() {
   // — no code change needed (the SudsAnimator detects + uses it automatically).
   // Each path can end in .lottie (compressed dotLottie) OR .json (raw Lottie)
   // — DotLottieReact loads both. Pick whatever format your downloaded file is.
-  // Currently all set to .lottie paths that DON'T exist yet — Suds falls back
-  // to his original PNG poses. When custom otter Lottie animations are made
-  // (later, after launch), drop them in /public/lottie/ matching these names.
+  //
+  // CURRENTLY ALL DISABLED (set to null) — Suds renders as his original PNG
+  // poses. The SudsAnimator component is wired up and ready, so when custom
+  // otter Lottie animations are commissioned (post-launch), just swap the
+  // null below for the file path like '/lottie/suds-idle.lottie' and that
+  // pose smoothly upgrades. No other code changes needed.
   const LOTTIE_POSES = {
-    idle:      '/lottie/suds-idle.lottie',
-    waving:    '/lottie/suds-waving.lottie',
-    thinking:  '/lottie/suds-thinking.lottie',
-    celebrate: '/lottie/suds-celebrate.lottie',
-    sleeping:  '/lottie/suds-sleeping.lottie',
-    talking:   '/lottie/suds-talking.lottie',
+    idle:      null,  // future: '/lottie/suds-idle.lottie'
+    waving:    null,  // future: '/lottie/suds-waving.lottie'
+    thinking:  null,  // future: '/lottie/suds-thinking.lottie'
+    celebrate: null,  // future: '/lottie/suds-celebrate.lottie'
+    sleeping:  null,  // future: '/lottie/suds-sleeping.lottie'
+    talking:   null,  // future: '/lottie/suds-talking.lottie'
   }
   // The mood is auto-derived from app state (sending, sudsTalking, time of day).
   // Other pages can fire window.dispatchEvent(new CustomEvent('petpro:celebrate',
