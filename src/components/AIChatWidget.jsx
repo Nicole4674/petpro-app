@@ -3,6 +3,62 @@ import { supabase } from '../lib/supabase'
 import { checkAICap, logAIUsage } from '../lib/aiUsage'
 import { fetchUnreadInsights, markInsightsRead, dismissInsight, actionInsight } from '../lib/insights'
 import { useNavigate } from 'react-router-dom'
+import { DotLottieReact } from '@lottiefiles/dotlottie-react'
+
+// ════════════ SUDS ANIMATOR — Lottie with PNG fallback ════════════
+// Tries to load a .lottie animation from the configured path. If the file
+// doesn't exist (404), gracefully falls back to the PNG so we can ship one
+// pose-at-a-time as Lottie files become available.
+//
+// Props:
+//   pose         — pose key ('idle' | 'waving' | 'thinking' | 'celebrate' | 'sleeping' | 'talking')
+//   lottieSrc    — path to the .lottie file (or null to skip Lottie entirely)
+//   pngSrc       — fallback PNG path (always required)
+//   size         — width in px (height auto)
+//   cssAnim      — optional CSS animation string for the PNG fallback
+//   alt          — accessibility text
+//   className    — passthrough class
+function SudsAnimator({ pose, lottieSrc, pngSrc, size, cssAnim, alt, className }) {
+  // Track whether the Lottie file exists. We start by trying the Lottie,
+  // and fall back to PNG if it errors out (404, malformed file, etc).
+  const [lottieFailed, setLottieFailed] = useState(false)
+  // Reset failure tracking when the source changes (so a new pose can re-try)
+  useEffect(function () { setLottieFailed(false) }, [lottieSrc])
+
+  var useLottie = !!lottieSrc && !lottieFailed
+  if (useLottie) {
+    return (
+      <DotLottieReact
+        src={lottieSrc}
+        loop
+        autoplay
+        onError={function () { setLottieFailed(true) }}
+        style={{
+          width: (size || 130) + 'px',
+          height: 'auto',
+          display: 'block',
+          pointerEvents: 'none',
+        }}
+      />
+    )
+  }
+  // PNG fallback — keep the existing CSS keyframe animations
+  return (
+    <img
+      src={pngSrc}
+      alt={alt || 'Suds the otter'}
+      className={className || 'suds-img'}
+      draggable={false}
+      style={{
+        width: (size || 130) + 'px',
+        height: 'auto',
+        display: 'block',
+        animation: cssAnim || 'sudsBreathe 3.5s ease-in-out infinite',
+        pointerEvents: 'none',
+      }}
+    />
+  )
+}
 
 export default function AIChatWidget() {
   const [isOpen, setIsOpen] = useState(false)
@@ -37,13 +93,29 @@ export default function AIChatWidget() {
   const audioRef = useRef(null)
 
   // ════════════ SUDS MOOD ENGINE — pose + animation per context ════════════
-  // Suds has 5 poses, each lives in /public/:
+  // Suds has 6 poses, each can be either a static PNG or a Lottie animation.
+  // Static PNGs live in /public/:
   //   idle      → /suds.png            (default — neutral, polo + hat)
   //   waving    → /suds-waving.png     (paw raised — greetings + first open)
   //   thinking  → /suds-thinking.png   (paper + pen — AI is processing/booking)
   //   celebrate → /suds-celebrate.png  (arms up — milestone wins)
   //   sleeping  → /suds-sleeping.png   (Zzz — after-hours when chat closed)
+  //   talking   → (uses idle pose if no talking PNG)  (mouth-moving while TTS)
   //
+  // ─── LOTTIE UPGRADE ───
+  // Drop a .lottie file in /public/lottie/ matching the path below to upgrade
+  // that pose from static PNG → smooth Lottie animation. Each pose falls back
+  // to its PNG if no Lottie file exists yet (so we can ship animations one at
+  // a time, no big-bang). To turn one ON, just add the file at the listed path
+  // — no code change needed (the SudsAnimator detects + uses it automatically).
+  const LOTTIE_POSES = {
+    idle:      '/lottie/suds-idle.lottie',
+    waving:    '/lottie/suds-waving.lottie',
+    thinking:  '/lottie/suds-thinking.lottie',
+    celebrate: '/lottie/suds-celebrate.lottie',
+    sleeping:  '/lottie/suds-sleeping.lottie',
+    talking:   '/lottie/suds-talking.lottie',
+  }
   // The mood is auto-derived from app state (sending, sudsTalking, time of day).
   // Other pages can fire window.dispatchEvent(new CustomEvent('petpro:celebrate',
   // { detail: { message: 'Way to go!' } })) to make Suds jump + cheer.
@@ -63,12 +135,14 @@ export default function AIChatWidget() {
 
   // Derived pose — chosen each render based on what's happening right now.
   // Priority (highest first):
-  //   1. sending  → thinking (AI is working)
-  //   2. mood is 'celebrate' or 'waving' (transient flash) → use it
-  //   3. history closed AND no active speech bubble AND after-hours (8pm–6am) → sleeping
-  //   4. fallback → idle (default Suds)
+  //   1. sending      → thinking (AI is working)
+  //   2. sudsTalking  → talking (TTS is playing — mouth moving Lottie)
+  //   3. celebrate / waving (transient flash) → use it
+  //   4. history closed AND no active speech bubble AND after-hours (8pm–6am) → sleeping
+  //   5. fallback → idle (default Suds)
   function pickSudsPose() {
     if (sending) return 'thinking'
+    if (sudsTalking) return 'talking'
     if (sudsMood === 'celebrate') return 'celebrate'
     if (sudsMood === 'waving') return 'waving'
     if (!historyOpen && !bubble) {
@@ -83,6 +157,7 @@ export default function AIChatWidget() {
     if (pose === 'thinking') return '/suds-thinking.png'
     if (pose === 'celebrate') return '/suds-celebrate.png'
     if (pose === 'sleeping') return '/suds-sleeping.png'
+    if (pose === 'talking') return '/suds.png'  // falls back to idle PNG until talking Lottie added
     return '/suds.png'
   }
 
@@ -995,11 +1070,13 @@ export default function AIChatWidget() {
               {(() => {
                 var headerPose = pickSudsPose()
                 return (
-                  <img
-                    src={sudsImageFor(headerPose)}
+                  <SudsAnimator
+                    pose={headerPose}
+                    lottieSrc={LOTTIE_POSES[headerPose]}
+                    pngSrc={sudsImageFor(headerPose)}
+                    size={32}
                     alt="Suds"
                     className={(sudsTalking || headerPose === 'celebrate') ? 'suds-celebrate' : ''}
-                    style={{ width: '32px', height: '32px', objectFit: 'contain', flexShrink: 0 }}
                   />
                 )
               })()}
@@ -1434,18 +1511,14 @@ export default function AIChatWidget() {
           if (pose === 'celebrate') anim = 'sudsCelebrate 1.2s ease-in-out infinite'
           if (pose === 'waving') anim = 'sudsWave 1.4s ease-in-out infinite'
           return (
-            <img
-              src={sudsImageFor(pose)}
+            <SudsAnimator
+              pose={pose}
+              lottieSrc={LOTTIE_POSES[pose]}
+              pngSrc={sudsImageFor(pose)}
+              size={130}
+              cssAnim={anim}
               alt="Suds the otter"
               className="suds-img"
-              draggable={false}
-              style={{
-                width: '130px',
-                height: 'auto',
-                display: 'block',
-                animation: anim,
-                pointerEvents: 'none',
-              }}
             />
           )
         })()}
