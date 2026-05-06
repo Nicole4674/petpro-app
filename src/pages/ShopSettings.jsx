@@ -11,6 +11,7 @@ import AIUsageWidget from '../components/AIUsageWidget'
 import SMSBalanceWidget from '../components/SMSBalanceWidget'
 import { formatPhoneOnInput } from '../lib/phone'
 import AddressInput from '../components/AddressInput'
+import { DEFAULT_SMS_TEMPLATES, SMS_TEMPLATE_LABELS } from '../lib/smsTemplates'
 
 export default function ShopSettings() {
   var navigate = useNavigate()
@@ -122,6 +123,12 @@ export default function ShopSettings() {
     sunday:    { is_open: false, open: null,    close: null    },
   }
   var [businessHours, setBusinessHours] = useState(DEFAULT_BUSINESS_HOURS)
+
+  // ─── SMS template wording — per-shop customization ───
+  // Each template is a string with {placeholder} tokens. Default copies live
+  // in src/lib/smsTemplates.js so the cron / send-sms helper can read them
+  // when a shop hasn't customized.
+  var [smsTemplates, setSmsTemplates] = useState(DEFAULT_SMS_TEMPLATES)
 
   // Waitlist auto-notify quiet hours — per-shop config so shops in different
   // timezones don't text clients at 6 AM their time. Defaults match the old
@@ -294,6 +301,10 @@ export default function ShopSettings() {
           // Merge with defaults to handle new days added in future versions
           setBusinessHours({ ...DEFAULT_BUSINESS_HOURS, ...data.business_hours })
         }
+        // SMS templates — merge with defaults so newly-added templates always exist
+        if (data.sms_templates && typeof data.sms_templates === 'object') {
+          setSmsTemplates({ ...DEFAULT_SMS_TEMPLATES, ...data.sms_templates })
+        }
       }
 
       // Smart Nudges + Stripe Connect status — both live on the groomers
@@ -432,6 +443,8 @@ export default function ShopSettings() {
         sms_notify_enabled: smsNotifyEnabled,
         // Business hours (per-day) — used by Suds AI to validate bookings
         business_hours: businessHours,
+        // Customizable SMS template wording (per shop)
+        sms_templates: smsTemplates,
       }
 
       var { error: upsertError } = await supabase
@@ -834,6 +847,124 @@ export default function ShopSettings() {
             </div>
           </>
         )}
+      </div>
+
+      {/* ─── Customizable SMS Templates ─── */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+          <span style={{ fontSize: '22px' }}>✏️</span>
+          <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#1f2937' }}>SMS Templates</h2>
+        </div>
+        <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#6b7280', lineHeight: 1.5 }}>
+          Customize the wording of every SMS PetPro sends on your behalf. Use these placeholders and they get filled in automatically:
+        </p>
+        <div style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '6px',
+          marginBottom: '16px',
+          padding: '10px 12px',
+          background: '#f9fafb',
+          border: '1px solid #e5e7eb',
+          borderRadius: '8px',
+          fontSize: '12px',
+          fontFamily: 'monospace',
+          color: '#4b5563',
+        }}>
+          {[
+            '{client_first_name}',
+            '{client_last_name}',
+            '{pet_name}',
+            '{service_name}',
+            '{date}',
+            '{time}',
+            '{shop_name}',
+            '{phone}',
+            '{minutes}',
+          ].map(function (ph) {
+            return (
+              <span
+                key={ph}
+                style={{
+                  background: '#fff',
+                  border: '1px solid #d1d5db',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                }}
+              >
+                {ph}
+              </span>
+            )
+          })}
+        </div>
+
+        {Object.keys(SMS_TEMPLATE_LABELS).map(function (key) {
+          var label = SMS_TEMPLATE_LABELS[key]
+          var value = smsTemplates[key] || ''
+          var isDefault = value === DEFAULT_SMS_TEMPLATES[key]
+          var charCount = value.length
+          return (
+            <div key={key} style={{ marginBottom: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 600, color: '#1f2937' }}>{label}</label>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <span style={{
+                    fontSize: '11px',
+                    color: charCount > 160 ? '#dc2626' : '#9ca3af',
+                    fontWeight: charCount > 160 ? 700 : 400,
+                  }}>
+                    {charCount} chars{charCount > 160 ? ' (over 1 SMS)' : ''}
+                  </span>
+                  {!isDefault && (
+                    <button
+                      type="button"
+                      onClick={() => setSmsTemplates({ ...smsTemplates, [key]: DEFAULT_SMS_TEMPLATES[key] })}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid #d1d5db',
+                        color: '#6b7280',
+                        borderRadius: '4px',
+                        padding: '2px 8px',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Reset to default
+                    </button>
+                  )}
+                </div>
+              </div>
+              <textarea
+                value={value}
+                onChange={(e) => setSmsTemplates({ ...smsTemplates, [key]: e.target.value })}
+                rows={2}
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontFamily: 'inherit',
+                  lineHeight: 1.45,
+                  resize: 'vertical',
+                  minHeight: '54px',
+                }}
+              />
+            </div>
+          )
+        })}
+
+        <div style={{
+          padding: '10px 12px',
+          background: '#fffbeb',
+          border: '1px solid #fde68a',
+          borderRadius: '6px',
+          fontSize: '12px',
+          color: '#92400e',
+          lineHeight: 1.5,
+        }}>
+          💡 <strong>Tip:</strong> SMS messages over 160 characters get split into multiple parts and count as multiple sends from your quota. Try to keep each one short.
+        </div>
       </div>
 
       {/* ─── Client Action Alerts — notify groomer when client self-books / reschedules ─── */}

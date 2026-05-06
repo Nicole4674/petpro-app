@@ -130,6 +130,54 @@ export default function SMSInboxView() {
       .eq('is_read', false)
   }
 
+  // ─── Delete a single message from the inbox (hard delete) ───
+  // Doesn't affect the actual SMS that was sent — only removes the audit row.
+  async function deleteMessage(msgId) {
+    if (!msgId) return
+    var ok = window.confirm('Delete this message from your inbox?\n\nThis only removes it from your view — the original text was already sent.')
+    if (!ok) return
+    var { error } = await supabase
+      .from('sms_messages')
+      .delete()
+      .eq('id', msgId)
+      .eq('groomer_id', user.id)
+    if (error) {
+      window.alert('Could not delete: ' + error.message)
+      return
+    }
+    // Optimistically remove from local thread + refresh conversations (last-message preview may change)
+    setThread(function (prev) { return prev.filter(function (m) { return m.id !== msgId }) })
+    if (user) await loadConversations(user.id)
+  }
+
+  // ─── Delete the entire conversation thread ───
+  async function deleteConversation() {
+    if (!selectedClientId || !user) return
+    var conv = conversations.find(function (c) { return (c.client_id || c.key) === selectedClientId })
+    var clientName = conv ? conv.client_name : 'this client'
+    var ok = window.confirm('Delete the ENTIRE conversation with ' + clientName + '?\n\nThis removes every message in this thread from your inbox. The original texts are unaffected.\n\nThis cannot be undone.')
+    if (!ok) return
+
+    var query = supabase.from('sms_messages').delete().eq('groomer_id', user.id)
+    // If this is a real client thread, filter by client_id; otherwise match by phone (orphan inbounds)
+    if (conv && conv.client_id) {
+      query = query.eq('client_id', conv.client_id)
+    } else if (conv && conv.client_phone) {
+      query = query.or('from_phone.eq.' + conv.client_phone + ',to_phone.eq.' + conv.client_phone)
+    } else {
+      window.alert('Could not delete — missing client info.')
+      return
+    }
+    var { error } = await query
+    if (error) {
+      window.alert('Could not delete conversation: ' + error.message)
+      return
+    }
+    setThread([])
+    setSelectedClientId(null)
+    await loadConversations(user.id)
+  }
+
   async function sendReply() {
     if (!replyDraft.trim()) return
     var conv = conversations.find(function (c) { return c.key === ('phone:' + selectedClientId) || c.client_id === selectedClientId })
@@ -231,16 +279,33 @@ export default function SMSInboxView() {
         ) : (
           <>
             {/* Thread header */}
-            <div style={{ padding: '14px 20px', borderBottom: '1px solid #e5e7eb', background: '#fafafa' }}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid #e5e7eb', background: '#fafafa', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
               {(function () {
                 var conv = conversations.find(function (c) { return (c.client_id || c.key) === selectedClientId })
                 return conv ? (
-                  <>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: '15px', color: '#1f2937' }}>{conv.client_name}</div>
                     <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>{formatPhone(conv.client_phone)}</div>
-                  </>
-                ) : null
+                  </div>
+                ) : <div style={{ flex: 1 }} />
               })()}
+              <button
+                onClick={deleteConversation}
+                title="Delete entire conversation"
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #fecaca',
+                  color: '#991b1b',
+                  borderRadius: '6px',
+                  padding: '6px 10px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                🗑️ Delete thread
+              </button>
             </div>
 
             {/* Messages */}
@@ -248,11 +313,40 @@ export default function SMSInboxView() {
               {thread.map(function (msg) {
                 var isOut = msg.direction === 'outbound'
                 return (
-                  <div key={msg.id} style={{
-                    display: 'flex',
-                    justifyContent: isOut ? 'flex-end' : 'flex-start',
-                    marginBottom: '12px',
-                  }}>
+                  <div
+                    key={msg.id}
+                    className="sms-msg-row"
+                    style={{
+                      display: 'flex',
+                      justifyContent: isOut ? 'flex-end' : 'flex-start',
+                      alignItems: 'center',
+                      gap: '6px',
+                      marginBottom: '12px',
+                    }}
+                  >
+                    {/* Per-message delete button — left side for outbound, right side for inbound */}
+                    {isOut && (
+                      <button
+                        className="sms-msg-delete-btn"
+                        onClick={function () { deleteMessage(msg.id) }}
+                        title="Delete this message"
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#9ca3af',
+                          cursor: 'pointer',
+                          fontSize: '14px',
+                          padding: '4px 6px',
+                          borderRadius: '4px',
+                          opacity: 0.4,
+                          transition: 'opacity 0.15s',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.color = '#dc2626' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.4'; e.currentTarget.style.color = '#9ca3af' }}
+                      >
+                        ✕
+                      </button>
+                    )}
                     <div style={{
                       maxWidth: '70%',
                       background: isOut ? '#7c3aed' : '#f3f4f6',
@@ -275,6 +369,28 @@ export default function SMSInboxView() {
                         {new Date(msg.created_at).toLocaleString()}
                       </div>
                     </div>
+                    {!isOut && (
+                      <button
+                        className="sms-msg-delete-btn"
+                        onClick={function () { deleteMessage(msg.id) }}
+                        title="Delete this message"
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#9ca3af',
+                          cursor: 'pointer',
+                          fontSize: '14px',
+                          padding: '4px 6px',
+                          borderRadius: '4px',
+                          opacity: 0.4,
+                          transition: 'opacity 0.15s',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.color = '#dc2626' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.4'; e.currentTarget.style.color = '#9ca3af' }}
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
                 )
               })}

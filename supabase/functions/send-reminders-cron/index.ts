@@ -61,9 +61,10 @@ serve(async (req) => {
     })
 
     // ─── 1. Pull all shops with reminders enabled ───
+    // sms_templates included so each shop can customize the reminder wording
     const { data: shops, error: shopsErr } = await supabase
       .from("shop_settings")
-      .select("groomer_id, shop_name, waitlist_timezone, reminder_enabled, reminder_send_hour_local, reminder_lead_days")
+      .select("groomer_id, shop_name, phone, waitlist_timezone, reminder_enabled, reminder_send_hour_local, reminder_lead_days, sms_templates")
       .eq("reminder_enabled", true)
 
     if (shopsErr) {
@@ -123,14 +124,33 @@ serve(async (req) => {
         if (!client || !client.phone) continue
         if (client.sms_consent !== true) continue
 
-        // Build the reminder text
+        // Build the reminder text using the shop's customizable template
         const clientFirst = client.first_name || "there"
+        const clientLast = client.last_name || ""
         const petName = pickPetName(appt) || "your pet"
         const timeStr = formatTime(appt.start_time)
+        const dateStr = formatDateLong(appt.appointment_date)
         const shopName = shop.shop_name || "your groomer"
-        const message =
-          `Hi ${clientFirst}! Reminder — ${petName}'s grooming appointment is tomorrow at ` +
-          `${timeStr}. Please reply Y to confirm or N to cancel. — ${shopName}`
+        const shopPhone = shop.phone || ""
+
+        // Default template (fallback if shop hasn't customized)
+        const DEFAULT_REMINDER =
+          "Hi {client_first_name}! Reminder: {pet_name} is booked for {service_name} on {date} at {time}. Reply Y to confirm or N to cancel. — {shop_name}"
+        const tpl = (shop.sms_templates && shop.sms_templates.reminder) || DEFAULT_REMINDER
+
+        const message = tpl.replace(/\{(\w+)\}/g, (_: string, k: string) => {
+          const vars: Record<string, string> = {
+            client_first_name: clientFirst,
+            client_last_name: clientLast,
+            pet_name: petName,
+            service_name: "grooming appointment",   // generic — services are per-pet
+            date: dateStr,
+            time: timeStr,
+            shop_name: shopName,
+            phone: shopPhone,
+          }
+          return vars[k] !== undefined ? vars[k] : ""
+        })
 
         // Call send-sms (counts against shop's quota, founders unlimited)
         try {
@@ -245,6 +265,13 @@ function formatTime(timeStr: string): string {
   if (h === 0) h = 12
   else if (h > 12) h -= 12
   return m === "00" ? `${h} ${ampm}` : `${h}:${m} ${ampm}`
+}
+
+function formatDateLong(ymd: string): string {
+  // "2026-05-09" → "Saturday, May 9"
+  if (!ymd) return ""
+  const d = new Date(ymd + "T12:00:00")
+  return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })
 }
 
 function jsonOk(payload: any, status = 200): Response {

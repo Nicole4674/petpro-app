@@ -207,12 +207,42 @@ export default function Calendar() {
     const [quickTextDraft, setQuickTextDraft] = useState(null)  // { type, body } | null
     const [quickTextSending, setQuickTextSending] = useState(false)
     const [quickTextResult, setQuickTextResult] = useState(null)  // { ok, text } | null
+    // Per-shop customizable SMS templates + shop name (loaded once on mount)
+    const [smsTemplates, setSmsTemplates] = useState({
+        confirmation: "Hi {client_first_name}! Confirming {pet_name}'s {service_name} on {date} at {time}. See you then! 🐾 — {shop_name}",
+        reminder: "Hi {client_first_name}! Reminder: {pet_name} is booked for {service_name} on {date} at {time}. Reply Y to confirm or N to cancel. — {shop_name}",
+        pickup_ready: "Hi {client_first_name}! {pet_name} is all done and ready for pickup. 🐾 — {shop_name}",
+    })
+    const [shopName, setShopName] = useState('')
+
+    // Load per-shop SMS templates + shop name once on mount
+    useEffect(function () {
+        async function loadShopSmsConfig() {
+            var { data: { user } } = await supabase.auth.getUser()
+            if (!user) return
+            var { data: shop } = await supabase
+                .from('shop_settings')
+                .select('shop_name, sms_templates')
+                .eq('user_id', user.id)
+                .maybeSingle()
+            if (shop) {
+                if (shop.shop_name) setShopName(shop.shop_name)
+                if (shop.sms_templates && typeof shop.sms_templates === 'object') {
+                    setSmsTemplates(function (prev) { return { ...prev, ...shop.sms_templates } })
+                }
+            }
+        }
+        loadShopSmsConfig()
+    }, [])
 
     // Build the prefilled message body for a given template type.
     // Uses simple personalization from selectedAppt — first pet name, client first name.
     function buildQuickText(templateType, appt) {
         if (!appt) return ''
+        if (templateType === 'custom') return ''
+
         var clientFirst = (appt.clients && appt.clients.first_name) || 'there'
+        var clientLast = (appt.clients && appt.clients.last_name) || ''
         // Pet name: prefer appointment_pets[0], fall back to legacy pets, fall back to "your pet"
         var petName = 'your pet'
         if (appt.appointment_pets && appt.appointment_pets.length > 0) {
@@ -221,23 +251,36 @@ export default function Calendar() {
         } else if (appt.pets && appt.pets.name) {
             petName = appt.pets.name
         }
-        // Format date/time nicely
+        // Service name (best-effort)
+        var serviceName = 'grooming appointment'
+        if (appt.appointment_pets && appt.appointment_pets.length > 0 && appt.appointment_pets[0].services) {
+            serviceName = appt.appointment_pets[0].services.service_name || serviceName
+        } else if (appt.services && appt.services.service_name) {
+            serviceName = appt.services.service_name
+        }
         var dateStr = appt.appointment_date || ''
         var timeStr = appt.start_time ? formatTime(appt.start_time) : ''
 
-        switch (templateType) {
-            case 'confirmation':
-                return 'Hi ' + clientFirst + '! Just confirming ' + petName + "'s appointment on " + dateStr +
-                       ' at ' + timeStr + '. See you then! 🐾'
-            case 'reminder':
-                return 'Hi ' + clientFirst + '! Friendly reminder — ' + petName + "'s grooming appointment is " +
-                       dateStr + ' at ' + timeStr + '. Please reply Y to confirm or N to cancel.'
-            case 'pickup':
-                return 'Hi ' + clientFirst + '! ' + petName + ' is all done and ready for pickup whenever you can swing by! 🐾'
-            case 'custom':
-            default:
-                return ''
-        }
+        // Map quick-text type → template key
+        var keyMap = { confirmation: 'confirmation', reminder: 'reminder', pickup: 'pickup_ready' }
+        var key = keyMap[templateType] || null
+        if (!key) return ''
+        var tpl = (smsTemplates && smsTemplates[key]) || ''
+        // Substitute placeholders
+        return tpl.replace(/\{(\w+)\}/g, function (_, k) {
+            var vars = {
+                client_first_name: clientFirst,
+                client_last_name: clientLast,
+                pet_name: petName,
+                service_name: serviceName,
+                date: dateStr,
+                time: timeStr,
+                shop_name: shopName || '',
+                phone: '',
+                minutes: '',
+            }
+            return vars[k] !== undefined ? vars[k] : ''
+        })
     }
 
     function openQuickText(templateType) {
