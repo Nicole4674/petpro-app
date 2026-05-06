@@ -140,11 +140,12 @@ export default function Waitlist() {
 
     setClients(clientData || [])
 
-    // Fetch pets
+    // Fetch pets (exclude archived/removed pets)
     var { data: petData } = await supabase
       .from('pets')
       .select('id, name, breed, client_id')
       .eq('groomer_id', user.id)
+      .or('is_archived.is.null,is_archived.eq.false')
 
     setPets(petData || [])
 

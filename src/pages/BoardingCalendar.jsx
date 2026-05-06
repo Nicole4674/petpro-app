@@ -269,11 +269,12 @@ export default function BoardingCalendar() {
         .eq('groomer_id', user.id)
         .order('first_name')
 
-      // Load pets for booking form
+      // Load pets for booking form (exclude archived/removed pets)
       const { data: petData } = await supabase
         .from('pets')
         .select('id, name, breed, weight, client_id')
         .eq('groomer_id', user.id)
+        .or('is_archived.is.null,is_archived.eq.false')
 
       setCategories(cats || [])
       setKennels(kens || [])

@@ -974,6 +974,7 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
           .from('pets')
           .select('client_id, name')
           .eq('groomer_id', groomerId)
+          .or('is_archived.is.null,is_archived.eq.false')
           .ilike('name', '%' + query + '%')
           .limit(10)
         if (fullPetMatch) {
@@ -992,6 +993,7 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
               .from('pets')
               .select('client_id, name')
               .eq('groomer_id', groomerId)
+              .or('is_archived.is.null,is_archived.eq.false')
               .ilike('name', '%' + pw + '%')
               .limit(10)
             if (wordPetMatch) {
@@ -1031,6 +1033,7 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
             .select('id, client_id, name, breed, weight, grooming_notes, special_notes, allergies, medications, dog_aggressive, people_aggressive, collapsed_trachea')
             .eq('groomer_id', groomerId)
             .in('client_id', clientIds)
+            .or('is_archived.is.null,is_archived.eq.false')
           pets = petData || []
         }
 
@@ -1063,6 +1066,7 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
           .select('*')
           .eq('client_id', toolInput.client_id)
           .eq('groomer_id', groomerId)
+          .or('is_archived.is.null,is_archived.eq.false')
 
         if (!clientInfo) return { success: false, error: 'Client not found' }
 

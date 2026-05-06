@@ -179,6 +179,7 @@ export default function Dashboard() {
       .from('pets')
       .select('id, name, breed, client_id')
       .eq('groomer_id', user.id)
+      .or('is_archived.is.null,is_archived.eq.false')
 
     setPets(petData || [])
 

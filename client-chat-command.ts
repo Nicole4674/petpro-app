@@ -592,11 +592,13 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         }
 
         // Verify pet belongs to this client (also pulls fields needed for rule check)
+        // Block booking attempts on archived/removed pets
         var { data: petCheck, error: petErr } = await supabaseAdmin
           .from('pets')
           .select('id, name, breed, weight, vaccination_expiry, dog_aggressive')
           .eq('id', toolInput.pet_id)
           .eq('client_id', clientId)
+          .or('is_archived.is.null,is_archived.eq.false')
           .maybeSingle()
         if (petErr) console.error('[BOOK] pet check error:', petErr.message)
         if (!petCheck) {
@@ -1247,11 +1249,12 @@ Deno.serve(async function(req) {
       })
     }
 
-    // --- Preload context ---
+    // --- Preload context (exclude archived/removed pets) ---
     var { data: myPets } = await supabaseAdmin
       .from('pets')
       .select('id, name, breed, weight, allergies, medications, vaccination_expiry, dog_aggressive')
       .eq('client_id', clientId)
+      .or('is_archived.is.null,is_archived.eq.false')
       .order('created_at', { ascending: true })
 
     var todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })

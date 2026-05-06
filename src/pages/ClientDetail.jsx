@@ -371,6 +371,7 @@ export default function ClientDetail() {
       .from('pets')
       .select('*')
       .eq('client_id', id)
+      .or('is_archived.is.null,is_archived.eq.false')
       .order('name')
 
     if (!petsError) setPets(petsData || [])

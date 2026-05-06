@@ -116,7 +116,7 @@ export default function Calendar() {
                 .lte('appointment_date', endDate)
                 .order('start_time'),
             supabase.from('clients').select('id, first_name, last_name').eq('groomer_id', user.id).order('last_name'),
-            supabase.from('pets').select('id, name, breed, client_id').eq('groomer_id', user.id).order('name'),
+            supabase.from('pets').select('id, name, breed, client_id').eq('groomer_id', user.id).or('is_archived.is.null,is_archived.eq.false').order('name'),
             supabase.from('services').select('id, service_name, price, time_block_minutes').eq('groomer_id', user.id).eq('is_active', true),
         ])
 
