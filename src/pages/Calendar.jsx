@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { checkBookingSafety } from '../lib/claude'
@@ -5557,9 +5557,41 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
     const nowMinute = today.getMinutes()
     const firstHour = HOURS[0]
     const lastHour = HOURS[HOURS.length - 1]
-    const showIndicator = nowHour >= firstHour && nowHour <= lastHour
-    const rowHeight = 120 // matches CSS min-height
-    const indicatorTop = showIndicator ? ((nowHour - firstHour) * rowHeight) + ((nowMinute / 60) * rowHeight) : 0
+    // Only show "now" line when viewing TODAY (otherwise it's misleading on
+    // a future or past day's calendar)
+    const viewingToday = isDayView
+        ? isSameDay(currentDate, today)
+        : dates.some(function (d) { return isSameDay(d, today) })
+    const showIndicator = viewingToday && nowHour >= firstHour && nowHour <= lastHour
+
+    // ─── Measure actual row height from the DOM ──────────────────────────────
+    // CSS uses min-height: 120px + 1.5px border-bottom — so the real row
+    // height is 121.5px, not 120. Using a hardcoded 120 caused the indicator
+    // to drift ~15 min behind by end of day. We measure a real row's height
+    // on mount + whenever the body resizes, so the indicator always lines up.
+    const bodyRef = useRef(null)
+    const [measuredRowHeight, setMeasuredRowHeight] = useState(121.5)
+    useEffect(function () {
+        function measure() {
+            if (!bodyRef.current) return
+            var firstRow = bodyRef.current.querySelector('.time-row')
+            if (firstRow) {
+                var h = firstRow.getBoundingClientRect().height
+                if (h > 0 && Math.abs(h - measuredRowHeight) > 0.1) {
+                    setMeasuredRowHeight(h)
+                }
+            }
+        }
+        measure()
+        // Re-measure on window resize (responsive layouts can change row heights)
+        window.addEventListener('resize', measure)
+        return function () { window.removeEventListener('resize', measure) }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [appointments, view, currentDate])
+
+    const indicatorTop = showIndicator
+        ? ((nowHour - firstHour) * measuredRowHeight) + ((nowMinute / 60) * measuredRowHeight)
+        : 0
 
     // Auto-update the indicator every minute
     const [, setTick] = useState(0)
@@ -5601,7 +5633,7 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
             </div>
 
             {/* Time Rows */}
-            <div className="time-grid-body">
+            <div className="time-grid-body" ref={bodyRef}>
                 {/* Red current-time indicator line */}
                 {showIndicator && (
                     <div className="time-indicator" style={{ top: `${indicatorTop}px` }} />

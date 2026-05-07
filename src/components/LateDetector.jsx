@@ -85,8 +85,9 @@ async function getDriveMinutes(origin, destLat, destLng) {
 export default function LateDetector({
   stops,
   enabled,
-  onSendHeadsUp,    // callback when groomer taps "Send heads-up email" — opens Phase 5B modal
-  onChange,         // callback that fires whenever lateState changes (parent uses for badges)
+  onSendHeadsUp,     // callback when groomer taps Email — opens Phase 5B modal
+  onSendHeadsUpSms,  // callback when groomer taps SMS — opens SMS modal (deducts from quota)
+  onChange,          // callback that fires whenever lateState changes (parent uses for badges)
 }) {
   // --- Google Maps SDK loader (cached across the app) ---
   const { isLoaded: mapsLoaded } = useLoadScript({
@@ -282,38 +283,57 @@ export default function LateDetector({
           </div>
         </div>
 
-        {/* Action buttons */}
-        <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+        {/* Action buttons — Email (compact) | SMS (compact) | Call */}
+        <div style={{ display: 'flex', gap: '6px', flexShrink: 0, flexWrap: 'wrap' }}>
           {stop.clientEmail && onSendHeadsUp && (
             <button
               onClick={() => onSendHeadsUp(stop)}
               style={{
-                padding: '8px 14px',
+                padding: '7px 10px',
                 background: '#7c3aed',
                 color: '#fff',
                 border: 'none',
                 borderRadius: '8px',
                 fontWeight: 700,
-                fontSize: '12px',
+                fontSize: '11px',
                 cursor: 'pointer',
+                whiteSpace: 'nowrap',
               }}
               title="Email the client your new ETA"
             >📧 Email</button>
+          )}
+          {stop.phone && onSendHeadsUpSms && (
+            <button
+              onClick={() => onSendHeadsUpSms(stop)}
+              style={{
+                padding: '7px 10px',
+                background: '#0891b2',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: 700,
+                fontSize: '11px',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+              title="Text the client your new ETA"
+            >📱 SMS</button>
           )}
           {stop.phone && (
             <a
               href={'tel:' + stop.phone}
               style={{
-                padding: '8px 14px',
+                padding: '7px 10px',
                 background: '#10b981',
                 color: '#fff',
                 border: 'none',
                 borderRadius: '8px',
                 fontWeight: 700,
-                fontSize: '12px',
+                fontSize: '11px',
                 cursor: 'pointer',
                 textDecoration: 'none',
                 display: 'inline-block',
+                whiteSpace: 'nowrap',
               }}
               title="Call the client"
             >📞 Call</a>

@@ -116,12 +116,24 @@ export default function Route() {
   var [headsUpSending, setHeadsUpSending] = useState(false)
   var [headsUpSent, setHeadsUpSent] = useState({})
   var [headsUpError, setHeadsUpError] = useState('')
+  // Method = 'email' or 'sms' — same modal, two delivery paths
+  var [headsUpMethod, setHeadsUpMethod] = useState('email')
 
   function openHeadsUp(stop) {
     setHeadsUpStop(stop)
     setHeadsUpEta(30)         // reset to default each time the modal opens
     setHeadsUpEtaIsCustom(false)
     setHeadsUpError('')
+    setHeadsUpMethod('email')
+  }
+
+  // SMS variant — same modal flow, different send path (uses send-sms quota)
+  function openHeadsUpSms(stop) {
+    setHeadsUpStop(stop)
+    setHeadsUpEta(30)
+    setHeadsUpEtaIsCustom(false)
+    setHeadsUpError('')
+    setHeadsUpMethod('sms')
   }
 
   function closeHeadsUp() {
@@ -130,40 +142,84 @@ export default function Route() {
     setHeadsUpError('')
   }
 
-  // Send the email via the send-heads-up-email edge function. Passes either
-  // appointment_id or boarding_reservation_id depending on stop type.
+  // Send heads-up via email OR sms (controlled by headsUpMethod state).
+  // Email uses send-heads-up-email; SMS uses send-sms (deducts from quota).
   async function sendHeadsUp() {
     if (!headsUpStop) return
     setHeadsUpSending(true)
     setHeadsUpError('')
     try {
-      var payload = {
-        eta_minutes: headsUpEta,
-      }
-      if (headsUpStop.type === 'grooming') {
-        payload.appointment_id = headsUpStop.dbId
+      if (headsUpMethod === 'sms') {
+        // ─── SMS path ───
+        if (!headsUpStop.phone) {
+          throw new Error('No phone number on file for this client')
+        }
+        var { data: { user } } = await supabase.auth.getUser()
+        if (!user) throw new Error('Not signed in')
+        // Pull groomer's running_late template (with placeholder support) +
+        // any context we need. Fall back to a sensible default.
+        var { data: shop } = await supabase
+          .from('shop_settings')
+          .select('shop_name, sms_templates')
+          .eq('user_id', user.id)
+          .maybeSingle()
+        var templates = (shop && shop.sms_templates) || {}
+        var tpl = templates.running_late ||
+          "Hi {client_first_name}! Just a heads up — I'm running about {minutes} minutes behind for {pet_name}'s {time} appointment. Thanks for your patience! — {shop_name}"
+        var firstName = headsUpStop.firstName || headsUpStop.clientName || 'there'
+        var petName = headsUpStop.petName || 'your pet'
+        var timeLabel = headsUpStop.timeLabel || 'today'
+        var shopName = (shop && shop.shop_name) || 'your groomer'
+        var msg = tpl.replace(/\{(\w+)\}/g, function (_, k) {
+          var vars = {
+            client_first_name: firstName,
+            pet_name: petName,
+            time: timeLabel,
+            minutes: headsUpEta,
+            shop_name: shopName,
+          }
+          return vars[k] !== undefined ? vars[k] : ''
+        })
+        var { data: smsData, error: smsErr } = await supabase.functions.invoke('send-sms', {
+          body: {
+            to: headsUpStop.phone,
+            message: msg,
+            groomer_id: user.id,
+            sms_type: 'running_late',
+          },
+        })
+        if (smsErr) throw smsErr
+        if (!smsData || !smsData.success) {
+          throw new Error((smsData && smsData.error) || 'SMS failed')
+        }
       } else {
-        payload.boarding_reservation_id = headsUpStop.dbId
-        payload.stop_type = headsUpStop.type   // 'boarding_dropoff' | 'boarding_pickup'
+        // ─── Email path (original) ───
+        var payload = {
+          eta_minutes: headsUpEta,
+        }
+        if (headsUpStop.type === 'grooming') {
+          payload.appointment_id = headsUpStop.dbId
+        } else {
+          payload.boarding_reservation_id = headsUpStop.dbId
+          payload.stop_type = headsUpStop.type   // 'boarding_dropoff' | 'boarding_pickup'
+        }
+        var { data, error } = await supabase.functions.invoke('send-heads-up-email', {
+          body: payload,
+        })
+        if (error) throw error
+        if (data && data.error) throw new Error(data.error)
       }
-
-      var { data, error } = await supabase.functions.invoke('send-heads-up-email', {
-        body: payload,
-      })
-
-      if (error) throw error
-      if (data && data.error) throw new Error(data.error)
 
       // Mark this stop as sent — UI will swap the button to "✅ Sent" state
       setHeadsUpSent(function (prev) {
         var next = Object.assign({}, prev)
-        next[headsUpStop.id] = { eta: headsUpEta, sentAt: new Date().toISOString() }
+        next[headsUpStop.id] = { eta: headsUpEta, sentAt: new Date().toISOString(), method: headsUpMethod }
         return next
       })
       setHeadsUpStop(null)   // close the modal on success
     } catch (err) {
-      console.error('[Route] heads-up email failed', err)
-      setHeadsUpError(err.message || 'Could not send email. Try again.')
+      console.error('[Route] heads-up send failed', err)
+      setHeadsUpError(err.message || ('Could not send ' + headsUpMethod + '. Try again.'))
     } finally {
       setHeadsUpSending(false)
     }
@@ -505,6 +561,7 @@ export default function Route() {
         stops={displayStops}
         enabled={lateWarningsEnabled}
         onSendHeadsUp={openHeadsUp}
+        onSendHeadsUpSms={openHeadsUpSms}
         onChange={setLateState}
       />
 
@@ -752,13 +809,18 @@ export default function Route() {
               boxShadow: '0 20px 50px rgba(0,0,0,0.25)',
             }}
           >
-            <div style={{ fontSize: '32px', textAlign: 'center', marginBottom: '8px' }}>🚗</div>
+            <div style={{ fontSize: '32px', textAlign: 'center', marginBottom: '8px' }}>
+              {headsUpMethod === 'sms' ? '📱' : '📧'}
+            </div>
             <h2 style={{ fontSize: '18px', fontWeight: 800, color: '#111827', textAlign: 'center', margin: '0 0 4px' }}>
-              Send heads-up email?
+              {headsUpMethod === 'sms' ? 'Send heads-up text?' : 'Send heads-up email?'}
             </h2>
             <div style={{ fontSize: '13px', color: '#6b7280', textAlign: 'center', marginBottom: '18px' }}>
               To <strong style={{ color: '#111827' }}>{headsUpStop.firstName || headsUpStop.clientName || 'client'}</strong>
-              {headsUpStop.clientEmail && (
+              {headsUpMethod === 'sms' && headsUpStop.phone && (
+                <span> · {headsUpStop.phone}</span>
+              )}
+              {headsUpMethod === 'email' && headsUpStop.clientEmail && (
                 <span> · {headsUpStop.clientEmail}</span>
               )}
             </div>
@@ -905,7 +967,7 @@ export default function Route() {
                   boxShadow: '0 2px 6px rgba(124,58,237,0.3)',
                 }}
               >
-                {headsUpSending ? 'Sending…' : '📧 Send email'}
+                {headsUpSending ? 'Sending…' : (headsUpMethod === 'sms' ? '📱 Send text' : '📧 Send email')}
               </button>
             </div>
           </div>
