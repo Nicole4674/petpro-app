@@ -282,8 +282,9 @@ export default function Plans() {
       </div>
 
       {/* ─── "Trouble signing up?" — prominent fallback for stuck users ─── */}
-      {/* If anything blocks them (Turnstile false-positive, Stripe glitch,    */}
-      {/* email delivery issue, etc.) they have a clear path to email Nicole. */}
+      {/* Two paths: quick self-fix (try a different browser) handles ~80% of  */}
+      {/* signup issues. Discount path catches the real bugs we need to know   */}
+      {/* about — incentive prevents bail-out-in-silence which kills ad ROI.  */}
       <div style={{
         background: '#fffbeb',
         borderBottom: '1px solid #fcd34d',
@@ -294,7 +295,7 @@ export default function Plans() {
         fontWeight: 600,
         lineHeight: 1.5,
       }}>
-        ⚠️ <strong>Trouble signing up or paying?</strong> Email{' '}
+        ⚠️ <strong>Trouble signing up?</strong> Try <strong>Chrome, Safari, or Edge</strong> first — private/incognito mode and Brave can block our security check. Still stuck? Email{' '}
         <a
           href="mailto:nicole@trypetpro.com?subject=Help%20signing%20up%20for%20PetPro"
           style={{
@@ -305,7 +306,7 @@ export default function Plans() {
         >
           nicole@trypetpro.com
         </a>{' '}
-        — replies same day from a real groomer (the founder).
+        — real bug reports get <strong>30% off your first 3 months</strong> as a thank-you.
       </div>
 
       {/* ─── Header ─── */}
