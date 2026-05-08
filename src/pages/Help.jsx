@@ -322,6 +322,139 @@ var SECTIONS = [
   },
 
   {
+    title: '🚐 Mobile Grooming',
+    articles: [
+      {
+        q: 'How do I tell PetPro I\'m a mobile groomer?',
+        steps: [
+          'During the new-shop wizard, pick "🚐 Mobile" on Question 2.',
+          'Already past the wizard? Open Settings → Shop Settings → toggle "I\'m a mobile groomer."',
+          'Mobile groomers see Route + Drive Time features unlock automatically.',
+        ],
+        tip: 'You can also flip individual appointments between in-shop and mobile from the appointment popup if you do both.',
+      },
+      {
+        q: 'How does the Route page work?',
+        steps: [
+          'Open Route in the sidebar — shows every stop on today\'s schedule with addresses + drive times.',
+          'PetPro calculates the optimal order based on Google Maps drive time between stops.',
+          'Tap "Optimize" to reorder for maximum efficiency, or drag stops manually.',
+          'Each stop shows: client name, pet, service, ETA, address. Tap → directions in your phone\'s map app.',
+          'Print Route Sheet (top-right) gives you a paper backup if you lose signal.',
+        ],
+      },
+      {
+        q: 'What is the Late Detector / running-late warning?',
+        steps: [
+          'Settings → Shop Settings → toggle "Late warnings" ON.',
+          'PetPro tracks the clock + your GPS (with permission) and warns you when you\'re running behind.',
+          'When late, a yellow banner shows on the Route page with three actions: 📧 Email, 📱 SMS, or 📞 Call your next client.',
+          'Email uses your branded email; SMS uses your "Running Late" template (counts against quota).',
+        ],
+        tip: 'GPS-based predictions are more accurate, but you can still get late warnings from time-only mode if you don\'t want to share location.',
+      },
+      {
+        q: 'How do drive-time conflicts work when booking?',
+        steps: [
+          'PetPro auto-checks Google Maps drive time between back-to-back mobile appointments.',
+          'If the drive between two stops is longer than the gap, you\'ll see a yellow drive-time warning before saving.',
+          'You can ignore it (e.g. if you\'re hands-on driving fast) or pick a later slot.',
+          'Auto-clusters bookings by zip/neighborhood so close stops stay together.',
+        ],
+      },
+      {
+        q: 'Can I block off lunch or a personal break on the road?',
+        steps: [
+          'Open Calendar → click a time slot → choose "Block this time."',
+          'Add a note like "Lunch" or "Driving across town."',
+          'Suds AI respects blocks — it won\'t let clients book over them through the portal.',
+        ],
+      },
+    ],
+  },
+
+  {
+    title: '📱 SMS / Texting',
+    articles: [
+      {
+        q: 'How many SMS do I get per month?',
+        steps: [
+          'Basic ($70): 0 SMS — upgrade to Pro for texting features.',
+          'Pro ($129): 1,000 SMS / month.',
+          'Pro+ ($199): 1,500 SMS / month.',
+          'Growing ($399): 3,000 SMS / month.',
+          'Quota resets the 1st of every month. Unused SMS don\'t roll over.',
+        ],
+        tip: 'Founders get unlimited SMS as a thank-you for being early supporters.',
+      },
+      {
+        q: 'How do I customize my SMS templates?',
+        steps: [
+          'Open Settings → Shop Settings → ✏️ SMS Templates section.',
+          'Edit any of 6 templates: Reminder, Confirmation, Pickup Ready, Running Late, Rebook Follow-up, Thank You.',
+          'Use placeholders like {client_first_name}, {pet_name}, {date}, {time}, {shop_name} — they auto-fill at send time.',
+          'Watch the character count — over 160 chars splits into multiple SMS (counts as multiple sends).',
+          'Click "Reset to default" if you mess up — restores the original wording.',
+          'Save Settings.',
+        ],
+      },
+      {
+        q: 'How do automated appointment reminders work?',
+        steps: [
+          'Settings → Shop Settings → 📬 Appointment Reminders → toggle ON.',
+          'Pick what time of day to send (e.g. 5 PM the day before).',
+          'Pick how far ahead (1, 2, or 3 days before each appointment).',
+          'PetPro sends every client with sms_consent=true a reminder text using your Reminder template.',
+          'Clients reply Y to confirm or N to cancel — PetPro auto-updates the appointment status.',
+        ],
+        tip: 'Each reminder counts as 1 SMS from your monthly quota. The auto Y/N reply doesn\'t cost extra (handled via Twilio TwiML).',
+      },
+      {
+        q: 'How do I send a quick text from an appointment?',
+        steps: [
+          'Open the appointment popup on the Calendar.',
+          'Click 💬 next to the client\'s phone number.',
+          'Pick a template: Booking Confirmation, Appointment Reminder, Ready for Pickup, or Custom.',
+          'Edit the prefilled text if needed → click Send.',
+          'Counts as 1 SMS from your quota.',
+        ],
+      },
+      {
+        q: 'What is the SMS Inbox?',
+        steps: [
+          'Open Messages (sidebar) → 📱 SMS Inbox tab.',
+          'Shows every text conversation grouped by client (most-recent on top).',
+          'Red badge = unread inbound message. Click to open.',
+          'Reply right from the inbox — sends as SMS, counts against quota.',
+          'Hover any message → ✕ deletes that single message.',
+          'Header → 🗑️ Delete thread removes the entire conversation from your inbox (original SMS unaffected).',
+        ],
+      },
+      {
+        q: 'How do I get a heads-up SMS when a client books on their own?',
+        steps: [
+          'Settings → Shop Settings → 🔔 Client Action Alerts.',
+          'Enter your phone number (E.164 format like +12815551234).',
+          'Toggle "Send me an SMS when a client books or changes" ON.',
+          'You\'ll get a text every time a client books, reschedules, or cancels through the portal or AI.',
+          'Calendar also shows colored badges (🤖 AI, 👤 portal, 🔄 moved, ❌ cancelled) with red pulse until you open them.',
+        ],
+        tip: 'These alerts use 1 SMS each — turn off if you\'d rather just check the calendar.',
+      },
+      {
+        q: 'How do I test SMS to make sure it works?',
+        steps: [
+          'Settings → Shop Settings → 📱 Test SMS section.',
+          'Enter any phone number (your own works great).',
+          'Click "Send Test SMS."',
+          'Within seconds you should get a text confirming Twilio is wired up.',
+          'Counts as 1 SMS from your quota (free for founders).',
+        ],
+      },
+    ],
+  },
+
+  {
     title: '⚙️ Settings & Account',
     articles: [
       {
@@ -370,6 +503,52 @@ export default function Help() {
   // Articles are keyed by `${sectionIdx}-${articleIdx}`.
   var [openKey, setOpenKey] = useState(null)
   var [searchTerm, setSearchTerm] = useState('')
+
+  // Contact-form state — emails Nicole directly via send-help-message function
+  var [contactEmail, setContactEmail] = useState('')
+  var [contactSubject, setContactSubject] = useState('')
+  var [contactMessage, setContactMessage] = useState('')
+  var [contactSending, setContactSending] = useState(false)
+  var [contactResult, setContactResult] = useState(null)  // { ok: true } or { error: '...' }
+
+  async function sendContactForm(e) {
+    if (e && e.preventDefault) e.preventDefault()
+    setContactResult(null)
+    if (!contactEmail.trim()) {
+      setContactResult({ error: 'Please enter your email so we can reply.' })
+      return
+    }
+    if (!contactMessage.trim()) {
+      setContactResult({ error: 'Please write a message.' })
+      return
+    }
+    setContactSending(true)
+    try {
+      // Lazy-import supabase to avoid circular issues + only when needed
+      var supabaseMod = await import('../lib/supabase')
+      var supabase = supabaseMod.supabase
+      var { data, error } = await supabase.functions.invoke('send-help-message', {
+        body: {
+          from_email: contactEmail.trim(),
+          subject: contactSubject.trim() || 'PetPro Help Message',
+          message: contactMessage.trim(),
+        },
+      })
+      if (error) {
+        setContactResult({ error: error.message || 'Could not send. Try again.' })
+      } else if (data && data.error) {
+        setContactResult({ error: data.error })
+      } else {
+        setContactResult({ ok: true })
+        setContactSubject('')
+        setContactMessage('')
+      }
+    } catch (err) {
+      setContactResult({ error: err.message || 'Could not send. Try again.' })
+    } finally {
+      setContactSending(false)
+    }
+  }
 
   function toggle(key) {
     setOpenKey(openKey === key ? null : key)
@@ -527,23 +706,147 @@ export default function Help() {
         </div>
       )}
 
-      {/* ─── Footer CTA ─── */}
+      {/* ─── Contact form — emails Nicole directly (founder reads every one) ─── */}
       <div style={{
         marginTop: '40px',
         padding: '24px',
         background: '#faf5ff',
         border: '1px solid #e9d5ff',
         borderRadius: '12px',
-        textAlign: 'center',
       }}>
-        <div style={{ fontSize: '20px', fontWeight: 700, color: '#5b21b6', marginBottom: '8px' }}>
-          Couldn't find what you needed?
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+          <span style={{ fontSize: '24px' }}>✉️</span>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: '#5b21b6' }}>
+            Couldn't find what you needed?
+          </div>
         </div>
-        <p style={{ margin: '0 0 12px', fontSize: '14px', color: '#6b7280', lineHeight: 1.5 }}>
-          Email <strong style={{ color: '#5b21b6' }}>nicole@trypetpro.com</strong> — replies come
-          from a working groomer (the founder), usually within a few hours.
-          <br />
-          Or use the floating PetPro AI assistant — it can walk you through anything live.
+        <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#6b7280', lineHeight: 1.5 }}>
+          Email me directly — replies come from a working groomer (the founder), usually within a few hours.
+          Found a bug? Just describe it. Have a feature wish? Spill it.
+        </p>
+
+        {contactResult && contactResult.ok && (
+          <div style={{
+            padding: '12px 14px',
+            background: '#ecfdf5',
+            border: '1px solid #a7f3d0',
+            borderRadius: '8px',
+            color: '#065f46',
+            fontSize: '13px',
+            marginBottom: '14px',
+          }}>
+            ✅ Sent! Nicole will reply to <strong>{contactEmail}</strong> as soon as she sees it. 🐾
+          </div>
+        )}
+        {contactResult && contactResult.error && (
+          <div style={{
+            padding: '12px 14px',
+            background: '#fef2f2',
+            border: '1px solid #fecaca',
+            borderRadius: '8px',
+            color: '#991b1b',
+            fontSize: '13px',
+            marginBottom: '14px',
+          }}>
+            ⚠️ {contactResult.error}
+          </div>
+        )}
+
+        <form onSubmit={sendContactForm}>
+          <div style={{ marginBottom: '10px' }}>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+              Your email <span style={{ color: '#dc2626' }}>*</span>
+            </label>
+            <input
+              type="email"
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
+              placeholder="you@example.com"
+              required
+              disabled={contactSending}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                background: '#fff',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          <div style={{ marginBottom: '10px' }}>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+              Subject <span style={{ color: '#9ca3af', fontWeight: 400 }}>(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={contactSubject}
+              onChange={(e) => setContactSubject(e.target.value)}
+              placeholder="Found a bug / Feature idea / etc."
+              disabled={contactSending}
+              maxLength={120}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                background: '#fff',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+              Message <span style={{ color: '#dc2626' }}>*</span>
+            </label>
+            <textarea
+              value={contactMessage}
+              onChange={(e) => setContactMessage(e.target.value)}
+              placeholder="What happened, what you expected, screenshots if you have them — the more detail the better."
+              required
+              disabled={contactSending}
+              rows={6}
+              maxLength={5000}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                fontFamily: 'inherit',
+                background: '#fff',
+                boxSizing: 'border-box',
+                resize: 'vertical',
+                minHeight: '120px',
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px', textAlign: 'right' }}>
+              {contactMessage.length} / 5000
+            </div>
+          </div>
+          <button
+            type="submit"
+            disabled={contactSending}
+            style={{
+              background: contactSending ? '#9ca3af' : '#7c3aed',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '10px',
+              padding: '12px 24px',
+              fontSize: '14px',
+              fontWeight: 700,
+              cursor: contactSending ? 'wait' : 'pointer',
+              boxShadow: '0 2px 6px rgba(124,58,237,0.3)',
+            }}
+          >
+            {contactSending ? 'Sending…' : '✉️ Send to Nicole'}
+          </button>
+        </form>
+
+        <p style={{ margin: '14px 0 0', fontSize: '12px', color: '#9ca3af', lineHeight: 1.5 }}>
+          Or use the floating PetPro AI assistant — it can walk you through most things live.
         </p>
       </div>
     </div>
