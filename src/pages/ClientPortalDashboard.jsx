@@ -13,9 +13,11 @@ import { getBreedDefaults } from '../lib/breedDefaults'
 import EnableNotifications from '../components/EnableNotifications'
 import ReportCardModal from '../components/ReportCardModal'
 import ClientPaymentModal from '../components/ClientPaymentModal'
+import ClientSubscriptionsTab from '../components/ClientSubscriptionsTab'
 import BreedPicker from '../components/BreedPicker'
 import { DOG_BREEDS, CAT_BREEDS } from '../lib/breeds'
 import { formatPhone, formatPhoneOnInput } from '../lib/phone'
+import { FEATURE_FLAGS } from '../lib/featureFlags'
 import { mapsUrl, telUrl } from '../lib/maps'
 
 const TABS = [
@@ -23,6 +25,7 @@ const TABS = [
   { key: 'upcoming', label: '📅 Upcoming' },
   { key: 'grooming', label: '✂️ Past Grooming' },
   { key: 'boarding', label: '🏠 Past Boarding' },
+  { key: 'subscriptions', label: '🔁 Subscriptions', featureFlag: 'SUBSCRIPTIONS' },
   { key: 'vaccinations', label: '💉 Vaccinations' },
   { key: 'payments', label: '🧾 Payments' },
   { key: 'cards', label: '💳 My Cards' },
@@ -920,7 +923,11 @@ export default function ClientPortalDashboard() {
 
       {/* Tabs */}
       <div className="cp-tabs">
-        {TABS.map(function (tab) {
+        {TABS.filter(function (tab) {
+          // Hide feature-flagged tabs unless the flag is on
+          if (tab.featureFlag) return !!FEATURE_FLAGS[tab.featureFlag]
+          return true
+        }).map(function (tab) {
           return (
             <button
               key={tab.key}
@@ -2125,6 +2132,14 @@ export default function ClientPortalDashboard() {
               </div>
             )}
           </div>
+        )}
+
+        {/* ═══════ SUBSCRIPTIONS TAB (feature-flagged) ═══════ */}
+        {activeTab === 'subscriptions' && FEATURE_FLAGS.SUBSCRIPTIONS && (
+          <ClientSubscriptionsTab
+            clientId={client?.id}
+            groomerId={client?.groomer_id}
+          />
         )}
 
         {/* ═══════ VACCINATIONS TAB ═══════ */}
