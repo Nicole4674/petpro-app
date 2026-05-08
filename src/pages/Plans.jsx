@@ -281,6 +281,33 @@ export default function Plans() {
         Locked in forever — limited time.
       </div>
 
+      {/* ─── "Trouble signing up?" — prominent fallback for stuck users ─── */}
+      {/* If anything blocks them (Turnstile false-positive, Stripe glitch,    */}
+      {/* email delivery issue, etc.) they have a clear path to email Nicole. */}
+      <div style={{
+        background: '#fffbeb',
+        borderBottom: '1px solid #fcd34d',
+        padding: '12px 20px',
+        textAlign: 'center',
+        fontSize: '14px',
+        color: '#78350f',
+        fontWeight: 600,
+        lineHeight: 1.5,
+      }}>
+        ⚠️ <strong>Trouble signing up or paying?</strong> Email{' '}
+        <a
+          href="mailto:nicole@trypetpro.com?subject=Help%20signing%20up%20for%20PetPro"
+          style={{
+            color: '#7c2d12',
+            textDecoration: 'underline',
+            fontWeight: 800,
+          }}
+        >
+          nicole@trypetpro.com
+        </a>{' '}
+        — replies same day from a real groomer (the founder).
+      </div>
+
       {/* ─── Header ─── */}
       <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '60px 24px 30px', textAlign: 'center' }}>
         <h1 style={{ fontSize: '44px', margin: '0 0 12px', fontWeight: '800', letterSpacing: '-0.02em' }}>
