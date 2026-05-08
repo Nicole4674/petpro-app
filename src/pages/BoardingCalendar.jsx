@@ -1574,6 +1574,12 @@ export default function BoardingCalendar() {
         <button className="cal-nav-btn" onClick={nextWeek}>Next →</button>
       </div>
 
+      {/* ─── Mobile horizontal-scroll wrapper ─── */}
+      {/* Vacancy bar + grid scroll together so day columns stay aligned. */}
+      {/* On desktop this is a no-op (grid fits the viewport).             */}
+      <div className="cal-scroll-wrap">
+      <div>
+
       {/* Vacancy Bar */}
       <div className="cal-vacancy-bar">
         <div className="cal-vacancy-label">Vacancy</div>
@@ -1703,6 +1709,10 @@ export default function BoardingCalendar() {
           )
         })}
       </div>
+
+      </div>
+      </div>
+      {/* ─── End mobile horizontal-scroll wrapper ─── */}
 
       {/* Legend */}
       <div className="cal-legend">
