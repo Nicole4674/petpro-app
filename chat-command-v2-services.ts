@@ -377,14 +377,14 @@ var toolDefinitions = [
   // ====================================================================
   {
     name: 'record_payment',
-    description: 'Record a payment made by a client against an appointment. Use when the user says things like "Sam paid $85 cash", "Mrs. Johnson Zelled $60 with a $10 tip", or "put $50 down on Bella\'s groom". For closing out an appointment fully in one go, prefer mark_paid_in_full (it auto-calculates the remaining balance + marks complete).',
+    description: 'Record a payment made by a client against an appointment. Use when the user says things like "Sam paid $85 cash", "Mrs. Johnson Zelled $60 with a $10 tip", or "put $50 down on Bella\'s groom". For closing out an appointment fully in one go, prefer mark_paid_in_full (it auto-calculates the remaining balance + marks complete). PRIVACY RULE: I CANNOT record CARD/credit/debit payments — those must go through the Calendar checkout modal where the groomer handles cards directly. If the user says "they paid by card", politely refuse and direct them to Calendar checkout.',
     input_schema: {
       type: 'object',
       properties: {
         appointment_id: { type: 'string', description: 'UUID of the appointment being paid for' },
         amount: { type: 'number', description: 'Payment amount in dollars (does NOT include tip — put tip separately in tip_amount)' },
         tip_amount: { type: 'number', description: 'Optional tip in dollars. Default 0.' },
-        method: { type: 'string', description: 'Payment method: "cash", "zelle", "venmo", "check", "card", or "other". Ask the user if unclear.' },
+        method: { type: 'string', description: 'Payment method: "cash", "zelle", "venmo", "check", or "other". CARD/CREDIT/DEBIT payments are NOT allowed here for privacy — those go through the Calendar checkout. If the user says card, refuse politely and redirect.' },
         notes: { type: 'string', description: 'Optional notes about this payment' },
       },
       required: ['appointment_id', 'amount', 'method'],
@@ -417,12 +417,12 @@ var toolDefinitions = [
   },
   {
     name: 'mark_paid_in_full',
-    description: 'Close out an appointment — records a payment for the remaining balance and marks the appointment completed. Use for "they just paid cash, close it out", "Venmo done, mark paid", etc. Computes balance automatically: (final_price OR quoted_price) − discount − prior payments. If balance is already 0, just marks complete.',
+    description: 'Close out an appointment — records a payment for the remaining balance and marks the appointment completed. Use for "they just paid cash, close it out", "Venmo done, mark paid", etc. Computes balance automatically: (final_price OR quoted_price) − discount − prior payments. If balance is already 0, just marks complete. PRIVACY RULE: I CANNOT close out CARD/credit/debit payments — for security, card payments must go through the Calendar checkout modal where the groomer handles cards directly.',
     input_schema: {
       type: 'object',
       properties: {
         appointment_id: { type: 'string', description: 'UUID of the appointment' },
-        method: { type: 'string', description: 'Payment method for the closing payment: "cash", "zelle", "venmo", "check", "card", "other". Ask the user if unclear.' },
+        method: { type: 'string', description: 'Payment method for the closing payment: "cash", "zelle", "venmo", "check", or "other". CARD payments NOT allowed here — those go through Calendar checkout for privacy.' },
         tip_amount: { type: 'number', description: 'Optional tip to include on this closing payment. Default 0.' },
         notes: { type: 'string', description: 'Optional notes' },
       },
@@ -1583,6 +1583,19 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
       // BILLING & CHECKOUT cases
       // ====================================================================
       case 'record_payment': {
+        // ─── PRIVACY GUARD: I never touch cards ────────────────────────────
+        // Card payments must be charged + recorded by the groomer through the
+        // Calendar checkout modal. I (Suds) refuse anything card-related so
+        // groomers know their clients' payment methods are never AI-handled.
+        var paymentMethod = (toolInput.method || 'cash').toLowerCase()
+        if (paymentMethod === 'card' || paymentMethod === 'credit' || paymentMethod === 'debit' || paymentMethod === 'stripe') {
+          return {
+            success: false,
+            error: 'For privacy, I (Suds) cannot record or charge card payments. Please open the appointment on the Calendar and use the checkout modal — that\'s where card payments are handled. I\'m happy to record cash, Zelle, Venmo, or check though!',
+            privacy_block: true,
+          }
+        }
+
         // Pull the appointment to get client_id (for the payment row)
         var { data: apptRow, error: apptFetchErr } = await supabaseAdmin
           .from('appointments')
@@ -1598,7 +1611,7 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
           groomer_id: groomerId,
           amount: parseFloat(toolInput.amount) || 0,
           tip_amount: toolInput.tip_amount ? parseFloat(toolInput.tip_amount) : 0,
-          method: (toolInput.method || 'cash').toLowerCase(),
+          method: paymentMethod,
           notes: toolInput.notes || null,
         }
 
@@ -1648,6 +1661,16 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
       }
 
       case 'mark_paid_in_full': {
+        // ─── PRIVACY GUARD: card method refused ───────────────────────────
+        var mpifMethod = (toolInput.method || 'cash').toLowerCase()
+        if (mpifMethod === 'card' || mpifMethod === 'credit' || mpifMethod === 'debit' || mpifMethod === 'stripe') {
+          return {
+            success: false,
+            error: 'For privacy, I (Suds) cannot close out card payments. Please use the Calendar checkout modal — that handles cards securely on the groomer side. I can close out cash, Zelle, Venmo, or check payments any time.',
+            privacy_block: true,
+          }
+        }
+
         // 1. Fetch the appointment + its multi-pet rows + prior payments
         var { data: apptDetail, error: apptDetailErr } = await supabaseAdmin
           .from('appointments')
@@ -3242,6 +3265,18 @@ Deno.serve(async (req) => {
     var dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
     contextParts.push('TODAY: ' + dayNames[now.getDay()] + ' ' + today + ' (Timezone: Central Time)')
     contextParts.push('Total clients in system: ' + (clientCount || 0))
+    contextParts.push('')
+
+    // ─── PRIVACY HARD-RULE — credit cards are off-limits to me ────────────────
+    // This block sits high in the prompt so the AI sees it before tool call
+    // decisions. Backed by server-side guards in record_payment +
+    // mark_paid_in_full (any card method gets refused with a clear message).
+    contextParts.push('=== PRIVACY (HARD RULES — never break these) ===')
+    contextParts.push('• I CANNOT view, look up, or display saved credit card information for any client.')
+    contextParts.push('• I CANNOT charge a card, run a card on file, or process card payments.')
+    contextParts.push('• I CANNOT record CARD/credit/debit/Stripe payments via record_payment or mark_paid_in_full — for those, I tell the user "For privacy, card payments go through the Calendar checkout — open the appointment and use the Pay button there."')
+    contextParts.push('• I CAN see and use: client name, email, phone number, pet info, appointment history, and notes. I CAN record cash, Zelle, Venmo, check, or other manual payment methods.')
+    contextParts.push('• If a user asks me about a card on file or wants me to charge a card, I refuse politely + explain that the groomer handles cards directly through the Calendar checkout. This protects client financial privacy and is a guarantee to every PetPro shop.')
     contextParts.push('')
 
     contextParts.push('=== SHOP MEMORY (facts you\'ve learned about this shop) ===')
