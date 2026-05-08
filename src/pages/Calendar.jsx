@@ -344,6 +344,10 @@ export default function Calendar() {
     // where the price needs adjusting without changing the service (custom quote, etc.)
     const [editingPriceApptPetId, setEditingPriceApptPetId] = useState(null)
     const [pendingPrice, setPendingPrice] = useState('')
+    // Edit price for an ADD-ON (extras like nail trim, dematting) — separate
+    // from the primary-service price editor. Tracks the addon row's id.
+    const [editingAddonId, setEditingAddonId] = useState(null)
+    const [pendingAddonPrice, setPendingAddonPrice] = useState('')
     // Report card modal state — { petId, clientId, petName, petBreed, appointmentId, existing? }
     const [reportCardModal, setReportCardModal] = useState(null)
     // Map of { appointmentPetKey: existingReportCard } so the popup can show "View" instead of "Create"
@@ -1248,6 +1252,33 @@ export default function Calendar() {
             fetchData()
         } catch (err) {
             alert('Error saving price: ' + (err.message || err))
+        }
+    }
+
+    // Edit the price on an ADD-ON service (e.g., nail trim, dematting fee).
+    // Mirrors handleSavePetPrice but writes to appointment_pet_addons instead.
+    // Lets groomers charge custom rates per visit ("dematting was bad, $25 instead of $15")
+    // without having to remove + re-add the addon.
+    const handleSaveAddonPrice = async (addonId) => {
+        if (!selectedAppt) return
+        var newPrice = parseFloat(pendingAddonPrice)
+        if (isNaN(newPrice) || newPrice < 0) {
+            alert('Enter a valid price (0 or greater).')
+            return
+        }
+        try {
+            const { error: updErr } = await supabase
+                .from('appointment_pet_addons')
+                .update({ quoted_price: newPrice })
+                .eq('id', addonId)
+            if (updErr) throw updErr
+            await recalcAndSaveApptTotal(selectedAppt.id)
+            setEditingAddonId(null)
+            setPendingAddonPrice('')
+            await handleApptClick(selectedAppt, { stopPropagation: function () {} })
+            fetchData()
+        } catch (err) {
+            alert('Error saving add-on price: ' + (err.message || err))
         }
     }
 
@@ -3727,6 +3758,44 @@ export default function Calendar() {
                                                 {(ap.appointment_pet_addons || []).length > 0 && (
                                                     <div style={{ marginBottom: '6px' }}>
                                                         {(ap.appointment_pet_addons || []).map(function (addon) {
+                                                            // Inline price editor for THIS addon (mirrors primary-service edit mode)
+                                                            if (editingAddonId === addon.id) {
+                                                                return (
+                                                                    <div
+                                                                        key={addon.id}
+                                                                        className="appt-detail-service-card"
+                                                                        style={{ marginBottom: '6px', background: '#faf5ff', borderLeft: '3px solid #c4b5fd' }}
+                                                                    >
+                                                                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>
+                                                                            ➕ {addon.services?.service_name || 'Add-on'} — set price
+                                                                        </div>
+                                                                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                                                            <span style={{ fontSize: '14px', color: '#6b7280', fontWeight: 700 }}>$</span>
+                                                                            <input
+                                                                                type="number"
+                                                                                step="0.01"
+                                                                                min="0"
+                                                                                value={pendingAddonPrice}
+                                                                                onChange={function (e) { setPendingAddonPrice(e.target.value) }}
+                                                                                placeholder="0.00"
+                                                                                autoFocus
+                                                                                style={{ flex: 1, padding: '8px', fontSize: '14px', borderRadius: '6px', border: '1px solid #d1d5db', background: '#fff' }}
+                                                                            />
+                                                                        </div>
+                                                                        <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                                                                            <button
+                                                                                onClick={function () { handleSaveAddonPrice(addon.id) }}
+                                                                                style={{ flex: 1, padding: '8px 12px', background: '#10b981', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                                                            >✓ Save price</button>
+                                                                            <button
+                                                                                onClick={function () { setEditingAddonId(null); setPendingAddonPrice('') }}
+                                                                                style={{ flex: 1, padding: '8px 12px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}
+                                                                            >Cancel</button>
+                                                                        </div>
+                                                                    </div>
+                                                                )
+                                                            }
+                                                            // Default render: show addon + 💵 price edit + × remove buttons
                                                             return (
                                                                 <div
                                                                     key={addon.id}
@@ -3750,6 +3819,13 @@ export default function Calendar() {
                                                                             {addon.services?.time_block_minutes ? ' · ' + addon.services.time_block_minutes + ' mins' : ''}
                                                                         </div>
                                                                     </div>
+                                                                    {/* Price edit pencil — quick way to charge custom rate ($25 dematting */}
+                                                                    {/* instead of $15) without having to remove + re-add the addon. */}
+                                                                    <button
+                                                                        onClick={function () { setEditingAddonId(addon.id); setPendingAddonPrice(String(parseFloat(addon.quoted_price || 0).toFixed(2))) }}
+                                                                        title="Edit price for this add-on"
+                                                                        style={{ background: '#fff', border: '1px solid #fcd34d', color: '#b45309', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, flexShrink: 0 }}
+                                                                    >💵 Price</button>
                                                                     <button
                                                                         onClick={function () { handleRemoveAddon(addon.id, addon.services?.service_name) }}
                                                                         title="Remove this add-on"
