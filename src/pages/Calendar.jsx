@@ -1340,20 +1340,52 @@ export default function Calendar() {
     // the payment flow + balance calcs see the correct total.
 
     async function recalcAndSaveApptTotal(apptId) {
-        // Re-fetch all appointment_pets + their addons for this appt,
-        // sum everything, save back to appointments.quoted_price.
+        // Re-fetch all appointment_pets + their addons + service durations,
+        // recompute BOTH the total price AND the appointment end_time, save back.
+        // Triggered any time we add/remove/change a service or add-on so the
+        // calendar block always reflects what's actually on the appointment.
+        // (Without the end_time recalc, removing an addon would leave the block
+        // visually too long — exactly the bug Nicole's husband hit.)
         var { data: aps } = await supabase
             .from('appointment_pets')
-            .select('quoted_price, appointment_pet_addons(quoted_price)')
+            .select('quoted_price, services:service_id(time_block_minutes), appointment_pet_addons(quoted_price, services:service_id(time_block_minutes))')
             .eq('appointment_id', apptId)
         var total = 0
+        var totalMinutes = 0
         ;(aps || []).forEach(function (ap) {
             total += parseFloat(ap.quoted_price || 0)
+            // Primary service time
+            var primaryMins = parseInt(ap.services && ap.services.time_block_minutes) || 0
+            totalMinutes += primaryMins
+            // Add-on times + prices
             ;(ap.appointment_pet_addons || []).forEach(function (addon) {
                 total += parseFloat(addon.quoted_price || 0)
+                var addonMins = parseInt(addon.services && addon.services.time_block_minutes) || 0
+                totalMinutes += addonMins
             })
         })
-        await supabase.from('appointments').update({ quoted_price: total }).eq('id', apptId)
+
+        // Compute the new end_time from start_time + totalMinutes
+        // Pull start_time so we know where to anchor the new end_time
+        var { data: apptRow } = await supabase
+            .from('appointments')
+            .select('start_time')
+            .eq('id', apptId)
+            .single()
+
+        var update = { quoted_price: total }
+        if (apptRow && apptRow.start_time && totalMinutes > 0) {
+            var startParts = String(apptRow.start_time).split(':')
+            var startMin = parseInt(startParts[0], 10) * 60 + parseInt(startParts[1], 10)
+            var endTotalMin = startMin + totalMinutes
+            // Cap at 23:59 just in case (don't roll over to next day)
+            if (endTotalMin > 23 * 60 + 59) endTotalMin = 23 * 60 + 59
+            var endH = Math.floor(endTotalMin / 60)
+            var endM = endTotalMin % 60
+            update.end_time = String(endH).padStart(2, '0') + ':' + String(endM).padStart(2, '0') + ':00'
+        }
+
+        await supabase.from('appointments').update(update).eq('id', apptId)
         return total
     }
 
