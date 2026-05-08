@@ -40,6 +40,8 @@ export default function ReportCardModal({
 }) {
   const initial = reportCard || {}
   const [servicesPerformed, setServicesPerformed] = useState(initial.services_performed || '')
+  const [productsUsed, setProductsUsed] = useState(initial.products_used || '')
+  const [coatCondition, setCoatCondition] = useState(initial.coat_condition || '')
   const [behaviorRating, setBehaviorRating] = useState(initial.behavior_rating || '')
   const [behaviorNotes, setBehaviorNotes] = useState(initial.behavior_notes || '')
   const [recommendations, setRecommendations] = useState(initial.recommendations || '')
@@ -114,6 +116,8 @@ export default function ReportCardModal({
         boarding_reservation_id: boardingReservationId || null,
         service_type: serviceType,
         services_performed: servicesPerformed.trim() || null,
+        products_used: productsUsed.trim() || null,
+        coat_condition: coatCondition.trim() || null,
         behavior_rating: behaviorRating || null,
         behavior_notes: behaviorNotes.trim() || null,
         recommendations: recommendations.trim() || null,
@@ -179,6 +183,14 @@ export default function ReportCardModal({
 
     if (servicesPerformed) {
       html += '<div class="section"><div class="section-title">✂️ Services Performed</div><div class="field">' + servicesPerformed.replace(/\n/g, '<br>') + '</div></div>'
+    }
+
+    if (productsUsed) {
+      html += '<div class="section"><div class="section-title">🧴 Products Used</div><div class="field">' + productsUsed.replace(/\n/g, '<br>') + '</div></div>'
+    }
+
+    if (coatCondition) {
+      html += '<div class="section"><div class="section-title">🐕 Coat Condition</div><div class="field">' + coatCondition.replace(/\n/g, '<br>') + '</div></div>'
     }
 
     if (ratingMeta) {
@@ -259,6 +271,20 @@ export default function ReportCardModal({
               <label style={labelStyle}>Services Performed</label>
               <textarea value={servicesPerformed} onChange={e => setServicesPerformed(e.target.value)}
                 placeholder="e.g. Full groom, dematting, dremel, ear cleaning..."
+                rows={2} style={{ ...inputStyle, fontFamily: 'inherit' }} />
+            </div>
+
+            <div style={{ marginBottom: '14px' }}>
+              <label style={labelStyle}>🧴 Products Used <span style={{ color: '#9ca3af', fontWeight: 400 }}>(optional)</span></label>
+              <textarea value={productsUsed} onChange={e => setProductsUsed(e.target.value)}
+                placeholder="e.g. Oatmeal shampoo, conditioning rinse, ear cleaner..."
+                rows={2} style={{ ...inputStyle, fontFamily: 'inherit' }} />
+            </div>
+
+            <div style={{ marginBottom: '14px' }}>
+              <label style={labelStyle}>🐕 Coat Condition <span style={{ color: '#9ca3af', fontWeight: 400 }}>(optional)</span></label>
+              <textarea value={coatCondition} onChange={e => setCoatCondition(e.target.value)}
+                placeholder="e.g. Mild matting behind ears, slight redness on belly, healthy coat overall..."
                 rows={2} style={{ ...inputStyle, fontFamily: 'inherit' }} />
             </div>
 
@@ -352,6 +378,20 @@ export default function ReportCardModal({
               <div style={{ marginBottom: '14px' }}>
                 <label style={labelStyle}>✂️ Services Performed</label>
                 <div style={readStyle}>{servicesPerformed}</div>
+              </div>
+            )}
+
+            {productsUsed && (
+              <div style={{ marginBottom: '14px' }}>
+                <label style={labelStyle}>🧴 Products Used</label>
+                <div style={readStyle}>{productsUsed}</div>
+              </div>
+            )}
+
+            {coatCondition && (
+              <div style={{ marginBottom: '14px' }}>
+                <label style={labelStyle}>🐕 Coat Condition</label>
+                <div style={readStyle}>{coatCondition}</div>
               </div>
             )}
 

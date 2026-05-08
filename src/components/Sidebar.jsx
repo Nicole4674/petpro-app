@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import usePermissions from '../hooks/usePermissions'
+import { FEATURE_FLAGS } from '../lib/featureFlags'
 import { supabase } from '../lib/supabase'
 
 export default function Sidebar({ onToggle }) {
@@ -264,6 +265,15 @@ export default function Sidebar({ onToggle }) {
                 onClick={function() { goTo('/agreements') }}
               >
                 Agreements
+              </div>
+              )}
+              {/* Custom subscriptions (feature-flagged — hidden until Phases 2-4 done) */}
+              {FEATURE_FLAGS.SUBSCRIPTIONS && canAccess('pricing.view') && (
+              <div
+                className={'sidebar-subitem' + (isActive('/subscriptions') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/subscriptions') }}
+              >
+                🔁 Subscriptions
               </div>
               )}
               {canAccessAny(['calendar.view_own', 'calendar.view_all']) && (

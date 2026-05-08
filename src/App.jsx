@@ -35,6 +35,7 @@ import ChatSettings from './pages/ChatSettings'
 import BookingRules from './pages/BookingRules'
 import Messages from './pages/Messages'
 import ShopSettings from './pages/ShopSettings'
+import Subscriptions from './pages/Subscriptions'
 import Account from './pages/Account'
 import Roadmap from './pages/Roadmap'
 import Help from './pages/Help'
@@ -240,6 +241,7 @@ function App() {
                     <Route path="/ai/chat-settings" element={gate(session, <ChatSettings />)} />
                     <Route path="/ai/booking-rules" element={gate(session, <BookingRules />)} />
                     <Route path="/settings/shop" element={gate(session, <ShopSettings />)} />
+                    <Route path="/subscriptions" element={gate(session, <Subscriptions />)} />
                     <Route path="/account" element={session ? <Account /> : <Navigate to="/login" />} />
                     <Route path="/roadmap" element={gate(session, <Roadmap />)} />
                     <Route path="/help" element={gate(session, <Help />)} />
