@@ -84,7 +84,8 @@ export default function ClientDetail() {
   const [editingClient, setEditingClient] = useState(false)
   const [editClientForm, setEditClientForm] = useState({
     first_name: '', last_name: '', phone: '', email: '',
-    preferred_contact: 'text', address: ''
+    preferred_contact: 'text', address: '',
+    sms_consent: false,  // TCR/Twilio gate — required for any auto-SMS to fire
   })
   const [savingClientEdit, setSavingClientEdit] = useState(false)
   const [editClientError, setEditClientError] = useState('')
@@ -546,6 +547,7 @@ export default function ClientDetail() {
       phone: client.phone || '',
       email: client.email || '',
       preferred_contact: client.preferred_contact || 'text',
+      sms_consent: !!client.sms_consent,
       address: client.address || '',
       address_notes: client.address_notes || '',
       // Coords come from clients table cache. Filled in only when the
@@ -585,8 +587,15 @@ export default function ClientDetail() {
       phone: editClientForm.phone.trim(),
       email: editClientForm.email.trim() || null,
       preferred_contact: editClientForm.preferred_contact,
+      sms_consent: !!editClientForm.sms_consent,
       address: editClientForm.address.trim() || null,
       address_notes: (editClientForm.address_notes || '').trim() || null,
+    }
+    // Stamp the consent timestamp on the FIRST time it flips to true so we
+    // have an audit record (TCR/Twilio compliance). If it was already true
+    // before, leave the original timestamp alone.
+    if (!!editClientForm.sms_consent && !client?.sms_consent) {
+      updatePayload.sms_consent_at = new Date().toISOString()
     }
     if (editClientForm.latitude != null && editClientForm.longitude != null) {
       updatePayload.latitude = editClientForm.latitude
@@ -1224,6 +1233,26 @@ export default function ClientDetail() {
                         <option value="email">Email</option>
                       </select>
                     </label>
+                    {/* SMS consent checkbox — TCR/Twilio compliance gate.
+                        Without this checked, no automated text (reminder,
+                        rebook, etc.) will fire to this client. Spans full row. */}
+                    <div style={{ gridColumn: '1 / -1', background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: '10px', padding: '12px 14px' }}>
+                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', margin: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={!!editClientForm.sms_consent}
+                          onChange={function (e) { setEditClientForm({ ...editClientForm, sms_consent: e.target.checked }) }}
+                          style={{ marginTop: '3px', width: '18px', height: '18px', cursor: 'pointer', accentColor: '#16a34a' }}
+                        />
+                        <span>
+                          <strong style={{ color: '#166534', fontSize: '14px' }}>📱 Consent to text messages</strong>
+                          <div style={{ fontSize: '12px', color: '#374151', marginTop: '4px', lineHeight: 1.4 }}>
+                            Client agrees to receive automated SMS reminders + rebook nudges from your shop.
+                            <strong> Required for any auto-text to fire</strong> (TCR/Twilio rule). Ask them verbally first, then check.
+                          </div>
+                        </span>
+                      </label>
+                    </div>
                     <label style={{ ...contactLabelStyle, gridColumn: '1 / -1' }}>
                       Address
                       <AddressInput

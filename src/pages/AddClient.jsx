@@ -14,6 +14,10 @@ export default function AddClient() {
     email: '',
     phone: '',
     preferred_contact: 'text',
+    // SMS consent (TCR/Twilio compliance) — required = true before any auto
+    // SMS will fire (reminders, rebook nudges, etc). Default false; groomer
+    // checks the box only after asking the client verbally.
+    sms_consent: false,
     address: '',
     // Coords are filled in when the user picks an address from the
     // Places Autocomplete dropdown. NULL if they typed it free-form.
@@ -24,7 +28,9 @@ export default function AddClient() {
   })
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value })
+    // Checkbox inputs need .checked, everything else uses .value
+    const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value
+    setForm({ ...form, [e.target.name]: value })
   }
 
   const handleSubmit = async (e) => {
@@ -34,13 +40,18 @@ export default function AddClient() {
 
     const { data: { user } } = await supabase.auth.getUser()
 
+    // Stamp sms_consent_at when consent is true so we have an audit trail
+    // (TCR/Twilio compliance requires being able to prove consent date).
+    const insertPayload = {
+      ...form,
+      groomer_id: user.id,
+      is_first_time: true,
+      sms_consent_at: form.sms_consent ? new Date().toISOString() : null,
+    }
+
     const { data, error: insertError } = await supabase
       .from('clients')
-      .insert({
-        ...form,
-        groomer_id: user.id,
-        is_first_time: true,
-      })
+      .insert(insertPayload)
       .select()
       .single()
 
@@ -114,6 +125,28 @@ export default function AddClient() {
             <option value="email">Email</option>
             <option value="both">Both</option>
           </select>
+        </div>
+
+        {/* SMS consent — required by Twilio/TCR before any auto-SMS will fire.
+            Default OFF; groomer must check it after asking the client.
+            Without this checked, reminders + rebook nudges silently skip. */}
+        <div className="form-group" style={{ background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: '10px', padding: '12px 14px' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              name="sms_consent"
+              checked={form.sms_consent}
+              onChange={handleChange}
+              style={{ marginTop: '3px', width: '18px', height: '18px', cursor: 'pointer', accentColor: '#16a34a' }}
+            />
+            <span>
+              <strong style={{ color: '#166534', fontSize: '14px' }}>📱 Consent to text messages</strong>
+              <div style={{ fontSize: '12px', color: '#374151', marginTop: '4px', lineHeight: 1.4 }}>
+                Client agrees to receive automated SMS reminders + rebook nudges from your shop.
+                <strong> Required for any auto-text to fire</strong> (TCR/Twilio rule). Ask them verbally first, then check.
+              </div>
+            </span>
+          </label>
         </div>
 
         <div className="form-group">
