@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { FEATURE_FLAGS } from '../lib/featureFlags'
 
 var STATUS_COLORS = {
   scheduled: '#7c3aed',
@@ -49,6 +50,9 @@ export default function Dashboard() {
   var [unreadSummary, setUnreadSummary] = useState({ total: 0, top3: [] })
   // Stripe payouts widget — net amount processed via Stripe today + this week
   var [stripeSummary, setStripeSummary] = useState({ todayNet: 0, todayCount: 0, weekNet: 0, weekCount: 0 })
+  // Subscriptions quick-glance stat card (Phase 4)
+  // mrr = monthly recurring revenue, normalized for weekly/yearly plans
+  var [subStats, setSubStats] = useState({ mrr: 0, activeCount: 0, newThisMonth: 0 })
 
   // ─── Onboarding wizard banner state ───
   // Shows a soft yellow banner at the top of the dashboard if the groomer
@@ -218,7 +222,63 @@ export default function Dashboard() {
     // Fetch Stripe payouts summary (Phase 4c) — net charges processed today + this week
     await fetchStripeSummary(user.id)
 
+    // Fetch subscription stats — MRR, active count, new this month (Phase 4)
+    if (FEATURE_FLAGS.SUBSCRIPTIONS) {
+      await fetchSubStats(user.id)
+    }
+
     setLoading(false)
+  }
+
+  // Pull every subscription for this groomer + roll up to MRR + counts.
+  // Weekly plans normalized to monthly (* 4.33), yearly normalized (/ 12).
+  // Excludes any sub already canceling at period end so the "active" count
+  // matches the dollar figure.
+  async function fetchSubStats(userId) {
+    try {
+      var { data } = await supabase
+        .from('client_subscriptions')
+        .select('status, cancel_at_period_end, created_at, subscription_plans(price_cents, billing_interval)')
+        .eq('groomer_id', userId)
+
+      if (!data) {
+        setSubStats({ mrr: 0, activeCount: 0, newThisMonth: 0 })
+        return
+      }
+
+      var mrrCents = 0
+      var activeCount = 0
+      var newThisMonth = 0
+      var startOfMonth = new Date()
+      startOfMonth.setDate(1)
+      startOfMonth.setHours(0, 0, 0, 0)
+
+      for (var i = 0; i < data.length; i++) {
+        var s = data[i]
+        if (s.status === 'active' && !s.cancel_at_period_end) {
+          activeCount++
+          var plan = s.subscription_plans
+          if (plan && plan.price_cents) {
+            var cents = plan.price_cents
+            if (plan.billing_interval === 'week') mrrCents += cents * 4.33
+            else if (plan.billing_interval === 'year') mrrCents += cents / 12
+            else mrrCents += cents
+          }
+        }
+        if (s.created_at && new Date(s.created_at) >= startOfMonth && s.status === 'active') {
+          newThisMonth++
+        }
+      }
+
+      setSubStats({
+        mrr: mrrCents / 100,
+        activeCount: activeCount,
+        newThisMonth: newThisMonth,
+      })
+    } catch (e) {
+      console.error('[Dashboard] fetchSubStats:', e)
+      setSubStats({ mrr: 0, activeCount: 0, newThisMonth: 0 })
+    }
   }
 
   // Sums all Stripe-processed payments for this groomer for "today" and
@@ -654,6 +714,33 @@ export default function Dashboard() {
             <div className="db-stat-label">Revenue Today</div>
           </div>
         </div>
+        {/* ─── Subscriptions quick-glance (Phase 4) ─── */}
+        {/* Always visible when feature flag is on. Click → jumps to Subscribers tab. */}
+        {FEATURE_FLAGS.SUBSCRIPTIONS && (
+          <div
+            className="db-stat-card"
+            onClick={function() { navigate('/subscriptions') }}
+            style={{
+              cursor: 'pointer',
+              background: 'linear-gradient(135deg, #7c3aed, #5b21b6)',
+              color: '#fff',
+              border: 'none',
+            }}
+          >
+            <div className="db-stat-icon">🔁</div>
+            <div className="db-stat-info">
+              <div className="db-stat-number" style={{ color: '#fff' }}>${subStats.mrr.toFixed(0)}</div>
+              <div className="db-stat-label" style={{ color: '#e9d5ff' }}>
+                MRR · {subStats.activeCount} sub{subStats.activeCount === 1 ? '' : 's'}
+                {subStats.newThisMonth > 0 && (
+                  <span style={{ marginLeft: '6px', background: 'rgba(255,255,255,0.25)', padding: '1px 6px', borderRadius: '8px', fontSize: '10px', fontWeight: 700 }}>
+                    +{subStats.newThisMonth} new
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         {waitlistCount > 0 && (
           <div className="db-stat-card db-stat-orange" onClick={function() { navigate('/waitlist') }} style={{ cursor: 'pointer' }}>
             <div className="db-stat-icon">📋</div>

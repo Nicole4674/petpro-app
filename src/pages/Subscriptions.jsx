@@ -29,6 +29,16 @@ export default function Subscriptions() {
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [editingPlan, setEditingPlan] = useState(null)  // plan obj if editing
 
+  // ─── Phase 4: Subscribers tab ──────────────────────────────────────────
+  // 'plans' (groomer creates/edits plans) or 'subscribers' (who's actually
+  // subscribed + MRR + cancel buttons)
+  const [activeTab, setActiveTab] = useState('plans')
+  const [subscribers, setSubscribers] = useState([])
+  const [loadingSubs, setLoadingSubs] = useState(false)
+  const [detailSub, setDetailSub] = useState(null)         // subscription obj when modal open
+  const [detailUsage, setDetailUsage] = useState([])       // usage rows for that sub
+  const [cancelingSubId, setCancelingSubId] = useState(null)
+
   // Form state
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -282,6 +292,100 @@ export default function Subscriptions() {
     })
   }
 
+  // ─── Phase 4: Subscribers tab logic ────────────────────────────────────
+  // Load when tab switches to subscribers (and once at mount if already on it).
+  // Pulls every subscription for this groomer + joins client + plan info.
+  async function loadSubscribers() {
+    if (!userId) return
+    setLoadingSubs(true)
+    try {
+      const { data, error } = await supabase
+        .from('client_subscriptions')
+        .select(`
+          *,
+          clients ( id, first_name, last_name, email, phone ),
+          subscription_plans ( id, name, emoji, price_cents, billing_interval, discount_pct, usage_caps, covered_service_ids )
+        `)
+        .eq('groomer_id', userId)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setSubscribers(data || [])
+    } catch (e) {
+      console.error('[Subscriptions] loadSubscribers:', e)
+      setSubscribers([])
+    } finally {
+      setLoadingSubs(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === 'subscribers' && userId) {
+      loadSubscribers()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, userId])
+
+  // Open the detail modal for a subscriber — pull their usage history too
+  async function openSubDetail(sub) {
+    setDetailSub(sub)
+    setDetailUsage([])
+    try {
+      const { data } = await supabase
+        .from('subscription_usage')
+        .select('*, appointments(appointment_date, services(service_name))')
+        .eq('subscription_id', sub.id)
+        .order('used_at', { ascending: false })
+        .limit(50)
+      setDetailUsage(data || [])
+    } catch (e) {
+      console.error('[Subscriptions] openSubDetail usage err:', e)
+    }
+  }
+
+  // Cancel a subscription. atPeriodEnd=true means "let them keep using it
+  // until the current billing cycle ends, then stop". false = stop now.
+  async function handleCancelSub(sub, atPeriodEnd) {
+    const verb = atPeriodEnd ? 'cancel at end of period' : 'cancel immediately'
+    const who = sub.clients ? `${sub.clients.first_name} ${sub.clients.last_name}` : 'this client'
+    if (!confirm(`Sure you want to ${verb} ${who}'s subscription to "${sub.subscription_plans?.name || 'this plan'}"?`)) return
+    setCancelingSubId(sub.id)
+    try {
+      const { data, error } = await supabase.functions.invoke('cancel-subscription', {
+        body: { subscription_id: sub.id, at_period_end: atPeriodEnd },
+      })
+      if (error) throw error
+      if (data && data.error) throw new Error(data.error)
+      // Refresh list + close modal
+      await loadSubscribers()
+      if (detailSub && detailSub.id === sub.id) setDetailSub(null)
+    } catch (e) {
+      alert('Could not cancel: ' + (e.message || e))
+    } finally {
+      setCancelingSubId(null)
+    }
+  }
+
+  // Calculate MRR (monthly recurring revenue) by normalizing every active
+  // sub's price to a monthly equivalent: weekly *4.33, monthly *1, yearly /12.
+  function calcMRR() {
+    let mrrCents = 0
+    for (const s of subscribers) {
+      if (s.status !== 'active' || s.cancel_at_period_end) continue  // exclude paused/canceling
+      const plan = s.subscription_plans
+      if (!plan) continue
+      const cents = plan.price_cents || 0
+      if (plan.billing_interval === 'week') mrrCents += cents * 4.33
+      else if (plan.billing_interval === 'year') mrrCents += cents / 12
+      else mrrCents += cents  // assume monthly
+    }
+    return mrrCents / 100
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return '—'
+    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+
   if (loading) {
     return <div style={{ padding: '40px', textAlign: 'center', color: '#9ca3af' }}>Loading subscriptions…</div>
   }
@@ -292,13 +396,13 @@ export default function Subscriptions() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h1 style={{ fontSize: '28px', fontWeight: 800, color: '#1f2937', margin: '0 0 4px' }}>
-            🔁 Subscription Plans
+            🔁 Subscriptions
           </h1>
           <p style={{ color: '#6b7280', margin: 0, fontSize: '14px' }}>
-            Create monthly/yearly plans clients can subscribe to. Auto-billed via Stripe.
+            Create plans + see who's subscribed. Auto-billed via Stripe.
           </p>
         </div>
-        {!showCreateForm && (
+        {activeTab === 'plans' && !showCreateForm && (
           <button
             onClick={() => { resetForm(); setShowCreateForm(true) }}
             style={{ background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '10px', padding: '12px 20px', fontWeight: 700, cursor: 'pointer', fontSize: '14px' }}
@@ -307,6 +411,41 @@ export default function Subscriptions() {
           </button>
         )}
       </div>
+
+      {/* ─── Tab nav ─── */}
+      <div style={{ display: 'flex', gap: '4px', borderBottom: '2px solid #e5e7eb', marginBottom: '20px' }}>
+        {[
+          { id: 'plans', label: '📋 Plans', count: plans.length },
+          { id: 'subscribers', label: '👥 Subscribers', count: subscribers.length || null },
+        ].map(t => (
+          <button
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
+            style={{
+              padding: '10px 18px',
+              background: 'transparent',
+              border: 'none',
+              borderBottom: activeTab === t.id ? '3px solid #7c3aed' : '3px solid transparent',
+              marginBottom: '-2px',
+              color: activeTab === t.id ? '#7c3aed' : '#6b7280',
+              fontWeight: activeTab === t.id ? 800 : 600,
+              fontSize: '14px',
+              cursor: 'pointer',
+            }}
+          >
+            {t.label} {t.count !== null && t.count !== undefined && (
+              <span style={{ marginLeft: '6px', padding: '1px 7px', background: activeTab === t.id ? '#7c3aed' : '#e5e7eb', color: activeTab === t.id ? '#fff' : '#6b7280', borderRadius: '10px', fontSize: '11px', fontWeight: 700 }}>
+                {t.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════
+          PLANS TAB — existing plan creator/editor + plan list
+          ═══════════════════════════════════════════════════════════════ */}
+      {activeTab === 'plans' && (<>
 
       {/* Create / Edit form */}
       {showCreateForm && (
@@ -541,6 +680,206 @@ export default function Subscriptions() {
           ))}
         </div>
       )}
+
+      </>)}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          SUBSCRIBERS TAB — KPIs + table of who's subscribed
+          ═══════════════════════════════════════════════════════════════ */}
+      {activeTab === 'subscribers' && (<>
+
+      {/* KPI cards */}
+      {(() => {
+        const activeCount = subscribers.filter(s => s.status === 'active').length
+        const startOfMonth = new Date(); startOfMonth.setDate(1); startOfMonth.setHours(0, 0, 0, 0)
+        const cancelsThisMonth = subscribers.filter(s =>
+          s.canceled_at && new Date(s.canceled_at) >= startOfMonth
+        ).length
+        const mrr = calcMRR()
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+            <div style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', color: '#fff', padding: '18px 20px', borderRadius: '14px' }}>
+              <div style={{ fontSize: '11px', letterSpacing: '0.5px', opacity: 0.85, fontWeight: 700 }}>MONTHLY RECURRING REVENUE</div>
+              <div style={{ fontSize: '28px', fontWeight: 800, marginTop: '4px' }}>${mrr.toFixed(2)}</div>
+              <div style={{ fontSize: '11px', opacity: 0.85, marginTop: '2px' }}>From {activeCount} active sub{activeCount === 1 ? '' : 's'}</div>
+            </div>
+            <div style={{ background: '#fff', border: '1.5px solid #e5e7eb', padding: '18px 20px', borderRadius: '14px' }}>
+              <div style={{ fontSize: '11px', letterSpacing: '0.5px', color: '#6b7280', fontWeight: 700 }}>ACTIVE SUBSCRIBERS</div>
+              <div style={{ fontSize: '28px', fontWeight: 800, marginTop: '4px', color: '#10b981' }}>{activeCount}</div>
+              <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>Currently billed</div>
+            </div>
+            <div style={{ background: '#fff', border: '1.5px solid #e5e7eb', padding: '18px 20px', borderRadius: '14px' }}>
+              <div style={{ fontSize: '11px', letterSpacing: '0.5px', color: '#6b7280', fontWeight: 700 }}>CANCELED THIS MONTH</div>
+              <div style={{ fontSize: '28px', fontWeight: 800, marginTop: '4px', color: cancelsThisMonth > 0 ? '#dc2626' : '#1f2937' }}>{cancelsThisMonth}</div>
+              <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>Churn this month</div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Subscribers table */}
+      {loadingSubs ? (
+        <div style={{ padding: '40px', textAlign: 'center', color: '#9ca3af' }}>Loading subscribers…</div>
+      ) : subscribers.length === 0 ? (
+        <div style={{ padding: '40px', textAlign: 'center', background: '#f9fafb', border: '1px dashed #e5e7eb', borderRadius: '12px', color: '#6b7280' }}>
+          No subscribers yet. Once a client subscribes from their portal, they'll show up here.
+        </div>
+      ) : (
+        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', overflow: 'hidden' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <thead style={{ background: '#f9fafb' }}>
+                <tr>
+                  <th style={thStyle}>Client</th>
+                  <th style={thStyle}>Plan</th>
+                  <th style={thStyle}>Status</th>
+                  <th style={thStyle}>Started</th>
+                  <th style={thStyle}>Next renewal</th>
+                  <th style={{ ...thStyle, textAlign: 'right' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {subscribers.map(sub => {
+                  const c = sub.clients
+                  const p = sub.subscription_plans
+                  const statusColor = sub.status === 'active' ? '#10b981' :
+                                      sub.status === 'past_due' ? '#f59e0b' :
+                                      sub.status === 'canceled' ? '#9ca3af' :
+                                      '#6b7280'
+                  const statusBg = sub.status === 'active' ? '#dcfce7' :
+                                   sub.status === 'past_due' ? '#fef3c7' :
+                                   sub.status === 'canceled' ? '#f3f4f6' :
+                                   '#f3f4f6'
+                  return (
+                    <tr key={sub.id} style={{ borderTop: '1px solid #f3f4f6' }}>
+                      <td style={tdStyle}>
+                        <div style={{ fontWeight: 700, color: '#1f2937' }}>
+                          {c ? `${c.first_name || ''} ${c.last_name || ''}`.trim() : '—'}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#9ca3af' }}>{c?.email || c?.phone || ''}</div>
+                      </td>
+                      <td style={tdStyle}>
+                        <div>{p?.emoji || '🐾'} {p?.name || '—'}</div>
+                        <div style={{ fontSize: '11px', color: '#7c3aed', fontWeight: 700 }}>
+                          {p ? `$${(p.price_cents / 100).toFixed(2)}/${p.billing_interval}` : ''}
+                        </div>
+                      </td>
+                      <td style={tdStyle}>
+                        <span style={{ display: 'inline-block', padding: '3px 10px', background: statusBg, color: statusColor, borderRadius: '12px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                          {sub.status || '—'}
+                        </span>
+                        {sub.cancel_at_period_end && (
+                          <div style={{ fontSize: '10px', color: '#f59e0b', marginTop: '2px', fontWeight: 700 }}>
+                            ⏳ ENDS {fmtDate(sub.current_period_end)}
+                          </div>
+                        )}
+                      </td>
+                      <td style={tdStyle}>{fmtDate(sub.created_at)}</td>
+                      <td style={tdStyle}>
+                        {sub.status === 'canceled' ? (
+                          <span style={{ color: '#9ca3af', fontSize: '12px' }}>Canceled {fmtDate(sub.canceled_at)}</span>
+                        ) : (
+                          fmtDate(sub.current_period_end)
+                        )}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <button onClick={() => openSubDetail(sub)}
+                          style={{ padding: '5px 10px', background: '#fff', color: '#7c3aed', border: '1px solid #c4b5fd', borderRadius: '6px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      </>)}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          SUBSCRIBER DETAIL MODAL — usage history + cancel buttons
+          ═══════════════════════════════════════════════════════════════ */}
+      {detailSub && (
+        <div onClick={() => setDetailSub(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: '16px', maxWidth: '600px', width: '100%', maxHeight: '85vh', overflowY: 'auto', padding: '24px' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 800, color: '#1f2937' }}>
+                  {detailSub.subscription_plans?.emoji || '🐾'} {detailSub.subscription_plans?.name || 'Subscription'}
+                </h2>
+                <div style={{ color: '#6b7280', fontSize: '13px', marginTop: '2px' }}>
+                  {detailSub.clients ? `${detailSub.clients.first_name} ${detailSub.clients.last_name}` : '—'}
+                </div>
+              </div>
+              <button onClick={() => setDetailSub(null)}
+                style={{ background: 'transparent', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#9ca3af', lineHeight: 1 }}>×</button>
+            </div>
+
+            {/* Status row */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', marginBottom: '16px', fontSize: '12px' }}>
+              <div><strong>Status:</strong> {detailSub.status || '—'}</div>
+              <div><strong>Price:</strong> ${detailSub.subscription_plans ? (detailSub.subscription_plans.price_cents / 100).toFixed(2) : '0.00'}/{detailSub.subscription_plans?.billing_interval || 'mo'}</div>
+              <div><strong>Started:</strong> {fmtDate(detailSub.created_at)}</div>
+              <div><strong>Renews:</strong> {detailSub.cancel_at_period_end ? `Ends ${fmtDate(detailSub.current_period_end)}` : fmtDate(detailSub.current_period_end)}</div>
+              {detailSub.canceled_at && (
+                <div style={{ gridColumn: 'span 2', color: '#9ca3af' }}><strong>Canceled:</strong> {fmtDate(detailSub.canceled_at)}</div>
+              )}
+            </div>
+
+            {/* Usage history */}
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 800, color: '#1f2937', marginBottom: '8px' }}>
+                📈 Usage History ({detailUsage.length})
+              </div>
+              {detailUsage.length === 0 ? (
+                <div style={{ fontSize: '12px', color: '#9ca3af', padding: '12px', background: '#f9fafb', borderRadius: '8px', textAlign: 'center' }}>
+                  No usage yet — this client hasn't booked an appointment that tapped this subscription.
+                </div>
+              ) : (
+                <div style={{ background: '#f9fafb', borderRadius: '8px', padding: '8px' }}>
+                  {detailUsage.map(u => (
+                    <div key={u.id} style={{ padding: '6px 8px', borderBottom: '1px solid #e5e7eb', fontSize: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#1f2937', fontWeight: 600 }}>{u.appointments?.services?.service_name || 'Appointment'}</span>
+                        <span style={{ color: '#9ca3af' }}>{fmtDate(u.used_at)}</span>
+                      </div>
+                      {u.notes && <div style={{ color: '#6b7280', fontSize: '11px', marginTop: '2px' }}>{u.notes}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Cancel buttons — only show if not already canceled */}
+            {detailSub.status !== 'canceled' && (
+              <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '14px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', marginBottom: '8px' }}>Danger zone</div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {!detailSub.cancel_at_period_end && (
+                    <button onClick={() => handleCancelSub(detailSub, true)} disabled={cancelingSubId === detailSub.id}
+                      style={{ flex: 1, minWidth: '180px', padding: '10px 14px', background: '#fff', color: '#f59e0b', border: '1.5px solid #f59e0b', borderRadius: '8px', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}>
+                      ⏳ Cancel at end of period
+                    </button>
+                  )}
+                  <button onClick={() => handleCancelSub(detailSub, false)} disabled={cancelingSubId === detailSub.id}
+                    style={{ flex: 1, minWidth: '180px', padding: '10px 14px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}>
+                    🛑 Cancel immediately
+                  </button>
+                </div>
+                <div style={{ fontSize: '10px', color: '#9ca3af', marginTop: '6px' }}>
+                  "End of period" = client keeps using until {fmtDate(detailSub.current_period_end)}, no more charges. "Immediately" = stops right now.
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -548,3 +887,6 @@ export default function Subscriptions() {
 // Shared styles
 const labelStyle = { display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '4px' }
 const inputStyle = { width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', background: '#fff', boxSizing: 'border-box' }
+// Subscribers table cells (Phase 4)
+const thStyle = { textAlign: 'left', padding: '10px 14px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }
+const tdStyle = { padding: '12px 14px', verticalAlign: 'top' }
