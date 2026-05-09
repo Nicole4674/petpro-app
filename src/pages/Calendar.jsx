@@ -10,6 +10,8 @@ import ReportCardModal from '../components/ReportCardModal'
 import MobileDriveTimeWarning from '../components/MobileDriveTimeWarning'
 import SmartBookModal from '../components/SmartBookModal'
 import { formatPhone } from '../lib/phone'
+import { FEATURE_FLAGS } from '../lib/featureFlags'
+import { computeCoverage, recordSubscriptionUsage } from '../lib/subscriptionCoverage'
 import { mapsUrl, telUrl } from '../lib/maps'
 
 const HOURS = []
@@ -407,6 +409,11 @@ export default function Calendar() {
     const [discountReason, setDiscountReason] = useState('')
     const [paymentNotes, setPaymentNotes] = useState('')
     const [recordingPayment, setRecordingPayment] = useState(false)
+    // ─── Subscription coverage state (Phase 3) ─────────────────────────────
+    // Set by openPaymentPopup if client has an active subscription that covers
+    // any service on this appointment. Drives the "🔁 Subscription covers $X"
+    // banner + auto-fills the discount field.
+    const [subCoverage, setSubCoverage] = useState(null)  // null OR coverage result obj
     // ─── Saved card support (Phase 4b) ───────────────────────────────────
     // When the groomer picks Card method, we offer the client's saved cards
     // (charged via Stripe) by default. Manual fallback for offline terminals.
@@ -1974,6 +1981,33 @@ export default function Calendar() {
         setSelectedSavedCardId(null)
         setUseManualCardEntry(false)
 
+        // ─── Subscription coverage check (feature-flagged) ────────────────
+        // Reset first so we don't show stale data from a prior popup
+        setSubCoverage(null)
+        if (FEATURE_FLAGS.SUBSCRIPTIONS && appt.client_id) {
+            try {
+                const coverage = await computeCoverage({
+                    clientId: appt.client_id,
+                    appointmentPets: appt.appointment_pets || [],
+                    topLevelService: appt.services || null,
+                    topLevelServicePrice: parseFloat(appt.final_price || appt.quoted_price || 0),
+                    appointmentPrice: servicePrice,
+                })
+                if (coverage.covered) {
+                    setSubCoverage(coverage)
+                    // Auto-bump the discount field so the balance reflects coverage immediately
+                    const totalDiscount = existingDiscount + coverage.discount_amount
+                    setDiscountAmount(totalDiscount.toFixed(2))
+                    setDiscountReason((appt.discount_reason ? appt.discount_reason + ' · ' : '') + coverage.coverage_message)
+                    // Recompute balance with subscription coverage applied
+                    const newBalance = servicePrice - totalDiscount - totalPaid
+                    setPaymentAmount(newBalance > 0 ? newBalance.toFixed(2) : '0.00')
+                }
+            } catch (e) {
+                console.warn('[checkout] subscription coverage check failed (non-fatal):', e)
+            }
+        }
+
         setShowPaymentPopup(true)
     }
 
@@ -2127,6 +2161,13 @@ export default function Calendar() {
                 setRecordingPayment(false)
                 return
             }
+        }
+
+        // ─── Subscription usage tracking (Phase 3) ────────────────────────
+        // Record that this appointment "used" the client's subscription so
+        // bundle caps tick down + history is preserved.
+        if (subCoverage && subCoverage.covered && subCoverage.usage_records) {
+            await recordSubscriptionUsage(subCoverage.usage_records, paymentAppt.id)
         }
 
         // 3. Stamp checked_out_at
@@ -5289,6 +5330,26 @@ export default function Calendar() {
                                         <span>${balance.toFixed(2)}</span>
                                     </div>
                                 </div>
+
+                                {/* ─── Subscription coverage banner (Phase 3) ─── */}
+                                {subCoverage && subCoverage.covered && (
+                                    <div style={{
+                                        marginTop: '12px',
+                                        padding: '10px 14px',
+                                        background: 'linear-gradient(135deg, #faf5ff, #f0fdf4)',
+                                        border: '1.5px solid #c4b5fd',
+                                        borderRadius: '10px',
+                                        fontSize: '13px',
+                                        color: '#5b21b6',
+                                        fontWeight: 600,
+                                        lineHeight: 1.5,
+                                    }}>
+                                        🔁 {subCoverage.coverage_message}
+                                        <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: 400, marginTop: '4px' }}>
+                                            Discount auto-applied. You can adjust if needed.
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* PAID IN FULL state OR payment form */}
                                 {isPaidInFull ? (
