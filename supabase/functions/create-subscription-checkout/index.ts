@@ -38,19 +38,16 @@ serve(async (req) => {
 
     // ─── Auth — must be a logged-in client ───
     const authHeader = req.headers.get("Authorization") || ""
-    const userClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    )
-    const { data: { user } } = await userClient.auth.getUser()
-    if (!user) return jsonError("Not authenticated", 401)
+    const jwt = authHeader.replace(/^Bearer\s+/i, "")
+    if (!jwt) return jsonError("Not authenticated", 401)
 
     const adminClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
       { auth: { autoRefreshToken: false, persistSession: false } }
     )
+    const { data: { user }, error: authErr } = await adminClient.auth.getUser(jwt)
+    if (authErr || !user) return jsonError("Not authenticated", 401)
 
     // ─── Look up the client ─── (must own this auth user)
     const { data: clientRow } = await adminClient
@@ -74,10 +71,10 @@ serve(async (req) => {
     // ─── Look up groomer's Connect account ───
     const { data: groomer } = await adminClient
       .from("groomers")
-      .select("stripe_connect_account_id, stripe_charges_enabled")
+      .select("stripe_connect_account_id, stripe_connect_charges_enabled")
       .eq("id", plan.groomer_id)
       .maybeSingle()
-    if (!groomer || !groomer.stripe_connect_account_id || !groomer.stripe_charges_enabled) {
+    if (!groomer || !groomer.stripe_connect_account_id || !groomer.stripe_connect_charges_enabled) {
       return jsonError("Your groomer's Stripe isn't ready for subscriptions yet.")
     }
 

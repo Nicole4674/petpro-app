@@ -2205,11 +2205,39 @@ export default function Calendar() {
     }
 
     // Already paid in full — just confirm and stamp check-out
+    // ALSO handles the $0-balance subscription-covered case:
+    //   • persists the auto-applied subscription discount to the appointment
+    //     (so the calendar block flips green via the isDoneAndPaid math)
+    //   • records subscription_usage rows so bundle caps tick down
     const confirmPaidInFull = async () => {
         if (!paymentAppt) return
         setRecordingPayment(true)
         const { data: { user } } = await supabase.auth.getUser()
         const now = new Date().toISOString()
+
+        // ─── Persist any pending discount (e.g. subscription auto-fill) ───
+        // openPaymentPopup may have set discountAmount/discountReason from
+        // computeCoverage but NEVER saved them to the row. Without this,
+        // the appointment still shows quoted_price as owed → block stays
+        // its normal color instead of going green.
+        const discount = parseFloat(discountAmount || 0)
+        const currentDiscount = parseFloat(paymentAppt.discount_amount || 0)
+        const discountChanged = discount !== currentDiscount ||
+            discountReason !== (paymentAppt.discount_reason || '')
+        if (discountChanged) {
+            await supabase.from('appointments').update({
+                discount_amount: discount,
+                discount_reason: discountReason || null,
+            }).eq('id', paymentAppt.id)
+        }
+
+        // ─── Subscription usage tracking ──────────────────────────────────
+        // Record that this appointment "used" the client's subscription so
+        // bundle caps tick down + history is preserved. This was missing
+        // entirely for the $0-balance path — usage rows weren't written.
+        if (subCoverage && subCoverage.covered && subCoverage.usage_records) {
+            await recordSubscriptionUsage(subCoverage.usage_records, paymentAppt.id)
+        }
 
         await supabase.from('appointments').update({
             checked_out_at: now,
@@ -2217,7 +2245,13 @@ export default function Calendar() {
         }).eq('id', paymentAppt.id)
 
         if (selectedAppt && selectedAppt.id === paymentAppt.id) {
-            setSelectedAppt({ ...selectedAppt, checked_out_at: now, checked_out_by: user.id })
+            setSelectedAppt({
+                ...selectedAppt,
+                checked_out_at: now,
+                checked_out_by: user.id,
+                discount_amount: discount,
+                discount_reason: discountReason,
+            })
         }
 
         await fetchData()

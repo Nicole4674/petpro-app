@@ -42,21 +42,18 @@ serve(async (req) => {
     const { plan_id } = await req.json()
     if (!plan_id) return jsonError("plan_id required")
 
-    // ─── Auth: verify caller owns this plan ───
+    // ─── Auth: extract user from the JWT (Supabase already verified it) ───
     const authHeader = req.headers.get("Authorization") || ""
-    const userClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    )
-    const { data: { user } } = await userClient.auth.getUser()
-    if (!user) return jsonError("Not authenticated", 401)
+    const jwt = authHeader.replace(/^Bearer\s+/i, "")
+    if (!jwt) return jsonError("Not authenticated", 401)
 
     const adminClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
       { auth: { autoRefreshToken: false, persistSession: false } }
     )
+    const { data: { user }, error: authErr } = await adminClient.auth.getUser(jwt)
+    if (authErr || !user) return jsonError("Not authenticated", 401)
 
     // ─── Pull the plan + verify ownership ───
     const { data: plan, error: planErr } = await adminClient
@@ -70,13 +67,13 @@ serve(async (req) => {
     // ─── Pull groomer's Stripe Connect account ───
     const { data: groomer } = await adminClient
       .from("groomers")
-      .select("stripe_connect_account_id, stripe_charges_enabled")
+      .select("stripe_connect_account_id, stripe_connect_charges_enabled")
       .eq("id", user.id)
       .maybeSingle()
     if (!groomer || !groomer.stripe_connect_account_id) {
       return jsonError("Stripe not connected. Set up Stripe Connect first in Shop Settings.")
     }
-    if (!groomer.stripe_charges_enabled) {
+    if (!groomer.stripe_connect_charges_enabled) {
       return jsonError("Stripe Connect is not fully enabled yet. Finish onboarding in Stripe Dashboard.")
     }
 

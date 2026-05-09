@@ -36,19 +36,16 @@ serve(async (req) => {
 
     // ─── Auth — caller must be the client ───
     const authHeader = req.headers.get("Authorization") || ""
-    const userClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    )
-    const { data: { user } } = await userClient.auth.getUser()
-    if (!user) return jsonError("Not authenticated", 401)
+    const jwt = authHeader.replace(/^Bearer\s+/i, "")
+    if (!jwt) return jsonError("Not authenticated", 401)
 
     const adminClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
       { auth: { autoRefreshToken: false, persistSession: false } }
     )
+    const { data: { user }, error: authErr } = await adminClient.auth.getUser(jwt)
+    if (authErr || !user) return jsonError("Not authenticated", 401)
 
     // ─── Look up the client ───
     const { data: clientRow } = await adminClient
