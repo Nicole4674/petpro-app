@@ -129,6 +129,10 @@ export default function ShopSettings() {
   // in src/lib/smsTemplates.js so the cron / send-sms helper can read them
   // when a shop hasn't customized.
   var [smsTemplates, setSmsTemplates] = useState(DEFAULT_SMS_TEMPLATES)
+  // Per-template ON/OFF map. Empty {} = all enabled (backward compat).
+  // When a key is set to false, the send-sms edge function skips that
+  // automated SMS type without burning a quota credit.
+  var [smsTemplateEnabled, setSmsTemplateEnabled] = useState({})
 
   // Waitlist auto-notify quiet hours — per-shop config so shops in different
   // timezones don't text clients at 6 AM their time. Defaults match the old
@@ -302,6 +306,9 @@ export default function ShopSettings() {
           setBusinessHours({ ...DEFAULT_BUSINESS_HOURS, ...data.business_hours })
         }
         // SMS templates — merge with defaults so newly-added templates always exist
+        if (data.sms_template_enabled && typeof data.sms_template_enabled === 'object') {
+          setSmsTemplateEnabled(data.sms_template_enabled)
+        }
         if (data.sms_templates && typeof data.sms_templates === 'object') {
           setSmsTemplates({ ...DEFAULT_SMS_TEMPLATES, ...data.sms_templates })
         }
@@ -445,6 +452,7 @@ export default function ShopSettings() {
         business_hours: businessHours,
         // Customizable SMS template wording (per shop)
         sms_templates: smsTemplates,
+        sms_template_enabled: smsTemplateEnabled,
       }
 
       var { error: upsertError } = await supabase
@@ -903,10 +911,39 @@ export default function ShopSettings() {
           var value = smsTemplates[key] || ''
           var isDefault = value === DEFAULT_SMS_TEMPLATES[key]
           var charCount = value.length
+          // Default to ON unless explicitly false. Lets shops upgrade without
+          // losing reminders just because they opened settings once.
+          var enabled = smsTemplateEnabled[key] !== false
+          var toggleEnabled = function () {
+            setSmsTemplateEnabled({ ...smsTemplateEnabled, [key]: !enabled })
+          }
           return (
-            <div key={key} style={{ marginBottom: '14px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: '#1f2937' }}>{label}</label>
+            <div key={key} style={{ marginBottom: '14px', opacity: enabled ? 1 : 0.55 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', gap: '8px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  {/* On/off pill — saves the groomer's monthly SMS allocation
+                      when an automated template is turned off. Click to flip. */}
+                  <button
+                    type="button"
+                    onClick={toggleEnabled}
+                    title={enabled ? 'Click to turn this SMS OFF (saves credits)' : 'Click to turn this SMS ON'}
+                    style={{
+                      background: enabled ? '#16a34a' : '#d1d5db',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '999px',
+                      padding: '3px 12px',
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      letterSpacing: '0.5px',
+                      minWidth: '44px',
+                    }}
+                  >
+                    {enabled ? 'ON' : 'OFF'}
+                  </button>
+                  <label style={{ fontSize: '13px', fontWeight: 600, color: '#1f2937' }}>{label}</label>
+                </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                   <span style={{
                     fontSize: '11px',

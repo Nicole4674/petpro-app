@@ -101,6 +101,40 @@ serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     })
 
+    // ─── 3b. PER-TEMPLATE TOGGLE GATE ──────────────────────────────────
+    // Groomers can disable specific automated SMS types they don't want
+    // (saves their monthly allocation). Toggles live in
+    // shop_settings.sms_template_enabled (JSONB). Manual sms_type ('manual'
+    // or unknown) is NEVER gated — those are one-off groomer actions.
+    // If the template key is explicitly set to false, skip BEFORE the
+    // quota check so the disabled SMS doesn't burn a credit.
+    const AUTOMATED_TYPES = new Set([
+      "reminder", "confirmation", "pickup_ready", "running_late",
+      "rebook_followup", "thank_you",
+    ])
+    if (AUTOMATED_TYPES.has(smsType)) {
+      const { data: shopRow } = await supabase
+        .from("shop_settings")
+        .select("sms_template_enabled")
+        .eq("groomer_id", groomerId)
+        .maybeSingle()
+      const toggles = (shopRow && shopRow.sms_template_enabled) || {}
+      // Default to enabled if key missing — preserves existing behavior
+      // for shops that haven't touched the toggles UI yet.
+      if (toggles[smsType] === false) {
+        console.log(`[send-sms] ${smsType} disabled by groomer ${groomerId} — skipping`)
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            skipped: true,
+            reason: `${smsType} template is disabled in shop settings`,
+            sms_type: smsType,
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        )
+      }
+    }
+
     // ─── 4. GATE — call deduct_sms_quota RPC FIRST ───
     // This either returns ok=true (we can send) or ok=false (block).
     // Founders get ok=true automatically with source='founder_unlimited'.
