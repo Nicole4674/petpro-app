@@ -6,7 +6,7 @@
 // (Previously used OpenAI fable. Swapped for stronger British accent + more
 // expressive emotion. Nicole already has an ElevenLabs sub for Mortal Ties.)
 //
-// Voice: "Charlie" — voice_id IKne3meq5aSn9XLyUdCD
+// Voice: very British male — voice_id giAoKpl5weRTCJK7uB9b (Nicole's pick May 2026)
 // Model: eleven_turbo_v2_5 — fastest low-latency voice, great quality
 //
 // Falls back to OpenAI tts-1 with fable if ElevenLabs key is missing or fails,
@@ -18,7 +18,7 @@
 // Response:
 //   audio/mpeg binary stream — frontend wraps it in a Blob + plays via Audio()
 //
-// Required env: ELEVENLABS_API_KEY (primary), OPENAI_API_KEY (fallback)
+// Required env: ELEVENLABS_API (primary), OPENAI_API_KEY (fallback)
 // =============================================================================
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
@@ -32,7 +32,7 @@ const corsHeaders = {
 // Charlie — ElevenLabs default voice library. Younger, friendly British male.
 // To swap voices later: change this voice_id to any other ElevenLabs voice
 // (e.g. George, Daniel, Adam, or your own cloned voice).
-const ELEVENLABS_VOICE_ID = "IKne3meq5aSn9XLyUdCD"   // Charlie
+const ELEVENLABS_VOICE_ID = "giAoKpl5weRTCJK7uB9b"   // British male — Nicole's pick
 
 // Model choice — turbo is fast + great quality. Use eleven_multilingual_v2
 // if you want max quality at the cost of slightly higher latency.
@@ -55,7 +55,7 @@ serve(async (req) => {
     // ElevenLabs charges per character, so this limit also caps spend.
     const cappedText = text.length > 2000 ? text.slice(0, 2000) : text
 
-    const elevenKey = Deno.env.get("ELEVENLABS_API_KEY")
+    const elevenKey = Deno.env.get("ELEVENLABS_API")
     const openaiKey = Deno.env.get("OPENAI_API_KEY")
 
     // ─── PRIMARY: ElevenLabs ───
@@ -106,7 +106,7 @@ serve(async (req) => {
 
     // ─── FALLBACK: OpenAI TTS (if ElevenLabs missing or errored) ───
     if (!openaiKey) {
-      console.error("[petpro-tts] No TTS provider configured (no ELEVENLABS_API_KEY or OPENAI_API_KEY)")
+      console.error("[petpro-tts] No TTS provider configured (no ELEVENLABS_API or OPENAI_API_KEY)")
       return jsonError("Voice is not configured yet — please contact support.", 500)
     }
 
