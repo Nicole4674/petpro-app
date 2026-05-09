@@ -1941,6 +1941,139 @@ When using this reference, Claude should also lean on:
 `
 
 // ─── SYSTEM PROMPT BUILDER ───────────────────────────────────────────────────
+// Execute a tool call from Suds. Currently only one tool — add_grooming_note —
+// which appends a note to a pet's grooming_notes column. We:
+//   1. Verify the pet belongs to this groomer (so Suds can't write to others')
+//   2. Read existing notes
+//   3. Append the new note prefixed with a date stamp + "via Suds"
+// Returns a result object that gets sent back to the model as tool_result.
+async function executeTool(name: string, input: any, groomerId: string, adminClient: any): Promise<any> {
+  if (name === "add_grooming_note") {
+    const petId = String(input?.pet_id || "").trim()
+    const note = String(input?.note || "").trim()
+    if (!petId || !note) {
+      return { ok: false, error: "Missing pet_id or note" }
+    }
+    try {
+      // Verify ownership AND get current notes
+      const { data: pet, error: pErr } = await adminClient
+        .from("pets")
+        .select("id, name, grooming_notes")
+        .eq("id", petId)
+        .eq("groomer_id", groomerId)
+        .maybeSingle()
+      if (pErr || !pet) return { ok: false, error: "Pet not found in your shop" }
+
+      const stamp = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      const newEntry = `[${stamp} · via Suds] ${note}`
+      const merged = pet.grooming_notes
+        ? `${pet.grooming_notes}\n\n${newEntry}`
+        : newEntry
+
+      const { error: uErr } = await adminClient
+        .from("pets")
+        .update({ grooming_notes: merged })
+        .eq("id", petId)
+        .eq("groomer_id", groomerId)
+      if (uErr) return { ok: false, error: uErr.message }
+
+      return { ok: true, pet_name: pet.name, note_added: newEntry }
+    } catch (e: any) {
+      console.error("[suds tool] add_grooming_note error:", e)
+      return { ok: false, error: e.message || "Internal error" }
+    }
+  }
+  return { ok: false, error: `Unknown tool: ${name}` }
+}
+
+// Pull yesterday + today + tomorrow appointments and the recent client list
+// so Suds can recognize pets/clients the groomer mentions casually.
+// Returns a compact text snippet to stick in the per-request system prompt.
+//
+// Format kept tight because this is sent EVERY message (no prompt cache —
+// it changes daily). Goal: Suds knows enough to say "Stella the
+// Goldendoodle from yesterday?" without bloating the token bill.
+async function loadGroomerContext(adminClient: any, groomerId: string): Promise<string> {
+  try {
+    const today = new Date()
+    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1)
+    const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1)
+    const iso = (d: Date) => d.toISOString().slice(0, 10)
+
+    // One query covering yesterday → tomorrow
+    const { data: appts } = await adminClient
+      .from("appointments")
+      .select(`
+        id, appointment_date, start_time, status,
+        clients(first_name, last_name),
+        appointment_pets(pets(id, name, breed, behavior_tags, grooming_notes), services(service_name))
+      `)
+      .eq("groomer_id", groomerId)
+      .gte("appointment_date", iso(yesterday))
+      .lte("appointment_date", iso(tomorrow))
+      .order("appointment_date", { ascending: true })
+      .order("start_time", { ascending: true })
+
+    // Format: bucket by date so Suds can say "yesterday's appts"
+    const buckets: Record<string, string[]> = {
+      [iso(yesterday)]: [],
+      [iso(today)]: [],
+      [iso(tomorrow)]: [],
+    }
+    for (const a of (appts || [])) {
+      const client = a.clients ? `${a.clients.first_name || ""} ${a.clients.last_name || ""}`.trim() : "—"
+      const petLines = (a.appointment_pets || []).map((ap: any) => {
+        const pet = ap.pets
+        if (!pet) return ""
+        const tags = (pet.behavior_tags && pet.behavior_tags.length) ? ` [${pet.behavior_tags.join(", ")}]` : ""
+        const svc = ap.services?.service_name || ""
+        // Include pet_id so Suds can reference it for the add_grooming_note tool
+        return `${pet.name}${pet.breed ? " · " + pet.breed : ""} (id:${pet.id}) — ${svc}${tags}`
+      }).filter(Boolean).join("; ")
+      const bucket = buckets[a.appointment_date]
+      if (bucket) bucket.push(`  • ${a.start_time?.slice(0, 5) || ""} ${client}: ${petLines}${a.status === 'no_show' ? ' [NO SHOW]' : a.status === 'cancelled' ? ' [CANCELLED]' : ''}`)
+    }
+
+    // Top 30 most-recently-seen clients so Suds can match casual name drops
+    const { data: recentClients } = await adminClient
+      .from("clients")
+      .select("id, first_name, last_name")
+      .eq("groomer_id", groomerId)
+      .order("updated_at", { ascending: false })
+      .limit(30)
+
+    const clientList = (recentClients || [])
+      .map((c: any) => `${c.first_name || ""} ${c.last_name || ""}`.trim())
+      .filter(Boolean)
+      .join(", ")
+
+    const fmt = (label: string, dateISO: string) => {
+      const lines = buckets[dateISO]
+      const dateLabel = new Date(dateISO + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+      if (!lines || lines.length === 0) return `${label} (${dateLabel}): no appointments`
+      return `${label} (${dateLabel}):\n${lines.join("\n")}`
+    }
+
+    return [
+      "# YOUR SHOP CONTEXT (this groomer's actual schedule)",
+      "Use this to recognize pets/clients when the groomer mentions them. ",
+      "When you reference a pet, mention the breed if you know it — feels personal. ",
+      "Pet IDs are included in parentheses so you can use them with the add_grooming_note tool.",
+      "",
+      fmt("YESTERDAY", iso(yesterday)),
+      "",
+      fmt("TODAY", iso(today)),
+      "",
+      fmt("TOMORROW", iso(tomorrow)),
+      "",
+      `RECENT CLIENTS: ${clientList || "(none yet)"}`,
+    ].join("\n")
+  } catch (e) {
+    console.error("[suds] loadGroomerContext error:", e)
+    return "# YOUR SHOP CONTEXT\n(Could not load schedule context — answer normally.)"
+  }
+}
+
 function buildSystemPrompt(): string {
   return `You are PetPro AI — the AI assistant inside PetPro, the grooming SaaS for professional dog groomers. Your user is a working groomer who is paying for access to you.
 
@@ -1981,6 +2114,32 @@ You will refuse — politely but firmly — to do these things:
 If a groomer asks for code or app modifications, redirect warmly: offer to draft a feature request they can send to the PetPro team, but never write or modify code yourself. Say something like "That's not something I can do from here — but I'd be happy to write up the request for you to send the PetPro team."
 
 EVERYTHING ELSE is open. Marketing help, payroll math, breed knowledge, photo analysis of dogs, drafting client conversations, bookkeeping help, business strategy, life advice between grooms, voice mode all-day-long companion. Full range. Be genuinely useful.
+
+# YOUR SHOP CONTEXT (per-message, dynamic)
+
+A "YOUR SHOP CONTEXT" block is injected into every conversation with the groomer's actual yesterday/today/tomorrow appointments and recent clients. USE THIS:
+
+- When the groomer mentions a pet by first name ("Stella was rough today"), check if you can identify which Stella from the schedule. If yes, reference them naturally: "Stella the Goldendoodle from yesterday's full groom?"
+- Use the breed and the day for color so it feels like you actually know them.
+- If you can't find the name in the schedule, just play along and ask which one — never invent.
+- The schedule has pet IDs in parens like "(id:abc123)". You don't show those to the groomer — they're for you to use with the add_grooming_note tool.
+
+# VENT MODE
+
+Groomers use you to vent about hard appointments. When that happens:
+- Match their energy — laugh with them, commiserate, joke around. Be the work bestie.
+- Don't moralize, don't defend the dog or owner, don't lecture. Just be on their side.
+- After they vent, ALWAYS offer: "Want me to add a note to {pet name}'s file so you don't forget?" — never auto-add without confirmation.
+- If they say yes/yeah/sure/please/etc, call the add_grooming_note tool with that pet's id and a tight, useful note (1-2 sentences). Confirm in your reply.
+- Keep notes professional even if the vent was salty — they're for the groomer's future self, not entertainment.
+
+# add_grooming_note TOOL
+
+You have a tool called \`add_grooming_note\`. Use it when the groomer confirms they want a note added.
+- pet_id: pull from the (id:...) markers in the SHOP CONTEXT
+- note: 1-2 sentence professional note for the pet's permanent grooming notes file
+- Don't call the tool unless the groomer explicitly confirms — assume "let me think" or silence means no.
+- The note APPENDS to the pet's existing grooming notes (it doesn't overwrite).
 
 # RESPONSE STYLE
 
@@ -2079,28 +2238,79 @@ serve(async (req) => {
     // Initialize Anthropic
     const anthropic = new Anthropic({ apiKey: anthropicKey })
 
-    // Call Claude with prompt caching for the long system prompt
-    const apiResponse = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 2048, // hard cap to control per-message API cost
-      system: [
-        {
-          type: "text",
-          text: buildSystemPrompt(),
-          cache_control: { type: "ephemeral" },
+    // Pull dynamic per-shop context (yesterday/today/tomorrow + recent clients)
+    // so Suds can recognize pets when the groomer mentions them by name.
+    const shopContext = await loadGroomerContext(adminClient, user.id)
+
+    // Tool definition — Suds can append a grooming note to a pet's file.
+    // Used after the groomer explicitly confirms (per system prompt rules).
+    const tools = [
+      {
+        name: "add_grooming_note",
+        description: "Append a 1-2 sentence professional grooming note to a pet's permanent file. Only call when the groomer has explicitly confirmed they want the note added. Pet IDs are surfaced in YOUR SHOP CONTEXT in parentheses like '(id:abc123)'.",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            pet_id: { type: "string", description: "The pet's UUID (from the YOUR SHOP CONTEXT block)" },
+            note: { type: "string", description: "The note to append (1-2 sentences, professional even if the groomer was venting)" },
+          },
+          required: ["pet_id", "note"],
         },
-      ],
+      },
+    ]
+
+    const sharedSystem = [
+      // Big static brain — cached so we don't re-bill it every message
+      { type: "text", text: buildSystemPrompt(), cache_control: { type: "ephemeral" } },
+      // Per-message dynamic context — NOT cached because it changes daily
+      { type: "text", text: shopContext },
+    ]
+
+    // Tool-use loop — keep going until the model returns text only.
+    // Cap iterations to prevent runaway loops (max 3 = enough for ~3 notes).
+    let apiResponse = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 2048,
+      system: sharedSystem,
+      tools,
       messages,
     })
 
-    // Extract text from response
+    let inputTokens = apiResponse.usage.input_tokens
+    let outputTokens = apiResponse.usage.output_tokens
+    let toolIterations = 0
+    while (apiResponse.stop_reason === "tool_use" && toolIterations < 3) {
+      toolIterations++
+      const toolUses = apiResponse.content.filter((c: any) => c.type === "tool_use")
+      const toolResults: any[] = []
+      for (const tu of toolUses) {
+        const result = await executeTool(tu.name, tu.input, user.id, adminClient)
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: JSON.stringify(result),
+        })
+      }
+      // Append the assistant's tool-call message + our tool_results
+      messages.push({ role: "assistant", content: apiResponse.content })
+      messages.push({ role: "user", content: toolResults })
+
+      apiResponse = await anthropic.messages.create({
+        model: "claude-sonnet-4-6",
+        max_tokens: 2048,
+        system: sharedSystem,
+        tools,
+        messages,
+      })
+      inputTokens += apiResponse.usage.input_tokens
+      outputTokens += apiResponse.usage.output_tokens
+    }
+
+    // Extract text from final response
     const assistantText = apiResponse.content
       .filter((c: any) => c.type === "text")
       .map((c: any) => c.text)
       .join("")
-
-    const inputTokens = apiResponse.usage.input_tokens
-    const outputTokens = apiResponse.usage.output_tokens
 
     // Save user message
     await adminClient.from("ai_messages").insert({
