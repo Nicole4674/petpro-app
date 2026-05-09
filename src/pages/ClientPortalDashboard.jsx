@@ -14,6 +14,8 @@ import EnableNotifications from '../components/EnableNotifications'
 import ReportCardModal from '../components/ReportCardModal'
 import ClientPaymentModal from '../components/ClientPaymentModal'
 import ClientSubscriptionsTab from '../components/ClientSubscriptionsTab'
+import ClientPortalReportCardsTab from '../components/ClientPortalReportCardsTab'
+import ReceiptModal from '../components/ReceiptModal'
 import BreedPicker from '../components/BreedPicker'
 import { DOG_BREEDS, CAT_BREEDS } from '../lib/breeds'
 import { formatPhone, formatPhoneOnInput } from '../lib/phone'
@@ -25,6 +27,7 @@ const TABS = [
   { key: 'upcoming', label: '📅 Upcoming' },
   { key: 'grooming', label: '✂️ Past Grooming' },
   { key: 'boarding', label: '🏠 Past Boarding' },
+  { key: 'reportcards', label: '📋 Report Cards' },
   { key: 'subscriptions', label: '🔁 Subscriptions', featureFlag: 'SUBSCRIPTIONS' },
   { key: 'vaccinations', label: '💉 Vaccinations' },
   { key: 'payments', label: '🧾 Payments' },
@@ -51,6 +54,29 @@ export default function ClientPortalDashboard() {
   var [pets, setPets] = useState([])
   var [shopSettings, setShopSettings] = useState(null)
   var [activeTab, setActiveTab] = useState('overview')
+  // Receipt modal state — when client clicks "🧾 Receipt" on a past
+  // appointment row. Loads payments for that appointment lazily.
+  var [receiptAppt, setReceiptAppt] = useState(null)
+  var [receiptPayments, setReceiptPayments] = useState([])
+  // Loads + opens the receipt modal for one appointment OR boarding reservation.
+  // Detects boarding by the presence of end_date on the row.
+  async function openReceipt(appt) {
+    setReceiptAppt(appt)
+    setReceiptPayments([])
+    try {
+      var isBoardingRow = !!appt.end_date
+      var query = supabase.from('payments').select('*')
+      if (isBoardingRow) {
+        query = query.eq('boarding_reservation_id', appt.id)
+      } else {
+        query = query.eq('appointment_id', appt.id)
+      }
+      var { data } = await query.order('created_at', { ascending: true })
+      setReceiptPayments(data || [])
+    } catch (e) {
+      console.error('[ClientPortal] receipt payments load:', e)
+    }
+  }
 
   // Edit mode state for Contact Info card
   var [editing, setEditing] = useState(false)
@@ -271,9 +297,10 @@ export default function ClientPortalDashboard() {
       setPastGrooming(pastApptsData || [])
 
       // 8. Past boarding — reservations that ended before today and not cancelled
+      // Now pulls boarding_addons so the Receipt modal can show them as line items.
       var { data: pastBoardingData } = await supabase
         .from('boarding_reservations')
-        .select('*, kennels(id, name), boarding_reservation_pets(id, pet_id, pets(id, name, breed))')
+        .select('*, kennels(id, name), boarding_reservation_pets(id, pet_id, pets(id, name, breed)), boarding_addons(*)')
         .eq('client_id', clientData.id)
         .lt('end_date', todayStr)
         .order('start_date', { ascending: false })
@@ -2072,6 +2099,16 @@ export default function ClientPortalDashboard() {
                           {appt.service_notes && (
                             <div className="cp-history-notes">📝 {appt.service_notes}</div>
                           )}
+                          {/* Receipt button — every past grooming gets one */}
+                          <div style={{ marginTop: '8px' }}>
+                            <button
+                              type="button"
+                              onClick={function () { openReceipt(appt) }}
+                              style={{ background: '#fff', color: '#7c3aed', border: '1px solid #c4b5fd', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                              🧾 Receipt
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )
@@ -2124,6 +2161,17 @@ export default function ClientPortalDashboard() {
                           {res.special_instructions && (
                             <div className="cp-history-notes">📝 {res.special_instructions}</div>
                           )}
+                          {/* Receipt button — works for boarding too thanks to
+                              ReceiptModal's auto-detect of end_date. */}
+                          <div style={{ marginTop: '8px' }}>
+                            <button
+                              type="button"
+                              onClick={function () { openReceipt(res) }}
+                              style={{ background: '#fff', color: '#7c3aed', border: '1px solid #c4b5fd', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                              🧾 Receipt
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )
@@ -2132,6 +2180,17 @@ export default function ClientPortalDashboard() {
               </div>
             )}
           </div>
+        )}
+
+        {/* ═══════ REPORT CARDS TAB ═══════ */}
+        {/* Read-only viewer for every report card the groomer's filled out  */}
+        {/* for this client's pets. Each card has a Print button that opens  */}
+        {/* a clean printable HTML doc styled like the groomer-side modal.   */}
+        {activeTab === 'reportcards' && (
+          <ClientPortalReportCardsTab
+            clientId={client?.id}
+            shopName={shopSettings?.shop_name}
+          />
         )}
 
         {/* ═══════ SUBSCRIPTIONS TAB (feature-flagged) ═══════ */}
@@ -2955,6 +3014,20 @@ export default function ClientPortalDashboard() {
             setPayingBalance(0)
             loadPortalData()
           }}
+        />
+      )}
+
+      {/* Receipt modal — opened from past appointment rows.
+          Pulls payment rows lazily via openReceipt() above. */}
+      {receiptAppt && (
+        <ReceiptModal
+          appointment={receiptAppt}
+          payments={receiptPayments}
+          shopName={shopSettings?.shop_name}
+          shopAddress={shopSettings?.address}
+          shopPhone={shopSettings?.phone}
+          shopEmail={shopSettings?.email}
+          onClose={function () { setReceiptAppt(null); setReceiptPayments([]) }}
         />
       )}
     </div>

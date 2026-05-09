@@ -7,6 +7,7 @@ import { BehaviorTagsRow } from '../components/BehaviorTags'
 import { resolveHighPriorityTags } from '../lib/behaviorTags'
 import { printDailySheet } from '../lib/printDailySheet'
 import ReportCardModal from '../components/ReportCardModal'
+import ReceiptModal from '../components/ReceiptModal'
 import MobileDriveTimeWarning from '../components/MobileDriveTimeWarning'
 import SmartBookModal from '../components/SmartBookModal'
 import { formatPhone } from '../lib/phone'
@@ -216,6 +217,10 @@ export default function Calendar() {
         pickup_ready: "Hi {client_first_name}! {pet_name} is all done and ready for pickup. 🐾 — {shop_name}",
     })
     const [shopName, setShopName] = useState('')
+    // Extra contact fields used by ReceiptModal so receipts look pro
+    const [shopAddress, setShopAddress] = useState('')
+    const [shopPhone, setShopPhone] = useState('')
+    const [shopEmail, setShopEmail] = useState('')
 
     // Load per-shop SMS templates + shop name once on mount
     useEffect(function () {
@@ -224,11 +229,14 @@ export default function Calendar() {
             if (!user) return
             var { data: shop } = await supabase
                 .from('shop_settings')
-                .select('shop_name, sms_templates')
+                .select('shop_name, sms_templates, address, phone, email')
                 .eq('user_id', user.id)
                 .maybeSingle()
             if (shop) {
                 if (shop.shop_name) setShopName(shop.shop_name)
+                if (shop.address) setShopAddress(shop.address)
+                if (shop.phone) setShopPhone(shop.phone)
+                if (shop.email) setShopEmail(shop.email)
                 if (shop.sms_templates && typeof shop.sms_templates === 'object') {
                     setSmsTemplates(function (prev) { return { ...prev, ...shop.sms_templates } })
                 }
@@ -352,6 +360,9 @@ export default function Calendar() {
     const [pendingAddonPrice, setPendingAddonPrice] = useState('')
     // Report card modal state — { petId, clientId, petName, petBreed, appointmentId, existing? }
     const [reportCardModal, setReportCardModal] = useState(null)
+    // Receipt modal — open when groomer clicks 🧾 Receipt on the appointment popup.
+    // We just toggle a boolean; the modal pulls from selectedAppt + apptPayments + shopName.
+    const [receiptOpen, setReceiptOpen] = useState(false)
     // Map of { appointmentPetKey: existingReportCard } so the popup can show "View" instead of "Create"
     const [existingReportCards, setExistingReportCards] = useState({})
     // Per-pet grooming notes shown inline in the appointment popup so the
@@ -3145,6 +3156,21 @@ export default function Calendar() {
                 )
             })()}
 
+            {/* Receipt modal — clean printable receipt for the appointment */}
+            {receiptOpen && selectedAppt && (
+                <ReceiptModal
+                    appointment={selectedAppt}
+                    payments={apptPayments}
+                    shopName={shopName}
+                    shopAddress={shopAddress}
+                    shopPhone={shopPhone}
+                    shopEmail={shopEmail}
+                    groomerName={shopName}
+                    allowEmail={true}
+                    onClose={() => setReceiptOpen(false)}
+                />
+            )}
+
             {/* Report Card modal (per-pet) */}
             {reportCardModal && (
                 <ReportCardModal
@@ -4598,16 +4624,26 @@ export default function Calendar() {
 
                                 return (
                                     <div className="appt-detail-section">
-                                        <div className="appt-detail-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div className="appt-detail-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                             <span>💳 Payment History</span>
-                                            <button
-                                                type="button"
-                                                onClick={openAddPayment}
-                                                className="appt-payment-add-btn"
-                                                title="Add an additional payment (tip later, second partial, etc.)"
-                                            >
-                                                ➕ Add Payment
-                                            </button>
+                                            <div style={{ display: 'flex', gap: '6px' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setReceiptOpen(true)}
+                                                    title="View / print the receipt for this appointment"
+                                                    style={{ background: '#fff', color: '#7c3aed', border: '1px solid #c4b5fd', borderRadius: '6px', padding: '4px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
+                                                >
+                                                    🧾 Receipt
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={openAddPayment}
+                                                    className="appt-payment-add-btn"
+                                                    title="Add an additional payment (tip later, second partial, etc.)"
+                                                >
+                                                    ➕ Add Payment
+                                                </button>
+                                            </div>
                                         </div>
                                         {apptPayments.length === 0 ? (
                                             <div className="appt-payments-empty">

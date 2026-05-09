@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { BehaviorTagsRow } from '../components/BehaviorTags'
 import { printDailySheet } from '../lib/printDailySheet'
 import ReportCardModal from '../components/ReportCardModal'
+import ReceiptModal from '../components/ReceiptModal'
 import { formatPhone } from '../lib/phone'
 import { mapsUrl, telUrl } from '../lib/maps'
 import '../boarding-styles.css'
@@ -69,6 +70,9 @@ export default function BoardingCalendar() {
   const [savingEdit, setSavingEdit] = useState(false)
 
   const [shopSettings, setShopSettings] = useState(null) // Task #42 — for printed forms
+  // Receipt modal — toggled when groomer clicks 🧾 Receipt in the kennel card.
+  // Pulls from selectedReservation + resPayments + shopSettings already loaded.
+  const [receiptOpen, setReceiptOpen] = useState(false)
   const [showIntakePicker, setShowIntakePicker] = useState(false) // Task #42
   const [hasLastStay, setHasLastStay] = useState(false) // Task #42
   const [showTopBarPrint, setShowTopBarPrint] = useState(false) // Task #42
@@ -533,7 +537,8 @@ export default function BoardingCalendar() {
             pets:pet_id ( id, name, breed, weight, age, sex, allergies, medications, vaccination_status, vaccination_expiry, is_spayed_neutered, behavior_tags )
           ),
           clients:client_id ( id, first_name, last_name, phone, email, address, address_notes, preferred_contact, notes ),
-          kennels:kennel_id ( name )
+          kennels:kennel_id ( name ),
+          boarding_addons ( * )
         `)
         .eq('id', reservation.id)
         .single()
@@ -1734,6 +1739,21 @@ export default function BoardingCalendar() {
       </div>
 
       {/* Kennel Card Popup */}
+      {/* Receipt modal — boarding-shaped data, prints + emails clean receipt */}
+      {receiptOpen && selectedReservation && (
+        <ReceiptModal
+          appointment={selectedReservation}
+          payments={resPayments}
+          shopName={shopSettings?.shop_name}
+          shopAddress={shopSettings?.address}
+          shopPhone={shopSettings?.phone}
+          shopEmail={shopSettings?.email}
+          groomerName={shopSettings?.shop_name}
+          allowEmail={true}
+          onClose={() => setReceiptOpen(false)}
+        />
+      )}
+
       {/* Report Card modal — created from kennel card */}
       {reportCardModal && (
         <ReportCardModal
@@ -2137,6 +2157,20 @@ export default function BoardingCalendar() {
                     Nothing added yet. Use "+ Add Service" to add a bath, nail trim, or other extra at pickup.
                   </div>
                 ))}
+              </div>
+
+              {/* Receipt button — always available so groomer can print after
+                  checkout regardless of payment count. Sits above Payment
+                  History so it's easy to spot. */}
+              <div className="kc-section" style={{ marginTop: '12px', display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={() => setReceiptOpen(true)}
+                  title="View / print / email the receipt for this stay"
+                  style={{ background: '#fff', color: '#7c3aed', border: '1px solid #c4b5fd', borderRadius: '7px', padding: '6px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                >
+                  🧾 Receipt
+                </button>
               </div>
 
               {/* Payment history — shows all payments recorded for this stay */}
