@@ -620,6 +620,26 @@ var toolDefinitions = [
       required: ['date'],
     },
   },
+  {
+    // Smart-search tool: solves the "client asks for a day I'm fully booked"
+    // problem. Instead of the AI manually loop-checking each day, this returns
+    // ready-to-offer slots so it can immediately say "I have Tues at 3 or
+    // Thurs at 10 — either work?" Use this WHENEVER the requested time/day
+    // is full or the client asks "what's available."
+    name: 'client_find_next_open_slots',
+    description: 'PROACTIVE tool — use this whenever the client\'s requested date/time is full, OR they ask "what\'s open" without a specific time. Returns the next N open slots in the upcoming 14 days that fit the service duration, already filtered against booked appointments, blocked time, and shop hours. Each result has a friendly_label you can read back to the client directly. NEVER tell a client "nothing\'s available" without calling this tool first — it almost always finds something.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        duration_minutes: { type: 'number', description: 'Service duration. Use time_block_minutes from SERVICES OFFERED. Default 60.' },
+        start_date: { type: 'string', description: 'YYYY-MM-DD — earliest date to search from. Default = today.' },
+        max_results: { type: 'number', description: 'Max slots to return. Default 3, max 5.' },
+        prefer_morning: { type: 'boolean', description: 'If client mentioned wanting a morning slot. Default false.' },
+        prefer_afternoon: { type: 'boolean', description: 'If client mentioned wanting an afternoon slot. Default false.' },
+      },
+      required: [],
+    },
+  },
 ]
 
 // ============================================================
@@ -1422,6 +1442,116 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         }
       }
 
+      // ──────────────────────────────────────────────────────────────
+      // SMART SLOT FINDER — solves "client asks for a date I'm full on"
+      // by returning ready-to-offer open times in the next 14 days.
+      // The AI just calls this once and reads back the friendly_label
+      // strings — no math, no looping check_availability.
+      // ──────────────────────────────────────────────────────────────
+      case 'client_find_next_open_slots': {
+        var duration = parseInt(toolInput.duration_minutes, 10) || 60
+        var maxResults = Math.min(parseInt(toolInput.max_results, 10) || 3, 5)
+        var preferMorning = !!toolInput.prefer_morning
+        var preferAfternoon = !!toolInput.prefer_afternoon
+
+        // Start date — default today in shop's local time. Format YYYY-MM-DD.
+        var startISO = toolInput.start_date
+        if (!startISO || !/^\d{4}-\d{2}-\d{2}$/.test(startISO)) {
+          var now = new Date()
+          startISO = now.toISOString().slice(0, 10)
+        }
+
+        // Pre-pull all appointments + blocked_times for the next 14 days
+        // in ONE query each — way faster than looping per-day queries.
+        var endDate = new Date(startISO + 'T12:00:00')
+        endDate.setDate(endDate.getDate() + 13)
+        var endISO = endDate.toISOString().slice(0, 10)
+
+        var { data: rangeAppts } = await supabaseAdmin
+          .from('appointments')
+          .select('appointment_date, start_time, end_time')
+          .eq('groomer_id', groomerId)
+          .gte('appointment_date', startISO)
+          .lte('appointment_date', endISO)
+          .neq('status', 'cancelled')
+
+        var { data: rangeBlocks } = await supabaseAdmin
+          .from('blocked_times')
+          .select('block_date, start_time, end_time')
+          .eq('groomer_id', groomerId)
+          .gte('block_date', startISO)
+          .lte('block_date', endISO)
+
+        // Bucket by date for fast lookup
+        var apptByDate: Record<string, Array<{ s: number, e: number }>> = {}
+        for (var ap of (rangeAppts || [])) {
+          var key = ap.appointment_date
+          if (!apptByDate[key]) apptByDate[key] = []
+          apptByDate[key].push({ s: hhmmToMin(ap.start_time), e: hhmmToMin(ap.end_time) })
+        }
+        var blockByDate: Record<string, Array<{ s: number, e: number }>> = {}
+        for (var bk of (rangeBlocks || [])) {
+          var bkey = bk.block_date
+          if (!blockByDate[bkey]) blockByDate[bkey] = []
+          blockByDate[bkey].push({ s: hhmmToMin(bk.start_time), e: hhmmToMin(bk.end_time) })
+        }
+
+        // Walk forward day by day, building slots
+        var results: any[] = []
+        var cursor = new Date(startISO + 'T12:00:00')
+        for (var dayIdx = 0; dayIdx < 14 && results.length < maxResults; dayIdx++) {
+          var dateISO = cursor.toISOString().slice(0, 10)
+          var weekday = getWeekdayKey(dateISO)
+          var dayHours = businessHours[weekday] || { is_open: false }
+          if (!dayHours.is_open) {
+            cursor.setDate(cursor.getDate() + 1)
+            continue
+          }
+          var openMin = hhmmToMin(dayHours.open)
+          var closeMin = hhmmToMin(dayHours.close)
+          var unavailable = (apptByDate[dateISO] || []).concat(blockByDate[dateISO] || [])
+          unavailable.sort(function (a, b) { return a.s - b.s })
+
+          // Generate candidate start times every 30 min within open hours,
+          // pick the first one (if any) that fits the duration without overlap.
+          var candidates: number[] = []
+          for (var startMin = openMin; startMin + duration <= closeMin; startMin += 30) {
+            // Apply morning/afternoon preferences as a soft filter
+            if (preferMorning && startMin >= 12 * 60) continue
+            if (preferAfternoon && startMin < 12 * 60) continue
+            candidates.push(startMin)
+          }
+          for (var cMin of candidates) {
+            var endMin = cMin + duration
+            var conflicts = false
+            for (var u of unavailable) {
+              if (cMin < u.e && endMin > u.s) { conflicts = true; break }
+            }
+            if (!conflicts) {
+              results.push({
+                date: dateISO,
+                weekday: weekday,
+                start_time: minToHHMM(cMin),
+                end_time: minToHHMM(endMin),
+                friendly_label: friendlySlotLabel(dateISO, cMin),
+              })
+              break  // one slot per day to keep options spread out
+            }
+          }
+          cursor.setDate(cursor.getDate() + 1)
+        }
+
+        return {
+          success: true,
+          duration_minutes: duration,
+          slots: results,
+          slot_count: results.length,
+          note: results.length > 0
+            ? 'Read the friendly_label strings back to the client. Offer ' + results.length + ' choice(s) and ask which works. Never invent a time not in this list.'
+            : 'No open slots found in the next 14 days that fit ' + duration + ' minutes. Tell the client honestly that the next 2 weeks are fully booked and offer to put them on the waitlist or have the groomer reach out.',
+        }
+      }
+
       default:
         return { success: false, error: 'Unknown tool: ' + toolName }
     }
@@ -1429,6 +1559,28 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
     console.error('Tool error (' + toolName + '):', err)
     return { success: false, error: String(err && err.message ? err.message : err) }
   }
+}
+
+// Helpers used by client_find_next_open_slots
+function hhmmToMin(t: string): number {
+  if (!t) return 0
+  var p = t.split(':')
+  return parseInt(p[0], 10) * 60 + parseInt(p[1] || '0', 10)
+}
+function minToHHMM(m: number): string {
+  var h = Math.floor(m / 60)
+  var mm = m % 60
+  return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm
+}
+function friendlySlotLabel(dateISO: string, startMin: number): string {
+  var d = new Date(dateISO + 'T12:00:00')
+  var dayLabel = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+  var h = Math.floor(startMin / 60)
+  var mm = startMin % 60
+  var ampm = h >= 12 ? 'PM' : 'AM'
+  var h12 = h % 12 || 12
+  var mmStr = mm === 0 ? '' : ':' + (mm < 10 ? '0' : '') + mm
+  return dayLabel + ' at ' + h12 + mmStr + ' ' + ampm
 }
 
 // ============================================================
@@ -1792,14 +1944,24 @@ Deno.serve(async function(req) {
       '- If a service has no price listed at all, say "the shop will confirm the exact price."',
       '- Always include the disclaimer "the groomer will confirm the exact quote" on any RANGE or STARTING_AT quote.',
       '',
-      'AVAILABILITY CHECKING (CRITICAL — PREVENT DOUBLE BOOKINGS):',
-      '- You DO NOT automatically see the shop\'s schedule. To see what times are already booked on a given day, you MUST call the `client_check_availability` tool.',
-      '- ALWAYS call `client_check_availability` BEFORE you suggest a specific time OR call `client_book_appointment`. No exceptions.',
-      '- The tool returns `booked_slots` (times already taken) and `shop_open` / `shop_close` (shop hours). Pick a time within shop hours that does NOT overlap ANY booked slot.',
-      '- If the client asks for a specific time (e.g., "9 AM tomorrow"), call `client_check_availability` first. If 9 AM overlaps a booked slot, tell them honestly: "9 AM is already booked — I have [list 2-3 actual open times] if any of those work?"',
-      '- If `client_book_appointment` returns `conflict: true`, the slot just got taken. Apologize briefly, call `client_check_availability` again, and offer a real open time.',
-      '- NEVER tell a client "the shop will let you know if there\'s a conflict" — that is WRONG. The system will NOT catch it later; you must prevent the conflict NOW by using the availability tool.',
-      '- NEVER say "I can\'t see the current schedule" — you CAN see it by calling `client_check_availability`. Always use the tool.',
+      'AVAILABILITY CHECKING (CRITICAL — PREVENT DOUBLE BOOKINGS + ALWAYS HAVE OPTIONS):',
+      '- You DO NOT automatically see the shop\'s schedule. You have TWO availability tools — pick the right one:',
+      '  1. `client_check_availability` — for ONE specific date. Use when the client said an exact day ("Friday").',
+      '  2. `client_find_next_open_slots` — finds the soonest 3 open slots in the next 14 days that fit the service duration. Use when the client said "anytime" / "what\'s open" / "this week" / OR when a specific date you checked is fully booked.',
+      '',
+      'GOLDEN RULE — NEVER LEAVE A CLIENT WITHOUT OPTIONS:',
+      '- If the client asks for a specific date and `client_check_availability` shows that day is fully booked → IMMEDIATELY call `client_find_next_open_slots` (with duration_minutes from the service\'s time_block_minutes) and offer 2-3 real open slots. Do NOT just say "that day is full" or "doesn\'t work" without offering alternatives.',
+      '- If the client asks "what\'s open this week" or "any time" or doesn\'t specify a day → call `client_find_next_open_slots` directly, skip `client_check_availability`.',
+      '- The slots returned each have a `friendly_label` like "Thursday May 15 at 3 PM" — read those strings back to the client verbatim. Don\'t reformat them, don\'t invent new times.',
+      '- Phrasing template: "I see you wanted Tuesday, but I\'m fully booked that day. I do have Thursday May 15 at 3 PM or Friday May 16 at 10 AM open — either work for Bella?"',
+      '- If `client_find_next_open_slots` returns `slot_count: 0` (genuinely nothing in 14 days), THEN tell the client honestly the next 2 weeks are full and offer the waitlist.',
+      '',
+      'OTHER AVAILABILITY RULES:',
+      '- ALWAYS call `client_check_availability` (or `client_find_next_open_slots`) BEFORE you call `client_book_appointment` or `client_reschedule_appointment`.',
+      '- Pick a time within shop hours that does NOT overlap ANY booked or blocked slot.',
+      '- If `client_book_appointment` returns `conflict: true`, the slot just got taken. Apologize briefly, call `client_find_next_open_slots`, and offer real open times.',
+      '- NEVER tell a client "the shop will let you know if there\'s a conflict" — that is WRONG.',
+      '- NEVER say "I can\'t see the current schedule" — you CAN, with the tools above. Always use them.',
       '',
       'SERVICE QUESTIONS (CRITICAL — ASK BEFORE BOOKING):',
       '- The word "grooming" or "appointment" is vague. Different dogs need different services. ALWAYS ask which service they want before booking.',
