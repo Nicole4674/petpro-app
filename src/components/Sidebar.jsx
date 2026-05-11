@@ -172,6 +172,16 @@ export default function Sidebar({ onToggle }) {
           {!collapsed && <span className="sidebar-label">Dashboard</span>}
         </div>
 
+        {/* Analytics — KPIs, client mix wheel, revenue trend, growth tips */}
+        <div
+          className={'sidebar-item' + (isActive('/analytics') ? ' sidebar-item-active' : '')}
+          onClick={function() { goTo('/analytics') }}
+          title="Analytics"
+        >
+          <span className="sidebar-icon">📈</span>
+          {!collapsed && <span className="sidebar-label">Analytics</span>}
+        </div>
+
         {/* Messages — top-level with unread badge */}
         <div
           className={'sidebar-item' + (isActive('/messages') ? ' sidebar-item-active' : '')}
