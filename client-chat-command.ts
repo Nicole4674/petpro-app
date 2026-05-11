@@ -755,35 +755,36 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           return { success: false, error: 'That pet isn\'t on your profile.' }
         }
 
-        // ─── DUPLICATE-PERSON GUARD ─────────────────────────────────────
-        // Before creating a new appointment, scan ALL sibling client rows
-        // for an existing appointment on the same date within ±90 min.
-        // If found, refuse — the AI should reschedule that one instead of
-        // double-booking the same person under a different client row.
-        // This is the belt-and-suspenders fix for the husband-books-first,
-        // wife-signs-up-later scenario.
-        if (allClientIds.length > 1) {
-          var newStartParts = String(toolInput.start_time).split(':')
-          var newStartMin = parseInt(newStartParts[0], 10) * 60 + parseInt(newStartParts[1], 10)
-          var { data: nearbyAppts } = await supabaseAdmin
-            .from('appointments')
-            .select('id, start_time, end_time, appointment_date, status, client_id')
-            .in('client_id', allClientIds)
-            .eq('appointment_date', toolInput.appointment_date)
-            .neq('status', 'cancelled')
-          for (var na of (nearbyAppts || [])) {
-            var naStartParts = String(na.start_time).split(':')
-            var naStartMin = parseInt(naStartParts[0], 10) * 60 + parseInt(naStartParts[1], 10)
-            if (Math.abs(naStartMin - newStartMin) <= 90) {
-              return {
-                success: false,
-                error: 'You already have an appointment that day around ' +
-                  formatHHMMto12h(na.start_time) +
-                  '. Would you like me to reschedule THAT one to ' +
-                  formatHHMMto12h(toolInput.start_time) +
-                  ' instead of creating a second appointment?',
-                duplicate_appointment_id: na.id,
-              }
+        // ─── SAME-DAY DUPLICATE GUARD (ALWAYS RUNS) ─────────────────────
+        // Before creating a new appointment, scan the client's existing
+        // appointments (across primary + sibling rows) for the same date
+        // within ±90 min. If found, refuse — the AI should reschedule that
+        // one instead of double-booking. This protects against BOTH:
+        //   • Sibling duplicate rows (husband-books-first, wife-signs-up)
+        //   • SAME row, AI just didn't think to check before booking
+        // Removed the prior `allClientIds.length > 1` guard so this runs
+        // even when there's only one client row — that was the actual bug
+        // for Hilda + Teo: one row, two appointments, AI didn't catch it.
+        var newStartParts = String(toolInput.start_time).split(':')
+        var newStartMin = parseInt(newStartParts[0], 10) * 60 + parseInt(newStartParts[1], 10)
+        var { data: nearbyAppts } = await supabaseAdmin
+          .from('appointments')
+          .select('id, start_time, end_time, appointment_date, status, client_id')
+          .in('client_id', allClientIds)
+          .eq('appointment_date', toolInput.appointment_date)
+          .neq('status', 'cancelled')
+        for (var na of (nearbyAppts || [])) {
+          var naStartParts = String(na.start_time).split(':')
+          var naStartMin = parseInt(naStartParts[0], 10) * 60 + parseInt(naStartParts[1], 10)
+          if (Math.abs(naStartMin - newStartMin) <= 90) {
+            return {
+              success: false,
+              error: 'You already have an appointment that day around ' +
+                formatHHMMto12h(na.start_time) +
+                '. Would you like me to reschedule THAT one to ' +
+                formatHHMMto12h(toolInput.start_time) +
+                ' instead of creating a second appointment?',
+              duplicate_appointment_id: na.id,
             }
           }
         }
@@ -2086,6 +2087,11 @@ Deno.serve(async function(req) {
       '- NEVER quote only the low end of a range as if it were the price. This is the most important rule in this section.',
       '- If a service has no price listed at all, say "the shop will confirm the exact price."',
       '- Always include the disclaimer "the groomer will confirm the exact quote" on any RANGE or STARTING_AT quote.',
+      '',
+      'BEFORE BOOKING — MANDATORY DOUBLE-CHECK (READ THIS):',
+      '- Look at MY UPCOMING APPOINTMENTS in the context block at the top. If the client is asking to book a date/time that\'s ALREADY in their upcoming list (or within 90 min of an existing one on the same date), this is NOT a new booking — they\'re confused or trying to reschedule.',
+      '- DO NOT call client_book_appointment when an existing same-day appointment is visible in MY UPCOMING APPOINTMENTS. Instead say something like: "Hey, looks like you already have a 2pm Saturday with Teo on the books! Did you want to keep it, change the time, or cancel? Happy to help either way."',
+      '- The system also has a server-side guard that will refuse same-day duplicate bookings with a duplicate_appointment_id — if you get that error, treat it as a signal to pivot to reschedule.',
       '',
       'HOW CLIENTS ACTUALLY SPEAK (parse loosely, react warmly):',
       '- Clients are casual, often grammatically loose. Don\'t make them feel dumb. Translate their words into tool params:',
