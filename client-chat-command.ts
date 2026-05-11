@@ -627,7 +627,7 @@ var toolDefinitions = [
     // Thurs at 10 — either work?" Use this WHENEVER the requested time/day
     // is full or the client asks "what's available."
     name: 'client_find_next_open_slots',
-    description: 'PROACTIVE tool — use this whenever the client\'s requested date/time is full, OR they ask "what\'s open" without a specific time. Returns the next N open slots in the upcoming 14 days that fit the service duration, already filtered against booked appointments, blocked time, and shop hours. Each result has a friendly_label you can read back to the client directly. NEVER tell a client "nothing\'s available" without calling this tool first — it almost always finds something.',
+    description: 'PROACTIVE tool — use this whenever the client\'s requested date/time is full, OR they ask "what\'s open" without a specific time. Returns MULTIPLE open slots PER DAY (up to 4 per day, evenly spread morning/midday/afternoon) in the upcoming 14 days that fit the service duration, already filtered against booked appointments, blocked time, and shop hours. Each result has a friendly_label you can read back to the client directly. CRITICAL: the slots are NOT in 1-per-day order — multiple slots from the same day appear consecutively. When offering, group slots by day in your reply and mention 2-3 times per day so the client sees real options ("Monday I have 9am, 11am, or 2pm — any work?"). NEVER offer only the first slot of a day as if it were the only option. NEVER tell a client "nothing\'s available" without calling this tool first.',
     input_schema: {
       type: 'object',
       properties: {
@@ -636,6 +636,8 @@ var toolDefinitions = [
         max_results: { type: 'number', description: 'Max slots to return. Default 3, max 5.' },
         prefer_morning: { type: 'boolean', description: 'If client mentioned wanting a morning slot. Default false.' },
         prefer_afternoon: { type: 'boolean', description: 'If client mentioned wanting an afternoon slot. Default false.' },
+        earliest_start_hour: { type: 'number', description: 'Earliest start hour (24h, 0-23). If client says "after 4pm" pass 16. If "after work" pass 17. If "after lunch" pass 13.' },
+        latest_start_hour: { type: 'number', description: 'Latest start hour (24h, 0-23). If client says "before noon" pass 12. If "before pickup at school 3pm" pass 14.' },
       },
       required: [],
     },
@@ -649,6 +651,11 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
   var clientId = ctx.clientId
   var groomerId = ctx.groomerId
   var toggles = ctx.toggles
+  // allClientIds includes the primary client_id PLUS any orphan duplicate
+  // rows that look like the same person (matched by phone/email upstream).
+  // Used to widen appointment + pet lookups so the AI doesn't go blind to
+  // appointments that were booked under a duplicate row.
+  var allClientIds: string[] = ctx.allClientIds || [clientId]
   var businessHours = ctx.businessHours || {
     monday:    { is_open: true,  open: '09:00', close: '17:00' },
     tuesday:   { is_open: true,  open: '09:00', close: '17:00' },
@@ -733,18 +740,52 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         }
 
         // Verify pet belongs to this client (also pulls fields needed for rule check)
-        // Block booking attempts on archived/removed pets
+        // Widened to allClientIds so a pet on a duplicate row is still
+        // recognized as "theirs". Block archived/removed pets.
         var { data: petCheck, error: petErr } = await supabaseAdmin
           .from('pets')
           .select('id, name, breed, weight, vaccination_expiry, dog_aggressive')
           .eq('id', toolInput.pet_id)
-          .eq('client_id', clientId)
+          .in('client_id', allClientIds)
           .or('is_archived.is.null,is_archived.eq.false')
           .maybeSingle()
         if (petErr) console.error('[BOOK] pet check error:', petErr.message)
         if (!petCheck) {
-          console.error('[BOOK] pet not found for client:', toolInput.pet_id, 'clientId:', clientId)
+          console.error('[BOOK] pet not found for client:', toolInput.pet_id, 'clientIds:', allClientIds.join(','))
           return { success: false, error: 'That pet isn\'t on your profile.' }
+        }
+
+        // ─── DUPLICATE-PERSON GUARD ─────────────────────────────────────
+        // Before creating a new appointment, scan ALL sibling client rows
+        // for an existing appointment on the same date within ±90 min.
+        // If found, refuse — the AI should reschedule that one instead of
+        // double-booking the same person under a different client row.
+        // This is the belt-and-suspenders fix for the husband-books-first,
+        // wife-signs-up-later scenario.
+        if (allClientIds.length > 1) {
+          var newStartParts = String(toolInput.start_time).split(':')
+          var newStartMin = parseInt(newStartParts[0], 10) * 60 + parseInt(newStartParts[1], 10)
+          var { data: nearbyAppts } = await supabaseAdmin
+            .from('appointments')
+            .select('id, start_time, end_time, appointment_date, status, client_id')
+            .in('client_id', allClientIds)
+            .eq('appointment_date', toolInput.appointment_date)
+            .neq('status', 'cancelled')
+          for (var na of (nearbyAppts || [])) {
+            var naStartParts = String(na.start_time).split(':')
+            var naStartMin = parseInt(naStartParts[0], 10) * 60 + parseInt(naStartParts[1], 10)
+            if (Math.abs(naStartMin - newStartMin) <= 90) {
+              return {
+                success: false,
+                error: 'You already have an appointment that day around ' +
+                  formatHHMMto12h(na.start_time) +
+                  '. Would you like me to reschedule THAT one to ' +
+                  formatHHMMto12h(toolInput.start_time) +
+                  ' instead of creating a second appointment?',
+                duplicate_appointment_id: na.id,
+              }
+            }
+          }
         }
 
         // =====================================================
@@ -1168,7 +1209,7 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           .from('appointments')
           .select('id, start_time, end_time, status, appointment_date, recurring_series_id, pets:pet_id(name)')
           .eq('id', toolInput.appointment_id)
-          .eq('client_id', clientId)
+          .in('client_id', allClientIds)
           .eq('groomer_id', groomerId)
           .maybeSingle()
         if (apptErr) console.error('[RESCHED] appt lookup error:', apptErr.message)
@@ -1268,7 +1309,7 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           .from('appointments')
           .update(resUpdate)
           .eq('id', toolInput.appointment_id)
-          .eq('client_id', clientId)
+          .in('client_id', allClientIds)
         if (updErr) {
           console.error('[RESCHED] update error:', updErr.message)
           return { success: false, error: updErr.message }
@@ -1313,12 +1354,13 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         }
         if (!toolInput.appointment_id) return { success: false, error: 'appointment_id required' }
 
-        // Verify ownership (also pull pet name + date for notification)
+        // Verify ownership across all sibling client rows (pull pet name +
+        // date for notification too).
         var { data: cancelCheck } = await supabaseAdmin
           .from('appointments')
           .select('id, status, appointment_date, start_time, pets:pet_id(name)')
           .eq('id', toolInput.appointment_id)
-          .eq('client_id', clientId)
+          .in('client_id', allClientIds)
           .eq('groomer_id', groomerId)
           .maybeSingle()
         if (!cancelCheck) return { success: false, error: 'That appointment isn\'t yours or doesn\'t exist.' }
@@ -1334,7 +1376,7 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
             action_seen_by_groomer: false,
           })
           .eq('id', toolInput.appointment_id)
-          .eq('client_id', clientId)
+          .in('client_id', allClientIds)
         if (cancelErr) return { success: false, error: cancelErr.message }
 
         // Notify groomer (push + SMS) that client cancelled — they need to know!
@@ -1355,10 +1397,12 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
       // --- LIST ---
       case 'client_list_my_appointments': {
         var todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })
+        // Widen to allClientIds so groomer-created appointments on a
+        // duplicate client row also surface for this person.
         var { data: mineList } = await supabaseAdmin
           .from('appointments')
           .select('id, appointment_date, start_time, end_time, status, service_notes, pets:pet_id(name), services:service_id(service_name)')
-          .eq('client_id', clientId)
+          .in('client_id', allClientIds)
           .eq('groomer_id', groomerId)
           .gte('appointment_date', todayStr)
           .neq('status', 'cancelled')
@@ -1453,6 +1497,12 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         var maxResults = Math.min(parseInt(toolInput.max_results, 10) || 3, 5)
         var preferMorning = !!toolInput.prefer_morning
         var preferAfternoon = !!toolInput.prefer_afternoon
+        // Hard time cutoffs from natural language ("after 4pm" / "before noon").
+        // Multiplied by 60 to compare against minute-of-day below.
+        var earliestStartMin = (toolInput.earliest_start_hour != null && toolInput.earliest_start_hour >= 0 && toolInput.earliest_start_hour <= 23)
+          ? parseInt(toolInput.earliest_start_hour, 10) * 60 : null
+        var latestStartMin = (toolInput.latest_start_hour != null && toolInput.latest_start_hour >= 0 && toolInput.latest_start_hour <= 23)
+          ? parseInt(toolInput.latest_start_hour, 10) * 60 : null
 
         // Start date — default today in shop's local time. Format YYYY-MM-DD.
         var startISO = toolInput.start_date
@@ -1496,10 +1546,16 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           blockByDate[bkey].push({ s: hhmmToMin(bk.start_time), e: hhmmToMin(bk.end_time) })
         }
 
-        // Walk forward day by day, building slots
+        // Walk forward day by day, building slots.
+        // Returns ALL open slots per day (capped at SLOTS_PER_DAY each) plus a
+        // total cap (maxResults * 4) so the AI can offer a real spread.
+        // Earlier version only returned ONE slot per day which made the AI
+        // sound like only morning was open — that was misleading to clients.
+        const SLOTS_PER_DAY = 4   // cap so we don't flood the AI with 20 slots in a day
+        const TOTAL_CAP = Math.max(maxResults * 4, 12)  // total across all days
         var results: any[] = []
         var cursor = new Date(startISO + 'T12:00:00')
-        for (var dayIdx = 0; dayIdx < 14 && results.length < maxResults; dayIdx++) {
+        for (var dayIdx = 0; dayIdx < 14 && results.length < TOTAL_CAP; dayIdx++) {
           var dateISO = cursor.toISOString().slice(0, 10)
           var weekday = getWeekdayKey(dateISO)
           var dayHours = businessHours[weekday] || { is_open: false }
@@ -1512,31 +1568,67 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           var unavailable = (apptByDate[dateISO] || []).concat(blockByDate[dateISO] || [])
           unavailable.sort(function (a, b) { return a.s - b.s })
 
-          // Generate candidate start times every 30 min within open hours,
-          // pick the first one (if any) that fits the duration without overlap.
-          var candidates: number[] = []
-          for (var startMin = openMin; startMin + duration <= closeMin; startMin += 30) {
-            // Apply morning/afternoon preferences as a soft filter
-            if (preferMorning && startMin >= 12 * 60) continue
-            if (preferAfternoon && startMin < 12 * 60) continue
-            candidates.push(startMin)
+          // Build two pools of candidates: on-the-hour (preferred — clean
+          // 9, 10, 11 times that match how groomers + clients think) and
+          // half-hour offsets (used only as fallback to fill gaps between
+          // shorter appointments, e.g. a nail trim at 10:00 makes 10:30
+          // bookable when 10:00 isn't).
+          function passesFilter(startMin: number): boolean {
+            if (preferMorning && startMin >= 12 * 60) return false
+            if (preferAfternoon && startMin < 12 * 60) return false
+            // Hard cutoffs from natural-language client preferences
+            if (earliestStartMin != null && startMin < earliestStartMin) return false
+            if (latestStartMin != null && startMin > latestStartMin) return false
+            return true
           }
-          for (var cMin of candidates) {
-            var endMin = cMin + duration
-            var conflicts = false
+          function fits(startMin: number): boolean {
+            var endMin = startMin + duration
             for (var u of unavailable) {
-              if (cMin < u.e && endMin > u.s) { conflicts = true; break }
+              if (startMin < u.e && endMin > u.s) return false
             }
-            if (!conflicts) {
-              results.push({
-                date: dateISO,
-                weekday: weekday,
-                start_time: minToHHMM(cMin),
-                end_time: minToHHMM(endMin),
-                friendly_label: friendlySlotLabel(dateISO, cMin),
-              })
-              break  // one slot per day to keep options spread out
+            return true
+          }
+          var hourSlots: number[] = []
+          var halfSlots: number[] = []
+          for (var startMin = openMin; startMin + duration <= closeMin; startMin += 30) {
+            if (!passesFilter(startMin)) continue
+            if (!fits(startMin)) continue
+            if (startMin % 60 === 0) hourSlots.push(startMin)
+            else halfSlots.push(startMin)
+          }
+
+          // Pick slots, preferring on-the-hour. If we have ≥ SLOTS_PER_DAY
+          // hour slots, sample those evenly across the day (e.g. 9, 11, 1, 3
+          // instead of 9, 10, 11, 12 — better spread). If fewer, fill with
+          // half-hour slots that don't sit adjacent to a chosen hour slot.
+          var chosen: number[] = []
+          if (hourSlots.length >= SLOTS_PER_DAY) {
+            // Have enough hour slots — sample evenly for spread
+            var step = hourSlots.length / SLOTS_PER_DAY
+            for (var i = 0; i < SLOTS_PER_DAY; i++) {
+              chosen.push(hourSlots[Math.floor(i * step)])
             }
+          } else {
+            // Use all hour slots, then fill with half-hour slots that aren't
+            // within 30 min of an already-chosen hour slot (avoids 10:00 +
+            // 10:30 appearing as separate options when client just wants 10).
+            chosen = hourSlots.slice()
+            for (var hs of halfSlots) {
+              if (chosen.length >= SLOTS_PER_DAY) break
+              var tooClose = chosen.some(function (c) { return Math.abs(c - hs) <= 30 })
+              if (!tooClose) chosen.push(hs)
+            }
+            chosen.sort(function (a, b) { return a - b })
+          }
+          for (var slotMin of chosen) {
+            if (results.length >= TOTAL_CAP) break
+            results.push({
+              date: dateISO,
+              weekday: weekday,
+              start_time: minToHHMM(slotMin),
+              end_time: minToHHMM(slotMin + duration),
+              friendly_label: friendlySlotLabel(dateISO, slotMin),
+            })
           }
           cursor.setDate(cursor.getDate() + 1)
         }
@@ -1547,7 +1639,7 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           slots: results,
           slot_count: results.length,
           note: results.length > 0
-            ? 'Read the friendly_label strings back to the client. Offer ' + results.length + ' choice(s) and ask which works. Never invent a time not in this list.'
+            ? 'Slots are grouped by day — multiple times may appear for the same day. GROUP THEM BY DATE in your reply and offer 2-3 times per day so the client sees the real spread. Example: "Monday I have 9am, 11am, or 2pm — any work? Tuesday I have 10am or 3pm." Never offer only the first slot of a day as if it were the only option for that day. Never invent a time not in this list.'
             : 'No open slots found in the next 14 days that fit ' + duration + ' minutes. Tell the client honestly that the next 2 weeks are fully booked and offer to put them on the waitlist or have the groomer reach out.',
         }
       }
@@ -1572,6 +1664,16 @@ function minToHHMM(m: number): string {
   var mm = m % 60
   return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm
 }
+function formatHHMMto12h(hhmm: string): string {
+  if (!hhmm) return ''
+  var p = hhmm.split(':')
+  var h = parseInt(p[0], 10)
+  var m = parseInt(p[1] || '0', 10)
+  var ampm = h >= 12 ? 'PM' : 'AM'
+  var h12 = h % 12 || 12
+  return m === 0 ? `${h12} ${ampm}` : `${h12}:${String(m).padStart(2, '0')} ${ampm}`
+}
+
 function friendlySlotLabel(dateISO: string, startMin: number): string {
   var d = new Date(dateISO + 'T12:00:00')
   var dayLabel = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
@@ -1623,6 +1725,46 @@ Deno.serve(async function(req) {
 
     var clientId = clientRow.id
     var groomerId = clientRow.groomer_id
+
+    // ─── Sibling client rows ──────────────────────────────────────────────
+    // When a groomer manually creates an appointment for a client BEFORE
+    // that client signs up to the portal, the smart-match-v3 trigger SHOULD
+    // link the new signup to the existing row by email/phone/name. If it
+    // misses (different email, weird name like "Teo's mom", etc.), the
+    // result is TWO client rows for the same person — and the AI chat goes
+    // blind to the husband-created appointment because it only sees the
+    // wife's portal-signup row.
+    //
+    // Fix: find all OTHER unlinked client rows under this groomer that look
+    // like the same person (exact email match or last-10-digit phone match)
+    // and treat them as siblings. The AI's appointment + pet lookups widen
+    // to include them so the chat behaves like a single client identity.
+    var ownerPhone = (clientRow.phone || '').replace(/[^0-9]/g, '')
+    var ownerPhoneLast10 = ownerPhone.length >= 10 ? ownerPhone.slice(-10) : ''
+    var ownerEmail = (authUser.email || '').trim().toLowerCase()
+    var siblingIds: string[] = []
+    if (ownerPhoneLast10 || ownerEmail) {
+      var { data: otherClientRows } = await supabaseAdmin
+        .from('clients')
+        .select('id, phone, email')
+        .eq('groomer_id', groomerId)
+        .is('user_id', null)            // only orphan rows (no portal login of their own)
+        .neq('id', clientId)
+      for (var r of (otherClientRows || [])) {
+        var rPhoneDigits = (r.phone || '').replace(/[^0-9]/g, '')
+        var rPhoneLast10 = rPhoneDigits.length >= 10 ? rPhoneDigits.slice(-10) : ''
+        var rEmail = (r.email || '').trim().toLowerCase()
+        if ((ownerPhoneLast10 && rPhoneLast10 === ownerPhoneLast10) ||
+            (ownerEmail && rEmail === ownerEmail)) {
+          siblingIds.push(r.id)
+        }
+      }
+    }
+    var allClientIds: string[] = [clientId, ...siblingIds]
+    if (siblingIds.length > 0) {
+      console.log('[client-chat] sibling rows detected for clientId=' + clientId + ': ' + siblingIds.join(','))
+    }
+
     var body = await req.json()
 
     // --- Waitlist YES/NO intercept (Task #84 Step 5) ---
@@ -1679,10 +1821,11 @@ Deno.serve(async function(req) {
     }
 
     // --- Preload context (exclude archived/removed pets) ---
+    // Widened to allClientIds so pets on a duplicate row also surface.
     var { data: myPets } = await supabaseAdmin
       .from('pets')
       .select('id, name, breed, weight, allergies, medications, vaccination_expiry, dog_aggressive')
-      .eq('client_id', clientId)
+      .in('client_id', allClientIds)
       .or('is_archived.is.null,is_archived.eq.false')
       .order('created_at', { ascending: true })
 
@@ -1944,6 +2087,20 @@ Deno.serve(async function(req) {
       '- If a service has no price listed at all, say "the shop will confirm the exact price."',
       '- Always include the disclaimer "the groomer will confirm the exact quote" on any RANGE or STARTING_AT quote.',
       '',
+      'HOW CLIENTS ACTUALLY SPEAK (parse loosely, react warmly):',
+      '- Clients are casual, often grammatically loose. Don\'t make them feel dumb. Translate their words into tool params:',
+      '  • "when is your next availability" / "what do you have open" / "got anything soon" / "any openings" → call client_find_next_open_slots immediately. They want options, not 20 questions.',
+      '  • "can i book for [pet name]" / "appt for shoes" / "I need to book Bella" → check MY PETS for that name (case-insensitive, partial match OK). If it matches, proceed. If multiple pets match, ask which.',
+      '  • "I can only do after 4pm" / "after work" / "evenings" → pass earliest_start_hour=16 (or 17 for "after work")',
+      '  • "I can only do mornings" / "before noon" / "early" → pass latest_start_hour=11 or prefer_morning=true',
+      '  • "Anytime works" / "I\'m flexible" → don\'t pass time prefs, just call find_next_open_slots',
+      '  • "I work nights, need an afternoon" → prefer_afternoon=true',
+      '  • "I can only do Saturdays" / "weekends only" → call find_next_open_slots, then in your reply filter to weekend results only (the schedule already excludes closed days)',
+      '  • "ASAP" / "as soon as possible" / "this week" → call find_next_open_slots with default start_date (today)',
+      '  • "Next week" → pass start_date as next Monday (use DATE REFERENCE in the system prompt)',
+      '- Pet names: clients give weird ones (Shoes, Cheese, Pickle, Mr. Wiggles). Don\'t question them — just match against MY PETS.',
+      '- Confirm warmly even when their message is unclear: "Got it — for [pet name]! Let me see what\'s open." Then call the tool.',
+      '',
       'AVAILABILITY CHECKING (CRITICAL — PREVENT DOUBLE BOOKINGS + ALWAYS HAVE OPTIONS):',
       '- You DO NOT automatically see the shop\'s schedule. You have TWO availability tools — pick the right one:',
       '  1. `client_check_availability` — for ONE specific date. Use when the client said an exact day ("Friday").',
@@ -2054,7 +2211,7 @@ Deno.serve(async function(req) {
     // --- Tool loop ---
     var maxLoops = 6
     var finalText = ''
-    var toolCtx = { clientId: clientId, groomerId: groomerId, toggles: toggles, businessHours: businessHours }
+    var toolCtx = { clientId: clientId, groomerId: groomerId, toggles: toggles, businessHours: businessHours, allClientIds: allClientIds }
 
     for (var loop = 0; loop < maxLoops; loop++) {
       var claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
