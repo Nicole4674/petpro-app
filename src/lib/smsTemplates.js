@@ -22,16 +22,22 @@ export const DEFAULT_SMS_TEMPLATES = {
   running_late:    "Hi {client_first_name}! Just a heads up — we're running about {minutes} minutes behind today, so {pet_name}'s {time} appointment will start a bit later. Thanks for your patience! — {shop_name}",
   rebook_followup: "Hi {client_first_name}! It's been a while since {pet_name}'s last visit. Time for another groom? Reply YES and we'll get you scheduled. — {shop_name}",
   thank_you:       "Thanks for choosing {shop_name}, {client_first_name}! {pet_name} did great today. Hope to see you both again soon. 🐾",
+  // Cancellation auto-fill offer — sent when an appointment cancels and a
+  // waitlist client matches the freed slot. SEPARATE from rebook_followup
+  // because cancellation offers are inventory-filling (business need), not
+  // marketing nudges. Most groomers want this ON even if rebook is OFF.
+  cancellation_offer: "Hi {client_first_name}! A grooming spot opened up for {pet_name} on {date} at {time}. Reply YES to book or NO to pass. — {shop_name}",
 }
 
 // Friendly labels for the Settings UI
 export const SMS_TEMPLATE_LABELS = {
-  reminder:        '📬 Appointment Reminder (Y/N)',
-  confirmation:    '✅ Booking Confirmation',
-  pickup_ready:    '🐾 Ready for Pickup',
-  running_late:    '⏰ Running Late',
-  rebook_followup: '🔁 Rebook Follow-up',
-  thank_you:       '💛 Thank You / Post-visit',
+  reminder:           '📬 Appointment Reminder (Y/N)',
+  confirmation:       '✅ Booking Confirmation',
+  pickup_ready:       '🐾 Ready for Pickup',
+  running_late:       '⏰ Running Late',
+  rebook_followup:    '🔁 Rebook Follow-up',
+  thank_you:          '💛 Thank You / Post-visit',
+  cancellation_offer: '📲 Cancellation Auto-Fill (waitlist SMS)',
 }
 
 // Helper: replace all {placeholder} tokens in a template string with values

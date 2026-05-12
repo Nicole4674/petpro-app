@@ -110,7 +110,7 @@ serve(async (req) => {
     // quota check so the disabled SMS doesn't burn a credit.
     const AUTOMATED_TYPES = new Set([
       "reminder", "confirmation", "pickup_ready", "running_late",
-      "rebook_followup", "thank_you",
+      "rebook_followup", "thank_you", "cancellation_offer",
     ])
     if (AUTOMATED_TYPES.has(smsType)) {
       const { data: shopRow } = await supabase

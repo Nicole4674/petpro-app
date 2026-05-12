@@ -75,43 +75,45 @@ serve(async (req) => {
     const apptLng = cancelledClient?.longitude
 
     // ─── 2. Pull shop settings (mobile? offer window? quiet hours?) ────
+    // Real schema uses waitlist_quiet_start_hour / waitlist_quiet_end_hour
+    // (ints 0-23). Defaults: 9 (start, allowed FROM) and 20 (end, allowed
+    // UNTIL — exclusive). So 9-20 = OK to text 9am to 8pm.
     const { data: shop } = await supabase
       .from("shop_settings")
-      .select("shop_name, phone, is_mobile, cancellation_offer_expiry_minutes, waitlist_quiet_hours_enabled, waitlist_quiet_hours_start, waitlist_quiet_hours_end, waitlist_timezone, sms_template_enabled")
+      .select("shop_name, phone, is_mobile, cancellation_offer_expiry_minutes, waitlist_quiet_start_hour, waitlist_quiet_end_hour, waitlist_timezone, sms_template_enabled")
       .eq("groomer_id", groomerId)
       .maybeSingle()
     if (!shop) return jsonError("Shop settings not found", 404)
 
-    // ─── 3. Quiet hours guard — don't text at 11pm even if eligible ────
-    if (shop.waitlist_quiet_hours_enabled) {
-      const tz = shop.waitlist_timezone || "America/Chicago"
-      const nowHour = getHourInTimezone(tz)
-      const startHour = parseInt(String(shop.waitlist_quiet_hours_start || "21").split(":")[0], 10)
-      const endHour = parseInt(String(shop.waitlist_quiet_hours_end || "08").split(":")[0], 10)
-      const inQuiet = startHour > endHour
-        ? (nowHour >= startHour || nowHour < endHour)   // wraps overnight (e.g. 21-08)
-        : (nowHour >= startHour && nowHour < endHour)
-      if (inQuiet) {
-        return jsonResponse({
-          ok: true,
-          no_match: true,
-          reason: `Quiet hours active (currently ${nowHour}:00 in ${tz}). Offer will be picked up by the cron when quiet hours end.`,
-          deferred: true,
-        })
-      }
-    }
-
-    // ─── 4. Check the reminder template is enabled (treat 'sms' offers
-    // as a marketing-ish text, gated by the same on/off toggle). If shop
-    // turned off automated SMS, we should NOT auto-text anyone.
-    const toggles = (shop.sms_template_enabled as any) || {}
-    // We use 'rebook_followup' as the gate for cancellation offers since
-    // they're conceptually similar (filling a slot proactively).
-    if (toggles.rebook_followup === false) {
+    // ─── 3. Quiet hours guard — don't text outside allowed window ──────
+    // Treat the columns as "send only when current hour >= start AND
+    // < end". Default 9-20 = 9am to 8pm. Anything outside = quiet.
+    const tz = shop.waitlist_timezone || "America/Chicago"
+    const startHour = (shop.waitlist_quiet_start_hour != null) ? Number(shop.waitlist_quiet_start_hour) : 9
+    const endHour = (shop.waitlist_quiet_end_hour != null) ? Number(shop.waitlist_quiet_end_hour) : 20
+    const nowHour = getHourInTimezone(tz)
+    const inAllowedWindow = startHour < endHour
+      ? (nowHour >= startHour && nowHour < endHour)
+      : (nowHour >= startHour || nowHour < endHour)  // wraps midnight (e.g. 22-06)
+    if (!inAllowedWindow) {
       return jsonResponse({
         ok: true,
         no_match: true,
-        reason: "Automated waitlist SMS is disabled in shop settings.",
+        reason: `Outside allowed texting window (currently ${nowHour}:00 in ${tz}, allowed ${startHour}:00 - ${endHour}:00). Offer skipped to avoid late-night text.`,
+        deferred: true,
+      })
+    }
+
+    // ─── 4. Check the cancellation_offer template toggle ────────────────
+    // Defaults ON (key absent === undefined !== false → not blocked).
+    // Groomers who specifically want to silence cancellation auto-fills
+    // can flip this off in Shop Settings → SMS Templates.
+    const toggles = (shop.sms_template_enabled as any) || {}
+    if (toggles.cancellation_offer === false) {
+      return jsonResponse({
+        ok: true,
+        no_match: true,
+        reason: "Cancellation auto-fill SMS is disabled in shop settings.",
       })
     }
 
@@ -209,7 +211,7 @@ serve(async (req) => {
         to: chosen.clients.phone,
         message,
         groomer_id: groomerId,
-        sms_type: "rebook_followup",  // reuses existing template-enabled gate
+        sms_type: "cancellation_offer",  // own template-enabled gate
       }),
     })
     if (!sendRes.ok) {

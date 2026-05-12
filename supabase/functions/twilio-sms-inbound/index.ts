@@ -139,7 +139,12 @@ serve(async (req) => {
       const endTime = ((pendingOffer.offered_slot_end as string).split("T")[1] || "").slice(0, 5)
 
       if (isYes) {
-        // Book the slot as a real appointment + mark waitlist as 'booked'
+        // Book the slot. Minimal field set so we don't hit any CHECK
+        // constraints on enum-like fields (booked_via, last_action).
+        // Those default safely in the database — we don't need to set them.
+        // staff_id defaults to the shop's groomer/owner — fine for solo
+        // groomers (the common case). Multi-staff shops can reassign in
+        // the UI after the booking lands.
         const { error: bookErr } = await supabase
           .from("appointments")
           .insert({
@@ -147,17 +152,26 @@ serve(async (req) => {
             client_id: pendingOffer.client_id,
             pet_id: pendingOffer.pet_id,
             service_id: pendingOffer.service_id,
+            staff_id: pendingOffer.groomer_id,
             appointment_date: apptDate,
             start_time: startTime,
             end_time: endTime,
             status: "confirmed",
-            booked_via: "waitlist_sms_offer",
-            last_action: "booked_via_waitlist_sms",
-            last_action_at: new Date().toISOString(),
-            action_seen_by_groomer: false,
           })
         if (bookErr) {
           console.error("[sms-inbound] waitlist book failed:", bookErr)
+          // Clear the offer fields so the next cancellation can re-offer
+          // (task #95 fix — failed YES was stranding the waitlist row).
+          await supabase
+            .from("grooming_waitlist")
+            .update({
+              offered_slot_start: null,
+              offered_slot_end: null,
+              expires_at: null,
+              offered_via: null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", pendingOffer.id)
           return twimlResponse("Oops — couldn't book that slot. Please contact your groomer directly.")
         }
         await supabase
