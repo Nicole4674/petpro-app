@@ -507,6 +507,14 @@ export default function Dashboard() {
   // Stats calculations
   var todayStr = formatDateISO(new Date())
   var todayAppts = appointments.filter(function(a) { return a.appointment_date === todayStr })
+  // "Appointments Today" stat card uses an active-only count: cancelled and
+  // no-show rows still need to render in the Grooming Overview list below
+  // (with their red badges) so the groomer can see history at a glance, but
+  // they shouldn't pad the headline number. Without this filter, a day with
+  // 7 real appointments and 10 leftover cancelled rows would show "17".
+  var todayApptsActive = todayAppts.filter(function(a) {
+    return a.status !== 'cancelled' && a.status !== 'no_show'
+  })
   // "Done" = status flipped to completed OR checked_out_at is stamped.
   // The manual "→ Check Out" button stamps checked_out_at without always flipping
   // status — so we treat both as "completed" to match what shows green on Calendar.
@@ -686,7 +694,7 @@ export default function Dashboard() {
         <div className="db-stat-card db-stat-purple" onClick={function() { navigate('/calendar') }} style={{ cursor: 'pointer' }}>
           <div className="db-stat-icon">✂️</div>
           <div className="db-stat-info">
-            <div className="db-stat-number">{todayAppts.length}</div>
+            <div className="db-stat-number">{todayApptsActive.length}</div>
             <div className="db-stat-label">Appointments Today</div>
           </div>
         </div>
