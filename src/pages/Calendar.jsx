@@ -2580,32 +2580,19 @@ export default function Calendar() {
     // Haiku picker, templated message, push notification, response window.
     const checkWaitlistForOpening = async (cancelledApptId) => {
         try {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) return
-
-            const { data: cancelledAppt } = await supabase
-                .from('appointments')
-                .select('appointment_date, start_time, end_time, service_id, staff_id')
-                .eq('id', cancelledApptId)
-                .single()
-
-            if (!cancelledAppt) return
-
-            // Build ISO timestamps for the open slot
-            const slotStart = cancelledAppt.appointment_date + 'T' + cancelledAppt.start_time
-            const slotEnd = cancelledAppt.appointment_date + 'T' + cancelledAppt.end_time
-
-            // Fire-and-forget — don't block the cancel flow if it fails
-            supabase.functions.invoke('waitlist-notify', {
-                body: {
-                    groomer_id: user.id,
-                    cancelled_appointment_id: cancelledApptId,
-                    start_time: slotStart,
-                    end_time: slotEnd,
-                    service_id: cancelledAppt.service_id,
-                    staff_id: cancelledAppt.staff_id || null
-                }
-            }).catch(err => console.error('waitlist-notify error:', err))
+            // Fire-and-forget call to the new offer function. It does ALL the work:
+            //   • Picks best waitlist match (mobile = nearest, stationary = top of list)
+            //   • Stamps the offer onto the waitlist row
+            //   • Sends an SMS to that client with YES/NO instructions
+            // The previous `waitlist-notify` function was never actually deployed —
+            // calls have been silently failing for weeks. This new path actually fires.
+            supabase.functions.invoke('offer-cancelled-slot-to-waitlist', {
+                body: { appointment_id: cancelledApptId },
+            }).then(({ data, error }) => {
+                if (error) console.error('[waitlist offer] invoke error:', error)
+                else if (data?.offered_to) console.log('[waitlist offer] offered to:', data.offered_to)
+                else if (data?.no_match) console.log('[waitlist offer] no match:', data.reason)
+            }).catch(err => console.error('[waitlist offer] threw:', err))
         } catch (err) {
             console.error('Waitlist auto-notify error:', err)
         }

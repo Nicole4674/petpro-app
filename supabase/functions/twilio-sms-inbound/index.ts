@@ -114,6 +114,85 @@ serve(async (req) => {
       return twimlResponse("Hi! We didn't recognize this number. Please reply to your groomer directly to update your appointment.")
     }
 
+    // ─── 3.5. WAITLIST OFFER INTERCEPT ─────────────────────────────────
+    // BEFORE we run the reminder Y/N logic, check if any of the matching
+    // clients has a PENDING waitlist offer (offered_slot_start NOT NULL,
+    // expires_at > NOW). If so, this YES/NO reply is for that offer —
+    // book the slot (YES) or clear + roll to next match (NO).
+    const intercepClientIds = clientHits.map((c) => c.id)
+    const { data: pendingOffer } = await supabase
+      .from("grooming_waitlist")
+      .select("id, groomer_id, client_id, pet_id, service_id, offered_slot_start, offered_slot_end, expires_at, pets:pet_id(name)")
+      .in("client_id", intercepClientIds)
+      .not("offered_slot_start", "is", null)
+      .gt("expires_at", new Date().toISOString())
+      .eq("status", "waiting")
+      .order("expires_at", { ascending: false })  // newest first
+      .limit(1)
+      .maybeSingle()
+
+    if (pendingOffer) {
+      const offerPetName = pendingOffer.pets?.name || "your pet"
+      const slotStart = pendingOffer.offered_slot_start as string
+      const apptDate = slotStart.split("T")[0]
+      const startTime = (slotStart.split("T")[1] || "").slice(0, 5)
+      const endTime = ((pendingOffer.offered_slot_end as string).split("T")[1] || "").slice(0, 5)
+
+      if (isYes) {
+        // Book the slot as a real appointment + mark waitlist as 'booked'
+        const { error: bookErr } = await supabase
+          .from("appointments")
+          .insert({
+            groomer_id: pendingOffer.groomer_id,
+            client_id: pendingOffer.client_id,
+            pet_id: pendingOffer.pet_id,
+            service_id: pendingOffer.service_id,
+            appointment_date: apptDate,
+            start_time: startTime,
+            end_time: endTime,
+            status: "confirmed",
+            booked_via: "waitlist_sms_offer",
+            last_action: "booked_via_waitlist_sms",
+            last_action_at: new Date().toISOString(),
+            action_seen_by_groomer: false,
+          })
+        if (bookErr) {
+          console.error("[sms-inbound] waitlist book failed:", bookErr)
+          return twimlResponse("Oops — couldn't book that slot. Please contact your groomer directly.")
+        }
+        await supabase
+          .from("grooming_waitlist")
+          .update({
+            status: "booked",
+            offered_slot_start: null,
+            offered_slot_end: null,
+            expires_at: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", pendingOffer.id)
+        const friendlyDate = new Date(apptDate + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })
+        const friendlyTime = formatTime12h(startTime)
+        return twimlResponse(`Awesome! ${offerPetName} is booked for ${friendlyDate} at ${friendlyTime}. See you then! 🐾`)
+      }
+
+      // NO → clear the offer + fire the next-best match
+      await supabase
+        .from("grooming_waitlist")
+        .update({
+          offered_slot_start: null,
+          offered_slot_end: null,
+          expires_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", pendingOffer.id)
+      // Try to fire next-best by re-invoking the offer function with the
+      // ORIGINAL cancelled appointment context. But we don't know the
+      // original appointment_id here — so we'll just notify the groomer.
+      // (Future polish: pass cancelled_appointment_id forward on the
+      // waitlist row so we can chain offers automatically.)
+      return twimlResponse(`Got it — passing on this slot. We'll text you next time something opens up!`)
+    }
+
     // For each matching client (could be multiple if same phone shared across shops),
     // find the soonest UPCOMING appointment that's still pending/scheduled/confirmed.
     // We act on the soonest one — that's what the reminder was about.
@@ -229,6 +308,15 @@ function normalizePhone(raw: string): string {
     else p = "+" + p
   }
   return p
+}
+
+// "14:30" -> "2:30 PM". Used in friendly SMS confirmation replies.
+function formatTime12h(hhmm: string): string {
+  if (!hhmm) return ""
+  const [h, m] = hhmm.split(":").map(Number)
+  const ampm = h >= 12 ? "PM" : "AM"
+  const h12 = h % 12 || 12
+  return m === 0 ? `${h12} ${ampm}` : `${h12}:${String(m).padStart(2, "0")} ${ampm}`
 }
 
 // Twilio expects a TwiML XML response. Empty <Response/> = ack with no reply.

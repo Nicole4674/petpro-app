@@ -1392,6 +1392,27 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           console.warn('[CANCEL] notify groomer failed (non-fatal):', notifyErr)
         }
 
+        // ─── Auto-offer the freed slot to the waitlist via SMS ─────────
+        // Fire-and-forget — we don't want a waitlist hiccup to block
+        // the client's cancel confirmation. The new edge function does
+        // the smart match (nearest for mobile, top-of-list otherwise)
+        // and sends an SMS offer if it finds a candidate.
+        try {
+          var supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+          var serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+          // Don't await — fire it and move on.
+          fetch(`${supabaseUrl}/functions/v1/offer-cancelled-slot-to-waitlist`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${serviceKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ appointment_id: toolInput.appointment_id }),
+          }).catch(function (e) { console.warn('[CANCEL] waitlist offer fire failed:', e) })
+        } catch (waitlistErr) {
+          console.warn('[CANCEL] waitlist offer setup failed:', waitlistErr)
+        }
+
         return { success: true, appointment_id: toolInput.appointment_id }
       }
 

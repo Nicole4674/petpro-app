@@ -1,0 +1,24 @@
+-- =============================================================================
+-- Shop Contact Fields v1
+-- =============================================================================
+-- Adds optional contact fields to shop_settings so they can be displayed
+-- on printable receipts (and later emailed receipts, statements, etc).
+--
+-- Why nullable: existing groomers shouldn't be blocked. They show up in the
+-- new Shop Settings form and get filled in over time.
+--
+-- HOW TO RUN:
+--   1. Supabase Dashboard → SQL Editor → New query
+--   2. Paste this whole file
+--   3. Click Run
+--   4. Should see "Success. No rows returned"
+-- =============================================================================
+
+ALTER TABLE shop_settings
+  ADD COLUMN IF NOT EXISTS shop_address TEXT,
+  ADD COLUMN IF NOT EXISTS shop_phone   TEXT,
+  ADD COLUMN IF NOT EXISTS shop_email   TEXT;
+
+-- Quick verify
+-- select shop_name, shop_address, shop_phone, shop_email
+-- from shop_settings limit 5;
