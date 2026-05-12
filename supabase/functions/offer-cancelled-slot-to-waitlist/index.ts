@@ -85,6 +85,27 @@ serve(async (req) => {
       .maybeSingle()
     if (!shop) return jsonError("Shop settings not found", 404)
 
+    // ─── 2b. MASTER KILL SWITCH — Waitlist Auto-Notify toggle ──────────
+    // Lives on ai_personalization.waitlist_auto_notify_enabled and is the
+    // single ON/OFF switch shown in AI → Chat Settings. Defaults OFF so a
+    // brand-new groomer doesn't blast clients before they've opted in.
+    // STRICT === true check: anything else (null, undefined, false) blocks.
+    // This is the gate that fixes the "I turned waitlist off but a client
+    // still got a text" bug — previously this function only honored the
+    // per-template cancellation_offer toggle and ignored the master switch.
+    const { data: aiPrefs } = await supabase
+      .from("ai_personalization")
+      .select("waitlist_auto_notify_enabled")
+      .eq("groomer_id", groomerId)
+      .maybeSingle()
+    if (!aiPrefs || aiPrefs.waitlist_auto_notify_enabled !== true) {
+      return jsonResponse({
+        ok: true,
+        no_match: true,
+        reason: "Waitlist Auto-Notify is OFF in AI Chat Settings — skipped.",
+      })
+    }
+
     // ─── 3. Quiet hours guard — don't text outside allowed window ──────
     // Treat the columns as "send only when current hour >= start AND
     // < end". Default 9-20 = 9am to 8pm. Anything outside = quiet.
