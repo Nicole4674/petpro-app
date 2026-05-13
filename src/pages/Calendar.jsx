@@ -174,7 +174,19 @@ export default function Calendar() {
     const [draggedAppt, setDraggedAppt] = useState(null)
     const [dragConfirm, setDragConfirm] = useState(null)
 
-    // ===== Mass Text state (emergency / day-of cancellations) =====
+    // ===== Mass SMS state (pro+ only) =====
+    // Parallel to the Mass Notify (in-app) flow below, but sends real Twilio SMS.
+    // Filters recipients by sms_consent AND has phone. Pre-flight quota check
+    // blocks send if recipients > monthly_sms_remaining (founder unlimited bypass).
+    const [showMassSms, setShowMassSms] = useState(false)
+    const [massSmsDate, setMassSmsDate] = useState(null)
+    const [massSmsMessage, setMassSmsMessage] = useState('')
+    const [massSmsRecipients, setMassSmsRecipients] = useState({}) // { clientId: bool }
+    const [massSmsSending, setMassSmsSending] = useState(false)
+    const [massSmsResults, setMassSmsResults] = useState(null) // { sent, failed, errors }
+    const [massSmsQuota, setMassSmsQuota] = useState({ remaining: null, total: null, founder: false, loaded: false })
+
+    // ===== Mass Notify (in-app) state — formerly "Mass Text" =====
     // Pulls every client with an appt on the chosen date, shows them,
     // lets Nicole uncheck any, type ONE message, send to all via Twilio.
     const [showMassText, setShowMassText] = useState(false)
@@ -2822,7 +2834,7 @@ export default function Calendar() {
                     </button>
                     <button
                         onClick={() => { setShowMassText(true); setMassTextDate(dateToString(currentDate)) }}
-                        title="Mass text every client with an appointment on a given day (for emergencies / day-of cancellations)"
+                        title="Send one in-app message to every client with an appointment on a given day (free, doesn't use SMS credits). Clients see it in the PetPro client portal."
                         style={{
                             padding: '8px 14px', background: '#fff',
                             color: '#dc2626', border: '1px solid #fecaca',
@@ -2830,8 +2842,49 @@ export default function Calendar() {
                             cursor: 'pointer', marginRight: '10px',
                         }}
                     >
-                        📣 Mass Text
+                        📣 Mass Notify
                     </button>
+
+                    {/* Mass SMS button — pro+ only. Basic tier doesn't see this
+                        button at all (they have Mass Notify above for free
+                        in-app blasts). Pro+ groomers also have access to Mass
+                        Notify when they're low on SMS credits. */}
+                    {subscriptionTier && subscriptionTier !== 'basic' && (
+                        <button
+                            onClick={() => {
+                                setShowMassSms(true)
+                                setMassSmsDate(dateToString(currentDate))
+                                setMassSmsResults(null)
+                                setMassSmsMessage('')
+                                setMassSmsRecipients({})
+                                // Load quota balance so we can render the meter
+                                ;(async () => {
+                                    const { data: { user } } = await supabase.auth.getUser()
+                                    if (!user) return
+                                    const { data: bal } = await supabase
+                                        .from('groomer_sms_balance')
+                                        .select('monthly_sms_remaining, monthly_sms_total, founder_unlimited_sms')
+                                        .eq('groomer_id', user.id)
+                                        .maybeSingle()
+                                    setMassSmsQuota({
+                                        remaining: bal?.monthly_sms_remaining ?? 0,
+                                        total: bal?.monthly_sms_total ?? 0,
+                                        founder: !!bal?.founder_unlimited_sms,
+                                        loaded: true,
+                                    })
+                                })()
+                            }}
+                            title="Send real SMS texts to every client on a given day (uses your monthly SMS credits)"
+                            style={{
+                                padding: '8px 14px', background: '#7c3aed',
+                                color: '#fff', border: '1px solid #7c3aed',
+                                borderRadius: '8px', fontWeight: '600', fontSize: '13px',
+                                cursor: 'pointer', marginRight: '10px',
+                            }}
+                        >
+                            📱 Mass SMS
+                        </button>
+                    )}
                     <div className="view-toggle">
                         <button className={view === 'day' ? 'active' : ''} onClick={() => setView('day')}>Day</button>
                         <button className={view === 'week' ? 'active' : ''} onClick={() => setView('week')}>Week</button>
@@ -3154,23 +3207,8 @@ export default function Calendar() {
                                 .update({ last_message_at: inserted.created_at })
                                 .eq('id', threadId)
 
-                            // 4. Fire the SMS via Twilio (best-effort)
-                            try {
-                                const smsRes = await supabase.functions.invoke('send-sms', {
-                                    body: { to: r.phone, message: msgText },
-                                })
-                                if (smsRes.error || (smsRes.data && smsRes.data.success === false)) {
-                                    // SMS failed but in-app message saved — count as partial success
-                                    results.failed++
-                                    const errMsg = smsRes.error ? smsRes.error.message : (smsRes.data && smsRes.data.error) || 'SMS failed'
-                                    results.errors.push(r.name + ': ' + errMsg + ' (in-app saved)')
-                                    continue
-                                }
-                            } catch (smsErr) {
-                                results.failed++
-                                results.errors.push(r.name + ': SMS error — ' + smsErr.message + ' (in-app saved)')
-                                continue
-                            }
+                            // NOTE: This is the Mass NOTIFY flow — in-app only.
+                            // For Mass SMS, see handleMassSmsSend below (pro+ tier).
 
                             results.sent++
                         } catch (err) {
@@ -3207,9 +3245,9 @@ export default function Calendar() {
                                 overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
                             }}
                         >
-                            <h2 style={{ margin: '0 0 6px', fontSize: '20px' }}>📣 Mass Text</h2>
+                            <h2 style={{ margin: '0 0 6px', fontSize: '20px' }}>📣 Mass Notify</h2>
                             <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#6b7280' }}>
-                                Send one message to every client with an appointment on a specific day. For emergencies / day-of cancellations.
+                                Send one in-app message to every client with an appointment on a specific day. Free — doesn't use SMS credits. Clients see it in their PetPro client portal (and as a push notification if they've enabled it).
                             </p>
 
                             {massTextResults ? (
@@ -3327,6 +3365,322 @@ export default function Calendar() {
                                             }}
                                         >
                                             {massTextSending ? 'Sending...' : '📣 Send to ' + selectedCount}
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                )
+            })()}
+
+            {/* ── Mass SMS Modal — pro+ only, real Twilio texts ──
+                Parallels the Mass Notify modal above but: filters by sms_consent,
+                shows a quota meter, blocks send if recipients exceed remaining
+                credits (founder unlimited bypasses the block), and calls send-sms
+                with groomer_id so the quota system actually deducts properly. */}
+            {showMassSms && (() => {
+                const dayApptsSms = appointments.filter(function (a) {
+                    if (a.appointment_date !== massSmsDate) return false
+                    if (a.status === 'cancelled' || a.status === 'no_show' || a.status === 'rescheduled') return false
+                    return true
+                })
+                // Dedupe + capture consent + phone for each client on this date
+                const smsClientMap = {}
+                dayApptsSms.forEach(function (a) {
+                    const c = a.clients
+                    if (!c || !c.id) return
+                    if (!smsClientMap[c.id]) {
+                        smsClientMap[c.id] = {
+                            id: c.id,
+                            name: ((c.first_name || '') + ' ' + (c.last_name || '')).trim(),
+                            phone: c.phone,
+                            smsConsent: c.sms_consent === true,
+                            times: [],
+                        }
+                    }
+                    if (a.start_time) smsClientMap[c.id].times.push(a.start_time.slice(0, 5))
+                })
+                const smsClientList = Object.values(smsClientMap)
+                const smsEligible = smsClientList.filter(function (c) { return c.phone && c.smsConsent })
+                const smsSelectedCount = smsEligible.filter(function (c) {
+                    return massSmsRecipients[c.id] !== false
+                }).length
+                const noPhoneCount = smsClientList.filter(function (c) { return !c.phone }).length
+                const noConsentCount = smsClientList.filter(function (c) { return c.phone && !c.smsConsent }).length
+
+                // Quota math: founder = unlimited, otherwise show remaining
+                const remaining = massSmsQuota.founder ? Infinity : (massSmsQuota.remaining ?? 0)
+                const overQuota = !massSmsQuota.founder && smsSelectedCount > remaining
+
+                function closeMassSms() {
+                    setShowMassSms(false)
+                    setMassSmsMessage('')
+                    setMassSmsRecipients({})
+                    setMassSmsResults(null)
+                    setMassSmsSending(false)
+                }
+
+                async function handleSendMassSms() {
+                    if (!massSmsMessage.trim()) { alert('Type a message first'); return }
+                    const recipients = smsEligible.filter(function (c) {
+                        return massSmsRecipients[c.id] !== false
+                    })
+                    if (recipients.length === 0) { alert('No eligible recipients selected'); return }
+                    if (overQuota) {
+                        alert('Not enough SMS credits. You have ' + remaining + ' remaining and selected ' + recipients.length + '. Either reduce recipients, upgrade your plan, or use Mass Notify (free in-app) instead.')
+                        return
+                    }
+                    if (!window.confirm('Send this SMS to ' + recipients.length + ' client' + (recipients.length === 1 ? '' : 's') + '?\n\n"' + massSmsMessage + '"\n\nThis will use ' + recipients.length + ' of your monthly SMS credits.')) return
+
+                    setMassSmsSending(true)
+                    const { data: { user } } = await supabase.auth.getUser()
+                    const results = { sent: 0, failed: 0, errors: [] }
+                    const msgText = massSmsMessage.trim()
+
+                    for (const r of recipients) {
+                        try {
+                            const { data: smsRes, error: smsErr } = await supabase.functions.invoke('send-sms', {
+                                body: {
+                                    to: r.phone,
+                                    message: msgText,
+                                    groomer_id: user.id,
+                                    sms_type: 'manual',
+                                },
+                            })
+                            if (smsErr || (smsRes && smsRes.success === false)) {
+                                results.failed++
+                                const errMsg = (smsRes && smsRes.error) || (smsErr && smsErr.message) || 'SMS failed'
+                                results.errors.push(r.name + ': ' + errMsg)
+                                // If we just hit OUT_OF_QUOTA mid-loop, stop — no point retrying
+                                if (smsRes && smsRes.code === 'OUT_OF_QUOTA') {
+                                    results.errors.push('Stopped — out of credits.')
+                                    break
+                                }
+                                continue
+                            }
+                            results.sent++
+                            // Best-effort: also log the SMS into the in-app thread tagged [SMS]
+                            // so the conversation history stays unified.
+                            try {
+                                let { data: thread } = await supabase
+                                    .from('threads')
+                                    .select('id')
+                                    .eq('groomer_id', user.id)
+                                    .eq('client_id', r.id)
+                                    .order('last_message_at', { ascending: false, nullsFirst: false })
+                                    .limit(1)
+                                    .maybeSingle()
+                                let threadId = thread && thread.id
+                                if (!threadId) {
+                                    const { data: newThread } = await supabase
+                                        .from('threads')
+                                        .insert({ groomer_id: user.id, client_id: r.id, subject: null })
+                                        .select('id')
+                                        .single()
+                                    threadId = newThread && newThread.id
+                                }
+                                if (threadId) {
+                                    await supabase.from('messages').insert({
+                                        thread_id: threadId,
+                                        groomer_id: user.id,
+                                        client_id: r.id,
+                                        sender_type: 'groomer',
+                                        text: '[SMS] ' + msgText,
+                                        read_by_groomer: true,
+                                        read_by_client: false,
+                                    })
+                                }
+                            } catch (mirrorErr) {
+                                console.warn('[mass-sms] mirror-to-inapp failed (non-fatal):', mirrorErr)
+                            }
+                        } catch (err) {
+                            results.failed++
+                            results.errors.push(r.name + ': ' + (err.message || 'Unknown error'))
+                        }
+                    }
+
+                    // Refresh quota after sends so the meter updates if user re-opens
+                    try {
+                        const { data: balAfter } = await supabase
+                            .from('groomer_sms_balance')
+                            .select('monthly_sms_remaining, monthly_sms_total, founder_unlimited_sms')
+                            .eq('groomer_id', user.id)
+                            .maybeSingle()
+                        setMassSmsQuota({
+                            remaining: balAfter?.monthly_sms_remaining ?? 0,
+                            total: balAfter?.monthly_sms_total ?? 0,
+                            founder: !!balAfter?.founder_unlimited_sms,
+                            loaded: true,
+                        })
+                    } catch (e) { /* non-fatal */ }
+
+                    setMassSmsResults(results)
+                    setMassSmsSending(false)
+                }
+
+                return (
+                    <div
+                        onClick={closeMassSms}
+                        style={{
+                            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            zIndex: 1000, padding: '20px',
+                        }}
+                    >
+                        <div
+                            onClick={function (e) { e.stopPropagation() }}
+                            style={{
+                                background: '#fff', color: '#111827',
+                                borderRadius: '16px', padding: '24px',
+                                maxWidth: '560px', width: '100%', maxHeight: '85vh',
+                                overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+                            }}
+                        >
+                            <h2 style={{ margin: '0 0 6px', fontSize: '20px' }}>📱 Mass SMS</h2>
+                            <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#6b7280' }}>
+                                Send a real text message to every consented client with an appointment on a specific day. Uses your monthly SMS credits.
+                            </p>
+
+                            {/* Quota meter */}
+                            <div style={{
+                                background: massSmsQuota.founder ? '#f0fdf4' : (overQuota ? '#fee2e2' : '#f5f3ff'),
+                                border: '1px solid ' + (massSmsQuota.founder ? '#bbf7d0' : (overQuota ? '#fca5a5' : '#c4b5fd')),
+                                borderRadius: '8px', padding: '10px 12px', marginBottom: '14px',
+                                fontSize: '13px',
+                                color: massSmsQuota.founder ? '#166534' : (overQuota ? '#991b1b' : '#5b21b6'),
+                            }}>
+                                {massSmsQuota.founder ? (
+                                    <span>🎁 <strong>Founder unlimited</strong> — send as many as you want, no quota.</span>
+                                ) : (
+                                    <span>
+                                        💳 <strong>{remaining}</strong> SMS credit{remaining === 1 ? '' : 's'} remaining
+                                        {smsSelectedCount > 0 && <> · this send will use <strong>{smsSelectedCount}</strong></>}
+                                        {overQuota && <> · ⚠️ over quota!</>}
+                                    </span>
+                                )}
+                            </div>
+
+                            {massSmsResults ? (
+                                <div>
+                                    <div style={{ padding: '16px', background: massSmsResults.failed === 0 ? '#f0fdf4' : '#fffbeb', border: '1px solid ' + (massSmsResults.failed === 0 ? '#bbf7d0' : '#fde68a'), borderRadius: '10px', marginBottom: '14px' }}>
+                                        <div style={{ fontSize: '15px', fontWeight: '700', marginBottom: '6px' }}>
+                                            {massSmsResults.failed === 0 ? '✅ All texts sent' : '⚠️ Partial success'}
+                                        </div>
+                                        <div style={{ fontSize: '13px', color: '#374151' }}>
+                                            Sent: <strong>{massSmsResults.sent}</strong>
+                                            {massSmsResults.failed > 0 && <> · Failed: <strong>{massSmsResults.failed}</strong></>}
+                                        </div>
+                                        {massSmsResults.errors.length > 0 && (
+                                            <div style={{ marginTop: '10px', fontSize: '12px', color: '#92400e' }}>
+                                                <strong>Issues:</strong>
+                                                <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                                                    {massSmsResults.errors.slice(0, 8).map(function (e, i) { return <li key={i}>{e}</li> })}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                        <button onClick={closeMassSms} style={{ padding: '10px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', cursor: 'pointer' }}>Done</button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <div style={{ marginBottom: '14px' }}>
+                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase' }}>Date</label>
+                                        <input
+                                            type="date"
+                                            value={massSmsDate || ''}
+                                            onChange={function (e) { setMassSmsDate(e.target.value); setMassSmsRecipients({}) }}
+                                            style={{ padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', width: '100%', boxSizing: 'border-box' }}
+                                        />
+                                    </div>
+
+                                    <div style={{ marginBottom: '14px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '4px' }}>
+                                            <label style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>
+                                                Recipients ({smsSelectedCount} selected)
+                                            </label>
+                                            <div style={{ fontSize: '11px', color: '#6b7280', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                                {noPhoneCount > 0 && <span style={{ color: '#dc2626' }}>{noPhoneCount} no phone</span>}
+                                                {noConsentCount > 0 && <span style={{ color: '#92400e' }}>{noConsentCount} no consent</span>}
+                                            </div>
+                                        </div>
+                                        {smsClientList.length === 0 ? (
+                                            <div style={{ padding: '16px', textAlign: 'center', color: '#9ca3af', background: '#f9fafb', borderRadius: '8px', fontSize: '13px' }}>
+                                                No appointments on this date.
+                                            </div>
+                                        ) : (
+                                            <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '6px' }}>
+                                                {smsClientList.map(function (c) {
+                                                    const eligible = c.phone && c.smsConsent
+                                                    const checked = eligible && massSmsRecipients[c.id] !== false
+                                                    const reason = !c.phone ? 'no phone' : (!c.smsConsent ? 'no SMS consent' : null)
+                                                    return (
+                                                        <label
+                                                            key={c.id}
+                                                            style={{
+                                                                display: 'flex', alignItems: 'center', gap: '10px',
+                                                                padding: '8px 10px', cursor: eligible ? 'pointer' : 'not-allowed',
+                                                                opacity: eligible ? 1 : 0.5, fontSize: '13px',
+                                                                borderRadius: '6px',
+                                                            }}
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={checked}
+                                                                disabled={!eligible}
+                                                                onChange={function (e) {
+                                                                    setMassSmsRecipients(Object.assign({}, massSmsRecipients, { [c.id]: e.target.checked }))
+                                                                }}
+                                                            />
+                                                            <span style={{ flex: 1 }}>
+                                                                <strong>{c.name || 'Unnamed'}</strong>
+                                                                <span style={{ color: '#6b7280', marginLeft: '6px' }}>
+                                                                    {formatPhone(c.phone) || '(no phone)'} {c.times.length > 0 && '· ' + c.times.join(', ')}
+                                                                </span>
+                                                                {reason && (
+                                                                    <span style={{ color: '#92400e', marginLeft: '8px', fontSize: '11px', fontStyle: 'italic' }}>
+                                                                        ({reason})
+                                                                    </span>
+                                                                )}
+                                                            </span>
+                                                        </label>
+                                                    )
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div style={{ marginBottom: '14px' }}>
+                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase' }}>
+                                            Message ({massSmsMessage.length} chars)
+                                        </label>
+                                        <textarea
+                                            value={massSmsMessage}
+                                            onChange={function (e) { setMassSmsMessage(e.target.value) }}
+                                            rows={4}
+                                            placeholder="Hi, we have an emergency today and need to cancel your appointment. Please reach out to reschedule. Thank you!"
+                                            style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', fontFamily: 'inherit', boxSizing: 'border-box', resize: 'vertical' }}
+                                        />
+                                        <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
+                                            SMS fits 160 chars; longer messages may be split into multiple texts (and use multiple credits per recipient).
+                                        </div>
+                                    </div>
+
+                                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                                        <button onClick={closeMassSms} disabled={massSmsSending} style={{ padding: '10px 18px', background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}>Cancel</button>
+                                        <button
+                                            onClick={handleSendMassSms}
+                                            disabled={massSmsSending || smsSelectedCount === 0 || !massSmsMessage.trim() || overQuota}
+                                            title={overQuota ? 'Not enough SMS credits — reduce recipients or use Mass Notify (free)' : undefined}
+                                            style={{
+                                                padding: '10px 20px',
+                                                background: (massSmsSending || smsSelectedCount === 0 || !massSmsMessage.trim() || overQuota) ? '#9ca3af' : '#7c3aed',
+                                                color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', cursor: (massSmsSending || smsSelectedCount === 0 || !massSmsMessage.trim() || overQuota) ? 'not-allowed' : 'pointer',
+                                            }}
+                                        >
+                                            {massSmsSending ? 'Sending...' : '📱 Send SMS to ' + smsSelectedCount}
                                         </button>
                                     </div>
                                 </>
