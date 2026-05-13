@@ -353,12 +353,18 @@ export default function Dashboard() {
   }
 
   async function fetchOwedSummary(userId) {
-    // Get checked-out appointments
+    // Get checked-out appointments that should actually appear in "Owed":
+    //   - status NOT cancelled / no_show / rescheduled (dead bookings — no money owed)
+    //   - pets.is_archived NOT true (the pet was cleaned up — historical noise)
+    //   - balance > 0 (computed below from payments)
+    // is_archived filter happens in JS after fetch because Supabase can't
+    // easily filter on a nested join column. Status filter is applied here.
     var { data: appts } = await supabase
       .from('appointments')
-      .select('id, quoted_price, final_price, discount_amount, appointment_date, clients:client_id(id, first_name, last_name), pets:pet_id(name)')
+      .select('id, status, quoted_price, final_price, discount_amount, appointment_date, clients:client_id(id, first_name, last_name), pets:pet_id(name, is_archived)')
       .eq('groomer_id', userId)
       .not('checked_out_at', 'is', null)
+      .not('status', 'in', '(cancelled,no_show,rescheduled)')
 
     if (!appts || appts.length === 0) {
       setOwedSummary({ total: 0, clientCount: 0, top3: [] })
@@ -378,9 +384,15 @@ export default function Dashboard() {
       paidMap[p.appointment_id] += parseFloat(p.amount || 0)
     })
 
-    // Compute unpaid with balance
+    // Compute unpaid with balance. Skip rows where the pet has been archived
+    // (groomer cleaned up old records) — they're historical noise, not
+    // collectible debt. Also skip rows missing client info entirely.
     var unpaid = []
     appts.forEach(function(a) {
+      if (!a.clients) return
+      // No pet row at all = pet was hard-deleted. Skip; can't collect on a
+      // ghost. Archived pet = groomer cleaned up records, also skip.
+      if (!a.pets || a.pets.is_archived === true) return
       var servicePrice = parseFloat(a.final_price != null ? a.final_price : (a.quoted_price || 0))
       var discount = parseFloat(a.discount_amount || 0)
       var totalDue = servicePrice - discount

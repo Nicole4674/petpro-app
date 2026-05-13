@@ -18,11 +18,17 @@ export default function Balances() {
     var { data: { user } } = await supabase.auth.getUser()
     if (!user) { setLoading(false); return }
 
-    // Get all checked-out appointments
+    // Get all checked-out appointments that should actually appear in
+    // Outstanding Balances. Excludes cancelled/no-show/rescheduled (dead
+    // bookings — no money owed) at the SQL level. The is_archived filter on
+    // the pet happens after fetch (Supabase can't easily filter on nested
+    // join columns) so historical groomings tied to deleted pets don't
+    // linger forever.
     var { data: appts, error: aErr } = await supabase
       .from('appointments')
       .select(`
         id,
+        status,
         appointment_date,
         start_time,
         quoted_price,
@@ -30,11 +36,12 @@ export default function Balances() {
         discount_amount,
         checked_out_at,
         clients:client_id ( id, first_name, last_name, phone ),
-        pets:pet_id ( id, name, breed ),
+        pets:pet_id ( id, name, breed, is_archived ),
         services:service_id ( service_name )
       `)
       .eq('groomer_id', user.id)
       .not('checked_out_at', 'is', null)
+      .not('status', 'in', '(cancelled,no_show,rescheduled)')
       .order('appointment_date', { ascending: false })
 
     if (aErr) {
@@ -71,9 +78,15 @@ export default function Balances() {
       }
     })
 
-    // Filter to appointments with unpaid balance
+    // Filter to appointments with unpaid balance. Skip archived-pet rows
+    // (groomer cleaned up old records — that's historical noise, not real
+    // collectible debt) and skip rows missing client info entirely.
     var unpaid = []
     appts.forEach(function(a) {
+      if (!a.clients) return
+      // No pet row at all = pet was hard-deleted. Skip; can't collect on a
+      // ghost. Archived pet = groomer cleaned up records, also skip.
+      if (!a.pets || a.pets.is_archived === true) return
       var servicePrice = parseFloat(a.final_price != null ? a.final_price : (a.quoted_price || 0))
       var discount = parseFloat(a.discount_amount || 0)
       var totalDue = servicePrice - discount
