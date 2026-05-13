@@ -76,7 +76,7 @@ serve(async (req) => {
 
     const { data: matchingClients } = await supabase
       .from("clients")
-      .select("id, first_name, last_name, phone, groomer_id")
+      .select("id, first_name, last_name, phone, groomer_id, sms_consent")
 
     const clientHits = (matchingClients || []).filter((c) => {
       if (!c.phone) return false
@@ -98,6 +98,24 @@ serve(async (req) => {
         messageSid,
         inboundType
       )
+
+      // ─── Auto-consent: a reply IS an opt-in under TCPA. Any client who
+      // texts back to a groomer's number has affirmatively engaged, so we
+      // flip sms_consent=true on every matched inbound. Skip the write if
+      // already consented to avoid needless DB chatter. Also flips for
+      // every other client row sharing this phone (multi-account households).
+      for (const c of clientHits) {
+        if (c.sms_consent === true) continue
+        try {
+          await supabase
+            .from("clients")
+            .update({ sms_consent: true })
+            .eq("id", c.id)
+          console.log(`[sms-inbound] Auto-consented client ${c.id} (replied from ${fromPhone})`)
+        } catch (consentErr) {
+          console.warn("[sms-inbound] sms_consent flip failed (non-fatal):", consentErr)
+        }
+      }
     }
 
     // ─── 2.6. If it's NOT a Y/N reply, just acknowledge and bail ───

@@ -456,6 +456,16 @@ export default function Calendar() {
     const [newMessageText, setNewMessageText] = useState('')
     const [sendingMessage, setSendingMessage] = useState(false)
     const [sendMessageStatus, setSendMessageStatus] = useState(null) // 'success' | 'error' | null
+    // SMS-first composer state. mode toggles between 'sms' (primary for paid
+    // tiers) and 'inapp' (free fallback / basic tier only). smsErrorState
+    // captures specific failure modes so we can render the "Send free instead"
+    // recovery button next to OUT_OF_QUOTA errors (option C from the design).
+    const [messageMode, setMessageMode] = useState('sms') // 'sms' | 'inapp'
+    const [sendingSms, setSendingSms] = useState(false)
+    const [smsErrorState, setSmsErrorState] = useState(null) // { code, message } | null
+    // Tier gating: hasSmsAccess === false for $70 'basic' plan groomers.
+    // Anything pro+ gets the SMS-first UI in the appointment popup.
+    const [subscriptionTier, setSubscriptionTier] = useState(null) // 'basic' | 'pro' | 'pro_plus' | 'growing' | 'enterprise' | null
 
     useEffect(() => {
         fetchData()
@@ -469,6 +479,12 @@ export default function Calendar() {
         // Reset inline message composer each time the popup opens a different appt
         setNewMessageText('')
         setSendMessageStatus(null)
+        setSmsErrorState(null)
+        setSendingSms(false)
+        // Default the composer to SMS mode (the primary action) — user can
+        // toggle to in-app via the link below. Basic-tier groomers will see
+        // the composer rendered in in-app mode regardless of this state.
+        setMessageMode('sms')
         // Reset inline time edit so it starts collapsed on every open
         setEditingTime(false)
         setPendingStartTime('')
@@ -556,7 +572,7 @@ export default function Calendar() {
         const [apptResult, clientResult, petResult, serviceResult, staffResult, blockedResult] = await Promise.all([
             supabase
                 .from('appointments')
-                .select('*, clients(id, first_name, last_name, phone), pets(name, breed, behavior_tags), services:service_id(id, service_name), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed, behavior_tags), services:service_id(id, service_name), appointment_pet_addons(id, service_id, services:service_id(id, service_name))), payments(id, amount, refunded_amount)')
+                .select('*, clients(id, first_name, last_name, phone, sms_consent), pets(name, breed, behavior_tags), services:service_id(id, service_name), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed, behavior_tags), services:service_id(id, service_name), appointment_pet_addons(id, service_id, services:service_id(id, service_name))), payments(id, amount, refunded_amount)')
                 .gte('appointment_date', startDate)
                 .lte('appointment_date', endDate)
                 .order('start_time'),
@@ -582,6 +598,18 @@ export default function Calendar() {
         setServices(serviceResult.data || [])
         setStaffMembers(staffResult.data || [])
         setBlockedTimes(blockedResult.data || [])
+
+        // Pull this groomer's subscription tier so the appt popup can decide
+        // whether to show the SMS-first composer (pro+) or the in-app box +
+        // upgrade nudge (basic). Fire-and-forget — UI defaults to a safe fallback.
+        supabase
+            .from('groomers')
+            .select('subscription_tier')
+            .eq('id', user.id)
+            .maybeSingle()
+            .then(({ data: groomerRow }) => {
+                setSubscriptionTier(groomerRow?.subscription_tier || null)
+            })
 
         // Pull tip amounts so the Revenue sidebar's Completed total includes
         // tips (same fix as Dashboard.jsx — tips live on payments, not
@@ -1919,6 +1947,138 @@ export default function Calendar() {
             setSendMessageStatus('error')
         } finally {
             setSendingMessage(false)
+        }
+    }
+
+    // ---- Send via SMS (Twilio) from the appointment popup ----
+    // Hits the send-sms edge function. send-sms takes care of: monthly quota
+    // deduction, founder unlimited bypass, per-template toggle (we use
+    // sms_type: 'manual' so it skips template gating), and Twilio dispatch.
+    // We surface OUT_OF_QUOTA distinctly so the UI can offer a one-click
+    // "send free in-app instead" fallback (option C from the design).
+    const handleSendSmsFromPopup = async () => {
+        if (!newMessageText.trim() || !selectedAppt || sendingSms) return
+        const phone = selectedAppt?.clients?.phone
+        if (!phone) {
+            setSmsErrorState({ code: 'NO_PHONE', message: 'No phone number on file for this client.' })
+            return
+        }
+        if (selectedAppt?.clients?.sms_consent !== true) {
+            setSmsErrorState({ code: 'NO_CONSENT', message: "This client hasn't opted in to SMS. Ask them to enable it on their portal." })
+            return
+        }
+
+        setSendingSms(true)
+        setSmsErrorState(null)
+        setSendMessageStatus(null)
+        try {
+            const { data: { user } } = await supabase.auth.getUser()
+            if (!user) throw new Error('Not signed in')
+            const text = newMessageText.trim()
+
+            const { data: result, error } = await supabase.functions.invoke('send-sms', {
+                body: {
+                    to: phone,
+                    message: text,
+                    groomer_id: user.id,
+                    sms_type: 'manual',
+                },
+            })
+
+            // The edge function returns { success: true, sid, remaining, ... } on
+            // success and { success: false, error, code } on failure. The function
+            // itself returns 200 for quota blocks (402 in headers) so we have to
+            // check the JSON body's `success` flag, not just `error` from the SDK.
+            if (error || (result && result.success === false)) {
+                const code = (result && result.code) || 'UNKNOWN'
+                const message = (result && result.error) || (error && error.message) || 'SMS failed.'
+                setSmsErrorState({ code, message })
+                return
+            }
+
+            // Log this SMS into the in-app messages too so the conversation thread
+            // captures the groomer's outreach regardless of which channel they used.
+            // (Best-effort — don't fail the whole send if this fails.)
+            try {
+                const clientId = selectedAppt.client_id
+                if (clientId) {
+                    let { data: existingThread } = await supabase
+                        .from('threads')
+                        .select('id')
+                        .eq('groomer_id', user.id)
+                        .eq('client_id', clientId)
+                        .order('last_message_at', { ascending: false, nullsFirst: false })
+                        .limit(1)
+                        .maybeSingle()
+                    let threadId = existingThread?.id
+                    if (!threadId) {
+                        const { data: newThread } = await supabase
+                            .from('threads')
+                            .insert({ groomer_id: user.id, client_id: clientId, subject: null })
+                            .select('id')
+                            .single()
+                        threadId = newThread?.id
+                    }
+                    if (threadId) {
+                        await supabase.from('messages').insert({
+                            thread_id: threadId,
+                            groomer_id: user.id,
+                            client_id: clientId,
+                            sender_type: 'groomer',
+                            text: '[SMS] ' + text,
+                            read_by_groomer: true,
+                            read_by_client: false,
+                        })
+                    }
+                }
+            } catch (mirrorErr) {
+                console.warn('[sms-mirror] Could not log SMS to in-app thread:', mirrorErr)
+            }
+
+            setNewMessageText('')
+            setSendMessageStatus('success')
+            setTimeout(() => setSendMessageStatus(null), 3000)
+        } catch (err) {
+            console.error('SMS send from popup failed:', err)
+            setSmsErrorState({ code: 'UNKNOWN', message: (err && err.message) || 'Unexpected error.' })
+        } finally {
+            setSendingSms(false)
+        }
+    }
+
+    // ---- Mark a client as SMS-consented (in-popup, one click) ----
+    // Used by the yellow banner shown when SMS is blocked due to missing
+    // consent. The groomer taps "Mark as consented" after verbally confirming
+    // with the client that they're OK with texts. Flips clients.sms_consent
+    // = true and patches local state so the banner clears immediately
+    // without a full refresh.
+    const [markingConsent, setMarkingConsent] = useState(false)
+    const handleMarkClientSmsConsent = async () => {
+        if (!selectedAppt?.client_id || markingConsent) return
+        setMarkingConsent(true)
+        try {
+            const { error } = await supabase
+                .from('clients')
+                .update({ sms_consent: true })
+                .eq('id', selectedAppt.client_id)
+            if (error) throw error
+            // Patch the open popup's client object so the banner disappears
+            setSelectedAppt((prev) => prev ? ({
+                ...prev,
+                clients: { ...(prev.clients || {}), sms_consent: true },
+            }) : prev)
+            // Also patch the appointments list in state so the banner stays
+            // off if this popup is reopened later without a refresh
+            setAppointments((prev) => prev.map((a) =>
+                a.client_id === selectedAppt.client_id && a.clients
+                    ? { ...a, clients: { ...a.clients, sms_consent: true } }
+                    : a
+            ))
+        } catch (err) {
+            console.error('Mark consent failed:', err)
+            setSmsErrorState({ code: 'CONSENT_UPDATE_FAILED', message: 'Could not update consent. Try again.' })
+        } finally {
+            setMarkingConsent(false)
         }
     }
 
@@ -4856,58 +5016,249 @@ export default function Calendar() {
                                 </button>
                             </div>
 
-                            {/* 💬 Send Message — quick compose to the pet's owner without leaving the calendar */}
-                            <div className="appt-detail-section">
-                                <div className="appt-detail-section-title">💬 Send Message</div>
-                                <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '6px' }}>
-                                    Text the owner directly — goes to their client portal inbox and phone.
-                                </div>
-                                <textarea
-                                    value={newMessageText}
-                                    onChange={(e) => setNewMessageText(e.target.value)}
-                                    placeholder="e.g. Hi! Just letting you know Lilly will be ready in 10 minutes 🐾"
-                                    rows={3}
-                                    style={{
-                                        width: '100%',
-                                        padding: '10px 12px',
-                                        fontSize: '14px',
-                                        border: '1px solid #e5e7eb',
-                                        borderRadius: '8px',
-                                        fontFamily: 'inherit',
-                                        resize: 'vertical',
-                                        boxSizing: 'border-box',
-                                    }}
-                                    disabled={sendingMessage}
-                                />
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', gap: '8px', flexWrap: 'wrap' }}>
-                                    <div style={{ fontSize: '13px', minHeight: '18px' }}>
-                                        {sendMessageStatus === 'success' && (
-                                            <span style={{ color: '#047857' }}>✓ Message sent</span>
+                            {/* Send Message — tier-gated. Pro+ gets SMS-first composer
+                                with in-app fallback link; Basic ($70) gets the original
+                                in-app composer plus an upgrade nudge. */}
+                            {(() => {
+                                // Derive flags from state. hasSmsAccess === true for any
+                                // tier ABOVE basic ($70). null = tier still loading; play
+                                // safe and render in-app-only until we know.
+                                const hasSmsAccess = subscriptionTier && subscriptionTier !== 'basic'
+                                const phone = selectedAppt?.clients?.phone
+                                const smsConsent = selectedAppt?.clients?.sms_consent === true
+                                const canTextThisClient = !!phone && smsConsent
+                                const smsBlockReason = !phone
+                                    ? 'No phone on file for this client.'
+                                    : !smsConsent
+                                        ? "Client hasn't opted in to SMS texts."
+                                        : null
+                                const inSmsMode = hasSmsAccess && messageMode === 'sms'
+                                const sectionTitle = inSmsMode ? '📱 Send SMS' : '💬 Send Message'
+                                const helperLine = inSmsMode
+                                    ? 'Texts the client directly via SMS — counts against your monthly SMS quota.'
+                                    : 'Text the owner directly — goes to their client portal inbox and phone.'
+                                const placeholder = inSmsMode
+                                    ? 'e.g. Hi Katy — Daisy is all done and looking sharp! 🐾'
+                                    : 'e.g. Hi! Just letting you know Lilly will be ready in 10 minutes 🐾'
+                                const sending = inSmsMode ? sendingSms : sendingMessage
+                                const primaryBtnDisabled = !newMessageText.trim() || sending || (inSmsMode && !canTextThisClient)
+                                const primaryBtnLabel = sending
+                                    ? 'Sending…'
+                                    : inSmsMode ? '📱 Send SMS' : '💬 Send Message'
+                                const onPrimaryClick = inSmsMode ? handleSendSmsFromPopup : handleSendMessageFromPopup
+                                const fullConvUrl = inSmsMode
+                                    ? `/messages?tab=sms&client=${selectedAppt?.client_id || ''}`
+                                    : '/messages'
+                                return (
+                                    <div className="appt-detail-section">
+                                        <div className="appt-detail-section-title">{sectionTitle}</div>
+                                        <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '6px' }}>
+                                            {helperLine}
+                                        </div>
+
+                                        {/* SMS gate banner — only when in SMS mode + client can't receive.
+                                            For consent-related blocks, includes a one-click "Mark as
+                                            consented" button for the groomer to use after verbally
+                                            confirming with the client. Most active clients also auto-flip
+                                            to consented when they reply to any inbound SMS — this button
+                                            covers the edge case where consent is verbal/written but the
+                                            client hasn't texted back yet. */}
+                                        {inSmsMode && smsBlockReason && (
+                                            <div style={{
+                                                background: '#fef3c7',
+                                                border: '1px solid #fcd34d',
+                                                color: '#92400e',
+                                                padding: '8px 10px',
+                                                borderRadius: '6px',
+                                                fontSize: '12px',
+                                                marginBottom: '8px',
+                                                display: 'flex',
+                                                flexWrap: 'wrap',
+                                                alignItems: 'center',
+                                                gap: '8px',
+                                            }}>
+                                                <span style={{ flex: '1 1 auto' }}>⚠️ {smsBlockReason}</span>
+                                                {!smsConsent && phone && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleMarkClientSmsConsent}
+                                                        disabled={markingConsent}
+                                                        style={{
+                                                            background: '#7c3aed',
+                                                            color: '#fff',
+                                                            border: 'none',
+                                                            padding: '6px 10px',
+                                                            borderRadius: '6px',
+                                                            fontSize: '12px',
+                                                            fontWeight: 700,
+                                                            cursor: markingConsent ? 'not-allowed' : 'pointer',
+                                                            opacity: markingConsent ? 0.6 : 1,
+                                                            whiteSpace: 'nowrap',
+                                                        }}
+                                                    >
+                                                        {markingConsent ? 'Saving…' : '✓ Mark as consented'}
+                                                    </button>
+                                                )}
+                                            </div>
                                         )}
-                                        {sendMessageStatus === 'error' && (
-                                            <span style={{ color: '#b91c1c' }}>✗ Couldn't send — try again</span>
-                                        )}
+
+                                        <textarea
+                                            value={newMessageText}
+                                            onChange={(e) => setNewMessageText(e.target.value)}
+                                            placeholder={placeholder}
+                                            rows={3}
+                                            style={{
+                                                width: '100%',
+                                                padding: '10px 12px',
+                                                fontSize: '14px',
+                                                border: '1px solid #e5e7eb',
+                                                borderRadius: '8px',
+                                                fontFamily: 'inherit',
+                                                resize: 'vertical',
+                                                boxSizing: 'border-box',
+                                            }}
+                                            disabled={sending}
+                                        />
+
+                                        {/* Status / error row */}
+                                        <div style={{ marginTop: '8px', minHeight: '18px' }}>
+                                            {sendMessageStatus === 'success' && (
+                                                <span style={{ color: '#047857', fontSize: '13px' }}>
+                                                    {inSmsMode ? '✓ SMS sent' : '✓ Message sent'}
+                                                </span>
+                                            )}
+                                            {sendMessageStatus === 'error' && (
+                                                <span style={{ color: '#b91c1c', fontSize: '13px' }}>✗ Couldn't send — try again</span>
+                                            )}
+                                            {smsErrorState && (
+                                                <div style={{
+                                                    background: '#fee2e2',
+                                                    border: '1px solid #fca5a5',
+                                                    color: '#991b1b',
+                                                    padding: '8px 10px',
+                                                    borderRadius: '6px',
+                                                    fontSize: '13px',
+                                                    display: 'flex',
+                                                    flexWrap: 'wrap',
+                                                    alignItems: 'center',
+                                                    gap: '8px',
+                                                    marginTop: '4px',
+                                                }}>
+                                                    <span style={{ flex: '1 1 auto' }}>
+                                                        ✗ {smsErrorState.message}
+                                                    </span>
+                                                    {/* Option C recovery — "send free in-app instead" one-click */}
+                                                    {smsErrorState.code === 'OUT_OF_QUOTA' && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setSmsErrorState(null)
+                                                                setMessageMode('inapp')
+                                                                handleSendMessageFromPopup()
+                                                            }}
+                                                            style={{
+                                                                background: '#7c3aed',
+                                                                color: '#fff',
+                                                                border: 'none',
+                                                                padding: '6px 10px',
+                                                                borderRadius: '6px',
+                                                                fontSize: '12px',
+                                                                fontWeight: 700,
+                                                                cursor: 'pointer',
+                                                            }}
+                                                        >
+                                                            Send free in-app instead
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Primary action row */}
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', gap: '8px', flexWrap: 'wrap' }}>
+                                            <Link
+                                                to={fullConvUrl}
+                                                style={{ fontSize: '13px', color: '#2563eb', textDecoration: 'underline', alignSelf: 'center' }}
+                                                onClick={() => setSelectedAppt(null)}
+                                            >
+                                                View full conversation
+                                            </Link>
+                                            <button
+                                                type="button"
+                                                className="appt-notes-add-btn"
+                                                onClick={onPrimaryClick}
+                                                disabled={primaryBtnDisabled}
+                                                style={{
+                                                    opacity: primaryBtnDisabled ? 0.5 : 1,
+                                                    background: inSmsMode ? '#7c3aed' : undefined,
+                                                    color: inSmsMode ? '#fff' : undefined,
+                                                }}
+                                                title={inSmsMode && smsBlockReason ? smsBlockReason : undefined}
+                                            >
+                                                {primaryBtnLabel}
+                                            </button>
+                                        </div>
+
+                                        {/* Mode toggle (pro+) OR upgrade nudge (basic) */}
+                                        {hasSmsAccess ? (
+                                            <div style={{ marginTop: '10px', fontSize: '12px', color: '#6b7280' }}>
+                                                {inSmsMode ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { setMessageMode('inapp'); setSmsErrorState(null) }}
+                                                        style={{
+                                                            background: 'none',
+                                                            border: 'none',
+                                                            color: '#2563eb',
+                                                            textDecoration: 'underline',
+                                                            cursor: 'pointer',
+                                                            padding: 0,
+                                                            fontSize: '12px',
+                                                        }}
+                                                    >
+                                                        Send as free in-app message instead
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { setMessageMode('sms'); setSmsErrorState(null) }}
+                                                        style={{
+                                                            background: 'none',
+                                                            border: 'none',
+                                                            color: '#2563eb',
+                                                            textDecoration: 'underline',
+                                                            cursor: 'pointer',
+                                                            padding: 0,
+                                                            fontSize: '12px',
+                                                        }}
+                                                    >
+                                                        Switch to SMS instead
+                                                    </button>
+                                                )}
+                                            </div>
+                                        ) : subscriptionTier === 'basic' ? (
+                                            <div style={{
+                                                marginTop: '10px',
+                                                padding: '8px 10px',
+                                                background: '#f5f3ff',
+                                                border: '1px dashed #c4b5fd',
+                                                borderRadius: '6px',
+                                                fontSize: '12px',
+                                                color: '#5b21b6',
+                                            }}>
+                                                💡 Want to text clients directly via SMS?{' '}
+                                                <Link
+                                                    to="/account"
+                                                    style={{ color: '#7c3aed', fontWeight: 700, textDecoration: 'underline' }}
+                                                    onClick={() => setSelectedAppt(null)}
+                                                >
+                                                    Upgrade to Pro →
+                                                </Link>
+                                            </div>
+                                        ) : null}
                                     </div>
-                                    <div style={{ display: 'flex', gap: '8px' }}>
-                                        <Link
-                                            to={'/messages'}
-                                            style={{ fontSize: '13px', color: '#2563eb', textDecoration: 'underline', alignSelf: 'center' }}
-                                            onClick={() => setSelectedAppt(null)}
-                                        >
-                                            View full conversation
-                                        </Link>
-                                        <button
-                                            type="button"
-                                            className="appt-notes-add-btn"
-                                            onClick={handleSendMessageFromPopup}
-                                            disabled={!newMessageText.trim() || sendingMessage}
-                                            style={{ opacity: (!newMessageText.trim() || sendingMessage) ? 0.5 : 1 }}
-                                        >
-                                            {sendingMessage ? 'Sending…' : '💬 Send Message'}
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
+                                )
+                            })()}
 
                             {/* Flags */}
                             {selectedAppt.has_flags && selectedAppt.flag_details && (

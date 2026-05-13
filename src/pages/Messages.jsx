@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import MessageBubble from '../components/MessageBubble'
 import MessageComposer from '../components/MessageComposer'
@@ -8,8 +8,13 @@ import { notifyUser } from '../lib/push'
 
 export default function Messages() {
   var navigate = useNavigate()
+  // ?tab=sms&client=<id> support — lets the appointment popup deep-link
+  // straight into the SMS conversation for a specific client. If the URL
+  // has tab=sms we open on the SMS tab; otherwise default to in-app.
+  var [searchParams] = useSearchParams()
+  var initialTab = searchParams.get('tab') === 'sms' ? 'sms' : 'inapp'
   // Tab switcher: 'inapp' = existing client portal threads, 'sms' = Twilio SMS inbox
-  var [activeTab, setActiveTab] = useState('inapp')
+  var [activeTab, setActiveTab] = useState(initialTab)
   var [user, setUser] = useState(null)
   var [threads, setThreads] = useState([]) // each: { id, groomer_id, client_id, subject, last_message_at, client_name, last_preview, last_sender, unread_count }
   var [selectedThreadId, setSelectedThreadId] = useState(null)

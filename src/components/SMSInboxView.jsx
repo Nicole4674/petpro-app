@@ -11,13 +11,19 @@
 // =============================================================================
 
 import { useState, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { formatPhone } from '../lib/phone'
 
 export default function SMSInboxView() {
+  // Deep-link support: if Messages was opened with ?client=<id> we auto-select
+  // that client's conversation on mount. Used by the appointment popup "View
+  // full conversation" link so one click lands the groomer on the right thread.
+  var [searchParams] = useSearchParams()
+  var initialClientFromUrl = searchParams.get('client') || null
   var [user, setUser] = useState(null)
   var [conversations, setConversations] = useState([])  // [{ client_id, client_name, client_phone, last_body, last_at, last_direction, unread_count }]
-  var [selectedClientId, setSelectedClientId] = useState(null)
+  var [selectedClientId, setSelectedClientId] = useState(initialClientFromUrl)
   var [thread, setThread] = useState([])  // messages for the selected conversation
   var [loading, setLoading] = useState(true)
   var [replyDraft, setReplyDraft] = useState('')
