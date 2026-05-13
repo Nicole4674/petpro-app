@@ -50,6 +50,11 @@ export default function Dashboard() {
   var [unreadSummary, setUnreadSummary] = useState({ total: 0, top3: [] })
   // Stripe payouts widget — net amount processed via Stripe today + this week
   var [stripeSummary, setStripeSummary] = useState({ todayNet: 0, todayCount: 0, weekNet: 0, weekCount: 0 })
+  // Per-appointment tip totals (keyed by appointment id). Tips live on the
+  // payments table, not appointments — so the Revenue Today stat card needs
+  // this map to add tips on top of service price. Without it, an $85 groom
+  // with a $15 tip would only show as $85 on the dashboard.
+  var [tipsByAppt, setTipsByAppt] = useState({})
   // Subscriptions quick-glance stat card (Phase 4)
   // mrr = monthly recurring revenue, normalized for weekly/yearly plans
   var [subStats, setSubStats] = useState({ mrr: 0, activeCount: 0, newThisMonth: 0 })
@@ -147,6 +152,26 @@ export default function Dashboard() {
 
     var { data: apptData } = await apptQuery
     setAppointments(apptData || [])
+
+    // Pull tip amounts for these appointments so Revenue Today includes tips.
+    // tip_amount only lives on the payments table — appointments don't track
+    // it directly. Build a map keyed by appointment_id for the revenue calc.
+    var apptIds = (apptData || []).map(function (a) { return a.id })
+    if (apptIds.length > 0) {
+      var { data: tipPayments } = await supabase
+        .from('payments')
+        .select('appointment_id, tip_amount')
+        .in('appointment_id', apptIds)
+      var tipMap = {}
+      ;(tipPayments || []).forEach(function (p) {
+        if (!p.appointment_id) return
+        if (!tipMap[p.appointment_id]) tipMap[p.appointment_id] = 0
+        tipMap[p.appointment_id] += parseFloat(p.tip_amount || 0)
+      })
+      setTipsByAppt(tipMap)
+    } else {
+      setTipsByAppt({})
+    }
 
     // Fetch boarding reservations that overlap with range
     var { data: boardData } = await supabase
@@ -541,7 +566,11 @@ export default function Dashboard() {
   var occupancyPercent = totalKennels > 0 ? Math.round((occupiedKennels / totalKennels) * 100) : 0
 
   var revenueToday = completedToday.reduce(function(sum, a) {
-    return sum + (parseFloat(a.final_price) || parseFloat(a.quoted_price) || 0)
+    var service = (parseFloat(a.final_price) || parseFloat(a.quoted_price) || 0)
+    // Tips live on the payments table — pulled into tipsByAppt during fetch.
+    // Adding them here so the stat card shows true earnings (service + tip).
+    var tip = parseFloat(tipsByAppt[a.id] || 0)
+    return sum + service + tip
   }, 0)
 
   // Quick add — active pets only (memorial + archived pets filtered out of dropdowns)

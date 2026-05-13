@@ -191,6 +191,10 @@ export default function Calendar() {
         })
     }
     const [appointments, setAppointments] = useState([])
+    // Per-appointment tip totals (keyed by appointment id). Tips live on the
+    // payments table — pulled into this map so the Revenue sidebar's Completed
+    // total adds tips on top of service price (same fix as Dashboard).
+    const [tipsByAppt, setTipsByAppt] = useState({})
     const [clients, setClients] = useState([])
     const [pets, setPets] = useState([])
     const [services, setServices] = useState([])
@@ -578,6 +582,29 @@ export default function Calendar() {
         setServices(serviceResult.data || [])
         setStaffMembers(staffResult.data || [])
         setBlockedTimes(blockedResult.data || [])
+
+        // Pull tip amounts so the Revenue sidebar's Completed total includes
+        // tips (same fix as Dashboard.jsx — tips live on payments, not
+        // appointments). Fire-and-forget so we don't block render.
+        const apptIds = (apptResult.data || []).map((a) => a.id)
+        if (apptIds.length > 0) {
+            supabase
+                .from('payments')
+                .select('appointment_id, tip_amount')
+                .in('appointment_id', apptIds)
+                .then(({ data: tipRows }) => {
+                    const tipMap = {}
+                    ;(tipRows || []).forEach((p) => {
+                        if (!p.appointment_id) return
+                        if (!tipMap[p.appointment_id]) tipMap[p.appointment_id] = 0
+                        tipMap[p.appointment_id] += parseFloat(p.tip_amount || 0)
+                    })
+                    setTipsByAppt(tipMap)
+                })
+        } else {
+            setTipsByAppt({})
+        }
+
         setLoading(false)
     }
 
@@ -613,7 +640,13 @@ export default function Calendar() {
             !isDone(a) && DEAD_STATUSES.indexOf(a.status) < 0
         )
         const active = filtered.filter((a) => DEAD_STATUSES.indexOf(a.status) < 0)
-        const totalCompleted = completed.reduce((sum, a) => sum + (parseFloat(a.final_price) || parseFloat(a.quoted_price) || 0), 0)
+        // Completed = service price + any tips on the payments table.
+        // Expected = service price only (tips don't exist yet for future appts).
+        const totalCompleted = completed.reduce((sum, a) => {
+            const service = (parseFloat(a.final_price) || parseFloat(a.quoted_price) || 0)
+            const tip = parseFloat(tipsByAppt[a.id] || 0)
+            return sum + service + tip
+        }, 0)
         const totalExpected = expected.reduce((sum, a) => sum + (parseFloat(a.quoted_price) || 0), 0)
         // Total Pets: count pets across all non-dead appts (handles multi-pet bookings via appointment_pets)
         const petIdSet = new Set()
