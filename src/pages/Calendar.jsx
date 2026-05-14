@@ -1216,7 +1216,10 @@ export default function Calendar() {
     // Multi-pet: Change the service for a single pet on an existing appointment.
     // Auto-shrinks/extends the appointment end_time based on the new service's time block.
     // Warns (with override) if the new end time overlaps another appointment on the same day/staff.
-    // Price is NOT auto-updated — groomer edits manually per product decision.
+    // Price auto-fills to the new service's default (e.g. swap bath→groom, price
+    // jumps $25→$60 automatically). Groomers can still manually edit after if
+    // they want a custom amount. This was previously a manual-only step but
+    // groomers found it annoying to change service AND price both every time.
     const handleChangePetService = async (apptPetId) => {
         if (!selectedAppt || !pendingServiceId) return
 
@@ -1284,10 +1287,15 @@ export default function Calendar() {
                 if (!window.confirm(msg)) return
             }
 
-            // 4. Update appointment_pets row (service swap)
+            // 4. Update appointment_pets row (service swap + price auto-fill).
+            // Auto-fills the pet's quoted_price to the NEW service's default so
+            // the groomer doesn't have to update price separately. Falls back
+            // to 0 if the new service has no price set.
+            var newServicePrice = parseFloat(newService.price)
+            if (isNaN(newServicePrice)) newServicePrice = 0
             var { error: apErr } = await supabase
                 .from('appointment_pets')
-                .update({ service_id: newService.id })
+                .update({ service_id: newService.id, quoted_price: newServicePrice })
                 .eq('id', apptPetId)
             if (apErr) throw apErr
 
@@ -1303,7 +1311,11 @@ export default function Calendar() {
                 .eq('id', selectedAppt.id)
             if (aErr) throw aErr
 
-            // 6. Close editor + refresh popup + calendar
+            // 6. Recompute the appointment total (sums every pet + every addon)
+            //    so the headline price on the calendar matches the new service.
+            await recalcAndSaveApptTotal(selectedAppt.id)
+
+            // 7. Close editor + refresh popup + calendar
             setEditingServiceApptPetId(null)
             setPendingServiceId('')
             await handleApptClick(selectedAppt, { stopPropagation: function () {} })
