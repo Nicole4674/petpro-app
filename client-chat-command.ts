@@ -1013,6 +1013,21 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
 
         // (regularStaffId was already looked up earlier, before the rule check)
 
+        // ── Look up service price so we can stamp `quoted_price` on the
+        // appointment + appointment_pets row. Without this the groomer's
+        // Calendar popup top-total reads $0 because both fields are null.
+        var bookingServicePrice: number = 0
+        if (toolInput.service_id) {
+          var { data: svcRowForPrice } = await supabaseAdmin
+            .from('services')
+            .select('price')
+            .eq('id', toolInput.service_id)
+            .maybeSingle()
+          if (svcRowForPrice) {
+            bookingServicePrice = parseFloat(String(svcRowForPrice.price || 0)) || 0
+          }
+        }
+
         // Always 'confirmed' so it shows on the calendar. Flagged bookings get
         // flag_status='pending' so they appear on the Flagged Bookings page for review.
         var apptPayload: any = {
@@ -1024,6 +1039,10 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           end_time: endTime,
           status: 'confirmed',  // matches original behavior — appears on calendar immediately
           service_notes: toolInput.service_notes || null,
+          // Stamp the catalog price so groomer's Calendar popup shows a real
+          // total instead of $0. Groomer can edit later if there are addons
+          // or a special quote.
+          quoted_price: bookingServicePrice > 0 ? bookingServicePrice : null,
           // ─── Source tracking — so calendar can show "🤖 booked by client AI" badge
           booked_via: 'client_ai',
           last_action: 'created',
@@ -1087,12 +1106,16 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         }
 
         // Multi-pet junction row (single pet booking)
+        // Also stamp `quoted_price` here so any UI that sums from
+        // appointment_pets gets a non-zero number (Calendar uses this as
+        // a fallback when appt.quoted_price is null).
         var { error: junctionErr } = await supabaseAdmin
           .from('appointment_pets')
           .insert({
             appointment_id: newAppt.id,
             pet_id: toolInput.pet_id,
             service_id: toolInput.service_id || null,
+            quoted_price: bookingServicePrice > 0 ? bookingServicePrice : null,
           })
         if (junctionErr) console.error('[BOOK] junction insert error:', junctionErr.message)
 

@@ -584,7 +584,7 @@ export default function Calendar() {
         const [apptResult, clientResult, petResult, serviceResult, staffResult, blockedResult] = await Promise.all([
             supabase
                 .from('appointments')
-                .select('*, clients(id, first_name, last_name, phone, sms_consent), pets(name, breed, behavior_tags), services:service_id(id, service_name), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed, behavior_tags), services:service_id(id, service_name), appointment_pet_addons(id, service_id, services:service_id(id, service_name))), payments(id, amount, refunded_amount)')
+                .select('*, clients(id, first_name, last_name, phone, sms_consent), pets(name, breed, behavior_tags), services:service_id(id, service_name, price), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed, behavior_tags), services:service_id(id, service_name, price), appointment_pet_addons(id, service_id, services:service_id(id, service_name, price))), payments(id, amount, refunded_amount)')
                 .gte('appointment_date', startDate)
                 .lte('appointment_date', endDate)
                 .order('start_time'),
@@ -4024,7 +4024,36 @@ export default function Calendar() {
                                 </div>
                                 <div className="appt-detail-sched-item">
                                     <span className="appt-detail-sched-label">💰 Price</span>
-                                    <span className="appt-detail-sched-value">${parseFloat(selectedAppt.final_price || selectedAppt.quoted_price || 0).toFixed(2)}</span>
+                                    <span className="appt-detail-sched-value">{(function () {
+                                        // Smart fallback — covers historical AI-booked appts that
+                                        // never had quoted_price stamped, so the top total isn't $0.
+                                        // Priority: final_price → quoted_price → sum of pet quotes
+                                        // → sum of service catalog prices (+ addons).
+                                        var f = parseFloat(selectedAppt.final_price || 0)
+                                        if (f > 0) return '$' + f.toFixed(2)
+                                        var q = parseFloat(selectedAppt.quoted_price || 0)
+                                        if (q > 0) return '$' + q.toFixed(2)
+                                        var aps = selectedAppt.appointment_pets || []
+                                        if (aps.length > 0) {
+                                            var petQuoteSum = aps.reduce(function (sum, ap) {
+                                                return sum + parseFloat(ap.quoted_price || 0)
+                                            }, 0)
+                                            if (petQuoteSum > 0) return '$' + petQuoteSum.toFixed(2)
+                                            // Last resort — sum catalog prices from services + addons
+                                            var catalogSum = aps.reduce(function (sum, ap) {
+                                                var svcPrice = parseFloat((ap.services && ap.services.price) || 0)
+                                                var addonSum = (ap.appointment_pet_addons || []).reduce(function (s, addon) {
+                                                    return s + parseFloat((addon.services && addon.services.price) || 0)
+                                                }, 0)
+                                                return sum + svcPrice + addonSum
+                                            }, 0)
+                                            if (catalogSum > 0) return '$' + catalogSum.toFixed(2)
+                                        }
+                                        // Single-pet legacy — use the appt-level service join
+                                        var apptSvcPrice = parseFloat((selectedAppt.services && selectedAppt.services.price) || 0)
+                                        if (apptSvcPrice > 0) return '$' + apptSvcPrice.toFixed(2)
+                                        return '$0.00'
+                                    })()}</span>
                                 </div>
                             </div>
 
