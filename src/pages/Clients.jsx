@@ -92,13 +92,18 @@ export default function Clients() {
   )
 
   function openMassSms() {
-    // Pre-check all eligible recipients
-    const preChecked = {}
-    smsEligible.forEach(c => { preChecked[c.id] = true })
-    setMassSmsRecipients(preChecked)
+    // SAFER default: pre-check NOTHING. Forces the groomer to actively
+    // choose recipients (Select all is one click). Previously pre-checked
+    // ALL which (a) made the "I want to text 1 person" flow confusing and
+    // (b) let a single accidental Send blast every client at once.
+    setMassSmsRecipients({})
     setMassSmsMessage('')
     setMassSmsResults(null)
     setMassSmsSearch('')
+    // Belt-and-suspenders — reset spinner in case a previous send threw
+    // before reaching the final setMassSmsSending(false). Without this,
+    // the Send button stays permanently greyed.
+    setMassSmsSending(false)
     setShowMassSms(true)
   }
 
@@ -107,6 +112,7 @@ export default function Clients() {
     setShowMassSms(false)
     setMassSmsResults(null)
     setMassSmsSearch('')
+    setMassSmsSending(false)
   }
 
   // Search-filtered eligible list — drives the visible recipient rows AND
@@ -383,8 +389,8 @@ export default function Clients() {
               <h2 style={{ margin: 0, fontSize: '20px' }}>📱 Mass SMS — All Clients</h2>
               <button onClick={closeMassSms} disabled={massSmsSending} style={{ background: 'none', border: 'none', fontSize: '22px', color: '#6b7280', cursor: massSmsSending ? 'not-allowed' : 'pointer', lineHeight: 1, padding: 0 }}>×</button>
             </div>
-            <p style={{ margin: '0 0 14px', color: '#6b7280', fontSize: '13px' }}>
-              Sends a real text to every active client who's opted in to SMS. Best for shop-wide news — new phone number, holiday closure, big announcement.
+            <p style={{ margin: '0 0 10px', color: '#6b7280', fontSize: '13px' }}>
+              Sends a real text to clients who've opted in to SMS. Search by name, check who you want, type your message, send. Nothing pre-checked — pick recipients first (or hit "Select all" for shop-wide news).
             </p>
 
             {/* Quota meter */}
@@ -631,6 +637,13 @@ export default function Clients() {
                       <button
                         onClick={handleMassSmsSend}
                         disabled={massSmsSending || selectedSmsCount === 0 || !massSmsMessage.trim() || overQuota}
+                        title={
+                          massSmsSending ? 'A send is already in progress' :
+                          selectedSmsCount === 0 ? 'Pick at least one recipient first' :
+                          !massSmsMessage.trim() ? 'Type a message first' :
+                          overQuota ? 'Selected more recipients than your remaining SMS credits' :
+                          'Send SMS to ' + selectedSmsCount + ' client(s)'
+                        }
                         style={{
                           padding: '10px 18px',
                           background: (massSmsSending || selectedSmsCount === 0 || !massSmsMessage.trim() || overQuota) ? '#9ca3af' : '#7c3aed',
