@@ -247,10 +247,29 @@ function getDateInTimezone(tz: string, addDays: number): string {
 }
 
 function pickPetName(appt: any): string | null {
+  // Multi-pet: pull every pet name out of appointment_pets and join with
+  // proper English conjunction so reminders read naturally.
+  //   1 pet  → "Bella"
+  //   2 pets → "Bella and Max"
+  //   3+ pets → "Bella, Max, and Luna" (Oxford comma)
+  // Previously this only returned appointment_pets[0].pets.name — clients
+  // with multiple dogs got reminders that named just one, which freaked
+  // some of them out.
   if (appt.appointment_pets && appt.appointment_pets.length > 0) {
-    const first = appt.appointment_pets[0]
-    if (first?.pets?.name) return first.pets.name
+    const names: string[] = []
+    for (const ap of appt.appointment_pets) {
+      const n = ap && ap.pets && ap.pets.name
+      if (n && typeof n === "string" && n.trim()) names.push(n.trim())
+    }
+    if (names.length === 1) return names[0]
+    if (names.length === 2) return names[0] + " and " + names[1]
+    if (names.length >= 3) {
+      return names.slice(0, -1).join(", ") + ", and " + names[names.length - 1]
+    }
+    // appointment_pets present but no usable names → fall through to legacy
   }
+  // Legacy single-pet appointment (no appointment_pets row): use the
+  // direct pet_id join.
   if (appt.pets && appt.pets.name) return appt.pets.name
   return null
 }

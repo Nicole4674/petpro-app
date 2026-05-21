@@ -269,11 +269,25 @@ export default function Calendar() {
 
         var clientFirst = (appt.clients && appt.clients.first_name) || 'there'
         var clientLast = (appt.clients && appt.clients.last_name) || ''
-        // Pet name: prefer appointment_pets[0], fall back to legacy pets, fall back to "your pet"
+        // Pet name: include EVERY pet on multi-pet appointments (clients with
+        // two dogs were getting reminders that named only one — confusing).
+        //   1 pet  → "Bella"
+        //   2 pets → "Bella and Max"
+        //   3+ pets → "Bella, Max, and Luna"
         var petName = 'your pet'
         if (appt.appointment_pets && appt.appointment_pets.length > 0) {
-            var firstPet = appt.appointment_pets[0]
-            if (firstPet && firstPet.pets && firstPet.pets.name) petName = firstPet.pets.name
+            var apPetNames = []
+            for (var pIdx = 0; pIdx < appt.appointment_pets.length; pIdx++) {
+                var ap = appt.appointment_pets[pIdx]
+                if (ap && ap.pets && ap.pets.name) apPetNames.push(ap.pets.name)
+            }
+            if (apPetNames.length === 1) petName = apPetNames[0]
+            else if (apPetNames.length === 2) petName = apPetNames[0] + ' and ' + apPetNames[1]
+            else if (apPetNames.length >= 3) {
+                petName = apPetNames.slice(0, -1).join(', ') + ', and ' + apPetNames[apPetNames.length - 1]
+            } else if (appt.pets && appt.pets.name) {
+                petName = appt.pets.name
+            }
         } else if (appt.pets && appt.pets.name) {
             petName = appt.pets.name
         }
