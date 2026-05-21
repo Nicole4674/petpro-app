@@ -584,11 +584,11 @@ export default function Calendar() {
         const [apptResult, clientResult, petResult, serviceResult, staffResult, blockedResult] = await Promise.all([
             supabase
                 .from('appointments')
-                .select('*, clients(id, first_name, last_name, phone, sms_consent), pets(name, breed, behavior_tags), services:service_id(id, service_name, price), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed, behavior_tags), services:service_id(id, service_name, price), appointment_pet_addons(id, service_id, services:service_id(id, service_name, price))), payments(id, amount, refunded_amount)')
+                .select('*, clients(id, first_name, last_name, phone, sms_consent, address), pets(name, breed, behavior_tags), services:service_id(id, service_name, price), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed, behavior_tags), services:service_id(id, service_name, price), appointment_pet_addons(id, service_id, services:service_id(id, service_name, price))), payments(id, amount, refunded_amount)')
                 .gte('appointment_date', startDate)
                 .lte('appointment_date', endDate)
                 .order('start_time'),
-            supabase.from('clients').select('id, first_name, last_name, phone').eq('groomer_id', user.id).order('last_name'),
+            supabase.from('clients').select('id, first_name, last_name, phone, default_mobile_visit, default_mobile_pickup').eq('groomer_id', user.id).order('last_name'),
             supabase.from('pets').select('id, name, breed, client_id').eq('groomer_id', user.id).or('is_archived.is.null,is_archived.eq.false').order('name'),
             supabase.from('services').select('id, service_name, price, time_block_minutes').eq('groomer_id', user.id).eq('is_active', true),
             supabase.from('staff_members').select('id, first_name, last_name, color_code').eq('groomer_id', user.id).eq('status', 'active').order('first_name'),
@@ -1971,6 +1971,99 @@ export default function Calendar() {
             setSendMessageStatus('error')
         } finally {
             setSendingMessage(false)
+        }
+    }
+
+    // ─── Mobile arrival actions (Mobile Pick Up flow) ────────────────────
+    // Helpers powering the "I'm here / Head back / Drop off" buttons in the
+    // appointment popup. Two operations:
+    //   sendArrivalSms(templateKey) — renders the configured template and
+    //     fires it via send-sms (same path as manual texts).
+    //   advancePickupStep(newStep)  — writes mobile_pickup_step to the DB
+    //     and patches local state so the popup re-renders instantly.
+    const [mobileActionStatus, setMobileActionStatus] = useState(null) // { ok, text }
+    const [mobileActionBusy, setMobileActionBusy] = useState(false)
+
+    async function sendArrivalSms(templateKey) {
+        if (!selectedAppt) return false
+        if (!selectedAppt.clients || !selectedAppt.clients.phone) {
+            setMobileActionStatus({ ok: false, text: 'No phone number on file for this client.' })
+            return false
+        }
+        if (selectedAppt.clients.sms_consent !== true) {
+            setMobileActionStatus({ ok: false, text: "Client hasn't opted in to SMS. Open their profile to mark them consented." })
+            return false
+        }
+        var tpl = (smsTemplates && smsTemplates[templateKey]) || ''
+        if (!tpl) {
+            setMobileActionStatus({ ok: false, text: 'SMS template missing. Reset it in Shop Settings → SMS Templates.' })
+            return false
+        }
+        // Pull pet name (multi-pet uses first pet; single-pet uses appt.pets)
+        var petName = ''
+        if (selectedAppt.appointment_pets && selectedAppt.appointment_pets.length > 0) {
+            petName = (selectedAppt.appointment_pets[0].pets && selectedAppt.appointment_pets[0].pets.name) || ''
+        } else if (selectedAppt.pets) {
+            petName = selectedAppt.pets.name || ''
+        }
+        var clientFirst = (selectedAppt.clients && selectedAppt.clients.first_name) || ''
+        var msg = tpl.replace(/\{(\w+)\}/g, function (_, k) {
+            var vars = {
+                client_first_name: clientFirst,
+                pet_name: petName,
+                shop_name: shopName || '',
+            }
+            return vars[k] !== undefined ? vars[k] : ''
+        })
+
+        setMobileActionBusy(true)
+        setMobileActionStatus(null)
+        try {
+            var { data: { user } } = await supabase.auth.getUser()
+            if (!user) throw new Error('Not signed in')
+            var { data, error } = await supabase.functions.invoke('send-sms', {
+                body: {
+                    to: selectedAppt.clients.phone,
+                    message: msg,
+                    groomer_id: user.id,
+                    sms_type: 'mobile_' + templateKey,
+                },
+            })
+            if (error || (data && data.success === false)) {
+                var em = (data && data.error) || (error && error.message) || 'SMS failed'
+                setMobileActionStatus({ ok: false, text: '❌ ' + em })
+                return false
+            }
+            var bal = data && data.source === 'founder_unlimited'
+                ? '(unlimited)'
+                : (data ? '(' + data.remaining + ' SMS left)' : '')
+            setMobileActionStatus({ ok: true, text: '✅ Sent ' + bal })
+            // Clear the success toast after a few seconds so it doesn't linger
+            setTimeout(function () { setMobileActionStatus(null) }, 4000)
+            return true
+        } catch (err) {
+            setMobileActionStatus({ ok: false, text: '❌ ' + (err.message || 'SMS failed') })
+            return false
+        } finally {
+            setMobileActionBusy(false)
+        }
+    }
+
+    async function advancePickupStep(newStep) {
+        if (!selectedAppt) return
+        try {
+            var { error } = await supabase
+                .from('appointments')
+                .update({ mobile_pickup_step: newStep })
+                .eq('id', selectedAppt.id)
+            if (error) throw error
+            // Patch local state so the popup re-renders without a full reload
+            setSelectedAppt((prev) => prev ? ({ ...prev, mobile_pickup_step: newStep }) : prev)
+            setAppointments((prev) => prev.map((a) =>
+                a.id === selectedAppt.id ? { ...a, mobile_pickup_step: newStep } : a
+            ))
+        } catch (err) {
+            setMobileActionStatus({ ok: false, text: '❌ Could not update status: ' + (err.message || 'unknown') })
         }
     }
 
@@ -3860,7 +3953,7 @@ export default function Calendar() {
 
                         <div className="appt-detail-body">
                             {/* Per-appointment Mobile Visit badge — only shows when this
-                                specific booking was flagged as pickup/drop-off. Lets the
+                                specific booking was flagged as a mobile visit. Lets the
                                 groomer instantly tell which appointments are on the Route
                                 vs storefront, without opening edit mode. */}
                             {selectedAppt.is_mobile_visit && (
@@ -3876,11 +3969,228 @@ export default function Calendar() {
                                     fontSize: '13px',
                                     fontWeight: 600,
                                     color: '#166534',
+                                    flexWrap: 'wrap',
                                 }}>
                                     <span style={{ fontSize: '18px' }}>🚐</span>
-                                    <span>Mobile visit (pickup / drop-off) — appears on today's Route page</span>
+                                    <span style={{ flex: 1, minWidth: 0 }}>Mobile visit — groomer goes to client (on today's Route)</span>
+                                    {/* "I'm at the door" SMS — also useful for regular Mobile Visit */}
+                                    {selectedAppt.clients && selectedAppt.clients.phone && (
+                                        <button
+                                            onClick={function () { sendArrivalSms('mobile_visit_arrived') }}
+                                            disabled={mobileActionBusy}
+                                            style={{
+                                                padding: '6px 12px',
+                                                background: '#16a34a',
+                                                color: '#fff',
+                                                border: 'none',
+                                                borderRadius: '6px',
+                                                fontSize: '12px',
+                                                fontWeight: 700,
+                                                cursor: mobileActionBusy ? 'wait' : 'pointer',
+                                                opacity: mobileActionBusy ? 0.7 : 1,
+                                            }}
+                                            title="Send 'I'm at the door' text to the client"
+                                        >📱 I'm here</button>
+                                    )}
                                 </div>
                             )}
+
+                            {/* ─── Mobile Pick Up Actions ────────────────────────────
+                                Step-by-step buttons for the pickup → shop → drop-off
+                                flow. Buttons change based on mobile_pickup_step so the
+                                groomer always sees ONE clear next action. GPS deep-links
+                                open the user's nav app of choice (Google/Apple/Waze). */}
+                            {selectedAppt.is_mobile_pickup && (() => {
+                                var step = selectedAppt.mobile_pickup_step || null
+                                var clientAddress = (selectedAppt.clients && selectedAppt.clients.address) || ''
+                                var clientFirst = (selectedAppt.clients && selectedAppt.clients.first_name) || 'client'
+                                var clientGpsUrl = clientAddress ? mapsUrl(clientAddress) : ''
+                                var shopGpsUrl = shopAddress ? mapsUrl(shopAddress) : ''
+                                // Status label
+                                var stepLabel = ''
+                                var stepBg = '#eef2ff'
+                                var stepBorder = '#a5b4fc'
+                                var stepColor = '#3730a3'
+                                if (step === 'pickup_arrived') {
+                                    stepLabel = '📍 Arrived for pickup'
+                                } else if (step === 'at_shop') {
+                                    stepLabel = '🏪 Pet at shop — groom in progress'
+                                    stepBg = '#fef3c7'; stepBorder = '#fbbf24'; stepColor = '#92400e'
+                                } else if (step === 'dropoff_arrived') {
+                                    stepLabel = '🏠 Arrived for drop-off'
+                                } else if (step === 'completed') {
+                                    stepLabel = '✅ Pickup / Drop-off complete'
+                                    stepBg = '#f0fdf4'; stepBorder = '#86efac'; stepColor = '#166534'
+                                } else {
+                                    stepLabel = '🚐 Mobile Pick Up — not started'
+                                    stepBg = '#f9fafb'; stepBorder = '#e5e7eb'; stepColor = '#374151'
+                                }
+                                var btn = function (extra) {
+                                    return Object.assign({
+                                        padding: '12px 14px',
+                                        borderRadius: '10px',
+                                        border: 'none',
+                                        fontSize: '14px',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        textAlign: 'center',
+                                        display: 'block',
+                                        width: '100%',
+                                        textDecoration: 'none',
+                                        boxSizing: 'border-box',
+                                    }, extra || {})
+                                }
+                                return (
+                                    <div style={{
+                                        marginBottom: '14px',
+                                        padding: '14px',
+                                        background: '#fff',
+                                        border: '2px solid #c7d2fe',
+                                        borderRadius: '12px',
+                                    }}>
+                                        {/* Header row */}
+                                        <div style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '10px',
+                                            padding: '8px 12px',
+                                            background: stepBg,
+                                            border: '1px solid ' + stepBorder,
+                                            borderRadius: '8px',
+                                            marginBottom: '12px',
+                                            fontSize: '13px',
+                                            fontWeight: 700,
+                                            color: stepColor,
+                                        }}>
+                                            <span>{stepLabel}</span>
+                                        </div>
+
+                                        {/* No client address warning — feature won't work without it */}
+                                        {!clientAddress && (
+                                            <div style={{
+                                                padding: '10px 12px',
+                                                background: '#fef2f2',
+                                                border: '1px solid #fecaca',
+                                                borderRadius: '8px',
+                                                color: '#991b1b',
+                                                fontSize: '12px',
+                                                marginBottom: '10px',
+                                            }}>
+                                                ⚠️ No address on file for {clientFirst}. Add their address on the client profile so GPS can route there.
+                                            </div>
+                                        )}
+
+                                        {/* Status toast (SMS result / errors) */}
+                                        {mobileActionStatus && (
+                                            <div style={{
+                                                padding: '8px 12px',
+                                                background: mobileActionStatus.ok ? '#f0fdf4' : '#fef2f2',
+                                                border: '1px solid ' + (mobileActionStatus.ok ? '#86efac' : '#fecaca'),
+                                                borderRadius: '8px',
+                                                color: mobileActionStatus.ok ? '#166534' : '#991b1b',
+                                                fontSize: '12px',
+                                                marginBottom: '10px',
+                                            }}>
+                                                {mobileActionStatus.text}
+                                            </div>
+                                        )}
+
+                                        {/* STEP BUTTONS — change with mobile_pickup_step */}
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                            {/* Not started — go pick up */}
+                                            {!step && (
+                                                <>
+                                                    {clientGpsUrl && (
+                                                        <a href={clientGpsUrl} target="_blank" rel="noopener noreferrer"
+                                                            style={btn({ background: '#4f46e5', color: '#fff' })}>
+                                                            🚐 Open GPS to {clientFirst}
+                                                        </a>
+                                                    )}
+                                                    <button
+                                                        onClick={async function () {
+                                                            var ok = await sendArrivalSms('pickup_arrived')
+                                                            if (ok) advancePickupStep('pickup_arrived')
+                                                        }}
+                                                        disabled={mobileActionBusy}
+                                                        style={btn({ background: '#16a34a', color: '#fff', opacity: mobileActionBusy ? 0.7 : 1 })}
+                                                    >📱 I'm here for pickup (sends text)</button>
+                                                </>
+                                            )}
+
+                                            {/* Pickup done — head back to shop */}
+                                            {step === 'pickup_arrived' && (
+                                                <>
+                                                    {shopGpsUrl ? (
+                                                        <a href={shopGpsUrl} target="_blank" rel="noopener noreferrer"
+                                                            onClick={function () { advancePickupStep('at_shop') }}
+                                                            style={btn({ background: '#4f46e5', color: '#fff' })}>
+                                                            ↩️ Head back to shop
+                                                        </a>
+                                                    ) : (
+                                                        <button
+                                                            onClick={function () { advancePickupStep('at_shop') }}
+                                                            style={btn({ background: '#4f46e5', color: '#fff' })}
+                                                        >↩️ Mark as heading back to shop</button>
+                                                    )}
+                                                    {!shopAddress && (
+                                                        <div style={{ fontSize: '11px', color: '#6b7280', textAlign: 'center' }}>
+                                                            Add your shop address in Settings for GPS routing.
+                                                        </div>
+                                                    )}
+                                                </>
+                                            )}
+
+                                            {/* At shop — when ready, drop off */}
+                                            {step === 'at_shop' && (
+                                                <>
+                                                    {clientGpsUrl && (
+                                                        <a href={clientGpsUrl} target="_blank" rel="noopener noreferrer"
+                                                            style={btn({ background: '#4f46e5', color: '#fff' })}>
+                                                            🏠 Open GPS to drop off at {clientFirst}'s
+                                                        </a>
+                                                    )}
+                                                    <button
+                                                        onClick={async function () {
+                                                            var ok = await sendArrivalSms('dropoff_arrived')
+                                                            if (ok) advancePickupStep('dropoff_arrived')
+                                                        }}
+                                                        disabled={mobileActionBusy}
+                                                        style={btn({ background: '#16a34a', color: '#fff', opacity: mobileActionBusy ? 0.7 : 1 })}
+                                                    >📱 I'm here for drop-off (sends text)</button>
+                                                </>
+                                            )}
+
+                                            {/* Drop-off arrived — finish */}
+                                            {step === 'dropoff_arrived' && (
+                                                <>
+                                                    <button
+                                                        onClick={function () { advancePickupStep('completed') }}
+                                                        style={btn({ background: '#10b981', color: '#fff' })}
+                                                    >✅ Mark Complete</button>
+                                                    {shopGpsUrl && (
+                                                        <a href={shopGpsUrl} target="_blank" rel="noopener noreferrer"
+                                                            style={btn({ background: '#fff', color: '#4f46e5', border: '1.5px solid #c7d2fe' })}>
+                                                            ↩️ Head back to shop
+                                                        </a>
+                                                    )}
+                                                </>
+                                            )}
+
+                                            {/* Completed — show summary + reset link */}
+                                            {step === 'completed' && (
+                                                <button
+                                                    onClick={function () {
+                                                        if (window.confirm('Reset the pickup flow back to "not started"? (use this only if you tapped a button by mistake)')) {
+                                                            advancePickupStep(null)
+                                                        }
+                                                    }}
+                                                    style={btn({ background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', fontWeight: 500, fontSize: '12px' })}
+                                                >🔄 Reset pickup flow</button>
+                                            )}
+                                        </div>
+                                    </div>
+                                )
+                            })()}
 
                             {/* Schedule Info */}
                             <div className="appt-detail-schedule">
@@ -7469,6 +7779,10 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
     // Stored as is_mobile_visit on the appointments row. Route page filters
     // to is_mobile_visit=true so storefront appts stay off the route.
     const [isMobileVisit, setIsMobileVisit] = useState(false)
+    // Third visit type — Mobile Pick Up. Groomer drives to client, picks pet
+    // up, brings to shop to groom, drives them home after. Mutually exclusive
+    // with isMobileVisit (radio in UI enforces).
+    const [isMobilePickup, setIsMobilePickup] = useState(false)
     const [isMobileShop, setIsMobileShop] = useState(false)
 
     // Load shop_settings.is_mobile so we know whether to show the checkbox.
@@ -7506,6 +7820,21 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
     useEffect(() => {
         setPetsInBooking([])
     }, [form.client_id])
+
+    // Auto-fill visit type from client's default. If you picked a Mobile Pick Up
+    // client, the radio jumps to Mobile Pick Up automatically — no need to
+    // remember on every booking. Groomer can still override per-appointment.
+    useEffect(() => {
+        if (!form.client_id) {
+            setIsMobileVisit(false)
+            setIsMobilePickup(false)
+            return
+        }
+        var c = clients.find(function (x) { return x.id === form.client_id })
+        if (!c) return
+        setIsMobileVisit(!!c.default_mobile_visit)
+        setIsMobilePickup(!!c.default_mobile_pickup)
+    }, [form.client_id, clients])
 
     // Pre-fill first pet if preFillPetId provided (Book Again / Quick Book flows)
     useEffect(() => {
@@ -7833,6 +8162,8 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                         recurring_sequence: g.sequence,
                         recurring_conflict: conflict,
                         is_mobile_visit: isMobileVisit,
+                is_mobile_pickup: isMobilePickup,
+                        is_mobile_pickup: isMobilePickup,
                         // Source tracking — calendar shows no badge for groomer-created appts
                         booked_via: 'recurring',
                         last_action: 'created',
@@ -7938,6 +8269,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                 flag_details: flagDetails,
                 flag_status: flagStatus,
                 is_mobile_visit: isMobileVisit,
+                is_mobile_pickup: isMobilePickup,
                 // Source tracking — groomer-side manual booking
                 booked_via: 'groomer',
                 last_action: 'created',
@@ -8472,48 +8804,78 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                         </div>
                     </div>
 
-                    {/* Per-appointment Mobile Visit toggle — only renders for shops
-                        with mobile mode on (hybrid). Lets the groomer flag THIS visit
-                        as pickup/drop-off so it appears on the Route page. Storefront
-                        appts stay false and only show on the Calendar. */}
-                    {isMobileShop && (
-                        <div style={{
-                            margin: '8px 0 14px',
-                            padding: '12px 14px',
-                            background: isMobileVisit ? '#f0fdf4' : '#f9fafb',
-                            border: '1px solid ' + (isMobileVisit ? '#86efac' : '#e5e7eb'),
-                            borderRadius: '10px',
-                        }}>
-                            <label style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '10px',
-                                cursor: 'pointer',
-                                fontSize: '14px',
-                                fontWeight: 600,
-                                color: '#111827',
-                            }}>
-                                <input
-                                    type="checkbox"
-                                    checked={isMobileVisit}
-                                    onChange={(e) => setIsMobileVisit(e.target.checked)}
-                                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                                />
-                                <span>📍 Mobile visit (pickup / drop-off)</span>
-                            </label>
+                    {/* Per-appointment Visit Type — only renders for shops with
+                        mobile mode on. Auto-filled from the client's default
+                        when the client was picked, but the groomer can override
+                        for this single appointment. Three options now:
+                          Storefront  | Mobile Visit  | Mobile Pick Up */}
+                    {isMobileShop && (() => {
+                        var visitTypeBg = isMobilePickup ? '#eef2ff'
+                            : isMobileVisit ? '#f0fdf4'
+                            : '#f9fafb'
+                        var visitTypeBorder = isMobilePickup ? '#a5b4fc'
+                            : isMobileVisit ? '#86efac'
+                            : '#e5e7eb'
+                        var rowStyle = {
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                            cursor: 'pointer',
+                            fontSize: '13px',
+                            color: '#111827',
+                            padding: '4px 0',
+                        }
+                        return (
                             <div style={{
-                                fontSize: '12px',
-                                color: '#6b7280',
-                                marginLeft: '28px',
-                                marginTop: '4px',
-                                lineHeight: 1.4,
+                                margin: '8px 0 14px',
+                                padding: '12px 14px',
+                                background: visitTypeBg,
+                                border: '1px solid ' + visitTypeBorder,
+                                borderRadius: '10px',
                             }}>
-                                {isMobileVisit
-                                    ? '✓ This appointment will appear on the Route page for the day.'
-                                    : 'Leave unchecked for storefront / drop-off-at-salon appointments.'}
+                                <div style={{ fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                                    🚐 Visit Type
+                                </div>
+                                <label style={rowStyle}>
+                                    <input
+                                        type="radio"
+                                        name="appt_visit_type"
+                                        checked={!isMobileVisit && !isMobilePickup}
+                                        onChange={() => { setIsMobileVisit(false); setIsMobilePickup(false) }}
+                                        style={{ accentColor: '#6d28d9' }}
+                                    />
+                                    <span><strong>🏪 Storefront</strong> — client comes to the shop</span>
+                                </label>
+                                <label style={rowStyle}>
+                                    <input
+                                        type="radio"
+                                        name="appt_visit_type"
+                                        checked={isMobileVisit && !isMobilePickup}
+                                        onChange={() => { setIsMobileVisit(true); setIsMobilePickup(false) }}
+                                        style={{ accentColor: '#16a34a' }}
+                                    />
+                                    <span><strong>🚐 Mobile Visit</strong> — you go to them, van-side groom</span>
+                                </label>
+                                <label style={rowStyle}>
+                                    <input
+                                        type="radio"
+                                        name="appt_visit_type"
+                                        checked={isMobilePickup}
+                                        onChange={() => { setIsMobileVisit(false); setIsMobilePickup(true) }}
+                                        style={{ accentColor: '#4f46e5' }}
+                                    />
+                                    <span><strong>📍 Mobile Pick Up</strong> — pick up → shop → drop home</span>
+                                </label>
+                                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '6px', lineHeight: 1.4 }}>
+                                    {isMobilePickup
+                                        ? '✓ Mobile Pick Up appointments get pickup / drop-off action buttons on the popup.'
+                                        : isMobileVisit
+                                            ? '✓ Shows on the Route page for the day.'
+                                            : 'Storefront appointments stay on the Calendar only.'}
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        )
+                    })()}
 
                     {/* Mobile-aware drive-time check (Phase 11) — renders ONLY for
                         mobile groomers (gated by shop_settings.is_mobile inside the

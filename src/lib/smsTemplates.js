@@ -27,17 +27,29 @@ export const DEFAULT_SMS_TEMPLATES = {
   // because cancellation offers are inventory-filling (business need), not
   // marketing nudges. Most groomers want this ON even if rebook is OFF.
   cancellation_offer: "Hi {client_first_name}! A grooming spot opened up for {pet_name} on {date} at {time}. Reply YES to book or NO to pass. — {shop_name}",
+  // ─── Mobile "I'm here" arrival texts ────────────────────────────────────
+  // Sent when groomer taps "I'm here" on a mobile appointment. Three flavors
+  // because the message differs slightly by visit type:
+  //   - mobile_visit_arrived: groomer is at client's door for van-side groom
+  //   - pickup_arrived:       groomer is at client's door to pick pet UP
+  //   - dropoff_arrived:      groomer is at client's door dropping pet OFF
+  mobile_visit_arrived: "Hi {client_first_name}! I'm at the door for {pet_name}'s grooming. 🐾 — {shop_name}",
+  pickup_arrived:       "Hi {client_first_name}! I'm outside ready to pick up {pet_name}. 🐾 — {shop_name}",
+  dropoff_arrived:      "Hi {client_first_name}! I'm outside with {pet_name}, all groomed and ready! 🐾 — {shop_name}",
 }
 
 // Friendly labels for the Settings UI
 export const SMS_TEMPLATE_LABELS = {
-  reminder:           '📬 Appointment Reminder (Y/N)',
-  confirmation:       '✅ Booking Confirmation',
-  pickup_ready:       '🐾 Ready for Pickup',
-  running_late:       '⏰ Running Late',
-  rebook_followup:    '🔁 Rebook Follow-up',
-  thank_you:          '💛 Thank You / Post-visit',
-  cancellation_offer: '📲 Cancellation Auto-Fill (waitlist SMS)',
+  reminder:             '📬 Appointment Reminder (Y/N)',
+  confirmation:         '✅ Booking Confirmation',
+  pickup_ready:         '🐾 Ready for Pickup',
+  running_late:         '⏰ Running Late',
+  rebook_followup:      '🔁 Rebook Follow-up',
+  thank_you:            '💛 Thank You / Post-visit',
+  cancellation_offer:   '📲 Cancellation Auto-Fill (waitlist SMS)',
+  mobile_visit_arrived: '🚐 Mobile Visit — "I\'m at the door"',
+  pickup_arrived:       '📍 Mobile Pick Up — Arrived for Pickup',
+  dropoff_arrived:      '🏠 Mobile Pick Up — Arrived for Drop-off',
 }
 
 // Helper: replace all {placeholder} tokens in a template string with values

@@ -86,6 +86,10 @@ export default function ClientDetail() {
     first_name: '', last_name: '', phone: '', email: '',
     preferred_contact: 'text', address: '',
     sms_consent: false,  // TCR/Twilio gate — required for any auto-SMS to fire
+    // Default visit type — auto-fills the booking modal when this client books.
+    // Mutually exclusive (DB constraint enforces). Both false = storefront default.
+    default_mobile_visit: false,
+    default_mobile_pickup: false,
   })
   const [savingClientEdit, setSavingClientEdit] = useState(false)
   const [editClientError, setEditClientError] = useState('')
@@ -550,6 +554,9 @@ export default function ClientDetail() {
       sms_consent: !!client.sms_consent,
       address: client.address || '',
       address_notes: client.address_notes || '',
+      // Default visit type — preload from client row so radio shows current state
+      default_mobile_visit: !!client.default_mobile_visit,
+      default_mobile_pickup: !!client.default_mobile_pickup,
       // Coords come from clients table cache. Filled in only when the
       // user picks a new address from the Places Autocomplete dropdown.
       latitude: null,
@@ -590,6 +597,10 @@ export default function ClientDetail() {
       sms_consent: !!editClientForm.sms_consent,
       address: editClientForm.address.trim() || null,
       address_notes: (editClientForm.address_notes || '').trim() || null,
+      // Default visit type — radio is mutually exclusive, so only ONE
+      // of these can be true (DB check constraint enforces too).
+      default_mobile_visit: !!editClientForm.default_mobile_visit,
+      default_mobile_pickup: !!editClientForm.default_mobile_pickup,
     }
     // Stamp the consent timestamp on the FIRST time it flips to true so we
     // have an audit record (TCR/Twilio compliance). If it was already true
@@ -1233,6 +1244,54 @@ export default function ClientDetail() {
                         <option value="email">Email</option>
                       </select>
                     </label>
+
+                    {/* ─── Default Visit Type ─────────────────────────────
+                        Radio so every appointment this client books auto-fills
+                        to the right type. Storefront (default), Mobile Visit
+                        (groomer goes to them, vans-side groom), or Mobile Pick
+                        Up (groomer picks pet up, brings to shop, drops back).
+                        Per-appointment override still works on each booking. */}
+                    <div style={{ gridColumn: '1 / -1', background: '#fafafa', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '12px 14px' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                        🚐 Default Visit Type
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: '#374151' }}>
+                          <input
+                            type="radio"
+                            name="default_visit_type"
+                            checked={!editClientForm.default_mobile_visit && !editClientForm.default_mobile_pickup}
+                            onChange={() => setEditClientForm({ ...editClientForm, default_mobile_visit: false, default_mobile_pickup: false })}
+                            style={{ accentColor: '#6d28d9' }}
+                          />
+                          <span><strong>🏪 Storefront</strong> — client comes to the shop</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: '#374151' }}>
+                          <input
+                            type="radio"
+                            name="default_visit_type"
+                            checked={!!editClientForm.default_mobile_visit}
+                            onChange={() => setEditClientForm({ ...editClientForm, default_mobile_visit: true, default_mobile_pickup: false })}
+                            style={{ accentColor: '#6d28d9' }}
+                          />
+                          <span><strong>🚐 Mobile Visit</strong> — you drive to them, groom van-side</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: '#374151' }}>
+                          <input
+                            type="radio"
+                            name="default_visit_type"
+                            checked={!!editClientForm.default_mobile_pickup}
+                            onChange={() => setEditClientForm({ ...editClientForm, default_mobile_visit: false, default_mobile_pickup: true })}
+                            style={{ accentColor: '#6d28d9' }}
+                          />
+                          <span><strong>📍 Mobile Pick Up</strong> — pick pet up, groom at shop, drop back home</span>
+                        </label>
+                      </div>
+                      <small style={{ display: 'block', marginTop: '8px', color: '#6b7280', fontSize: '11px', lineHeight: 1.4 }}>
+                        Auto-fills every new appointment for this client. You can still override per-appointment on the booking form.
+                      </small>
+                    </div>
+
                     {/* SMS consent checkbox — TCR/Twilio compliance gate.
                         Without this checked, no automated text (reminder,
                         rebook, etc.) will fire to this client. Spans full row. */}
