@@ -117,6 +117,13 @@ export default function ClientPortalDashboard() {
 
   // === Edit Health & Vet on existing pet ===
   var [editingHealthPet, setEditingHealthPet] = useState(null) // the pet object being edited, or null
+  // Basic pet info (Name/Weight/Age) — clients can edit these themselves
+  // so they don't have to bug the groomer for routine corrections. Sex/breed
+  // are intentionally NOT exposed (sex is a one-time intake correction,
+  // breed swaps would cascade into coat_type / service-fit logic).
+  var [editPetName, setEditPetName] = useState('')
+  var [editPetWeight, setEditPetWeight] = useState('')
+  var [editPetAge, setEditPetAge] = useState('')
   var [savingHealth, setSavingHealth] = useState(false)
   var [editHealthError, setEditHealthError] = useState('')
   var [editHealthAllergies, setEditHealthAllergies] = useState('')
@@ -711,6 +718,10 @@ export default function ClientPortalDashboard() {
   // ══════════════════════════════════════════════════════
   function handleOpenEditHealth(pet) {
     setEditHealthError('')
+    // Basic info — preload current values so client edits not creates
+    setEditPetName(pet.name || '')
+    setEditPetWeight(pet.weight != null ? String(pet.weight) : '')
+    setEditPetAge(pet.age != null ? String(pet.age) : '')
     setEditHealthAllergies(pet.allergies || '')
     setEditHealthMedications(pet.medications || '')
     setEditHealthVaxExpiry(pet.vaccination_expiry || '')
@@ -728,11 +739,44 @@ export default function ClientPortalDashboard() {
   async function handleSaveHealth() {
     if (!editingHealthPet) return
     setEditHealthError('')
+
+    // Validate basic info before hitting the DB.
+    // Name is required (can't have a pet with no name on a booking).
+    // Weight & age are optional but must parse if provided.
+    var nameTrimmed = editPetName.trim()
+    if (!nameTrimmed) {
+      setEditHealthError('Pet name is required.')
+      return
+    }
+
+    var weightVal = null
+    if (editPetWeight.trim() !== '') {
+      weightVal = parseFloat(editPetWeight)
+      if (isNaN(weightVal) || weightVal <= 0) {
+        setEditHealthError('Weight must be a positive number (in lbs).')
+        return
+      }
+    }
+
+    var ageVal = null
+    if (editPetAge.trim() !== '') {
+      ageVal = parseFloat(editPetAge)
+      if (isNaN(ageVal) || ageVal < 0) {
+        setEditHealthError('Age must be a non-negative number (in years).')
+        return
+      }
+    }
+
     setSavingHealth(true)
     try {
       var { error: updateError } = await supabase
         .from('pets')
         .update({
+          // Basic info — client-editable
+          name: nameTrimmed,
+          weight: weightVal,
+          age: ageVal,
+          // Health & Vet — client-editable
           allergies: editHealthAllergies.trim() || null,
           medications: editHealthMedications.trim() || null,
           vaccination_expiry: editHealthVaxExpiry || null,
@@ -744,7 +788,7 @@ export default function ClientPortalDashboard() {
       await loadPortalData()
       setEditingHealthPet(null)
     } catch (err) {
-      console.error('Error saving health info:', err)
+      console.error('Error saving pet info:', err)
       setEditHealthError('Could not save. Please try again.')
     } finally {
       setSavingHealth(false)
@@ -1447,7 +1491,7 @@ export default function ClientPortalDashboard() {
                             cursor: 'pointer'
                           }}
                         >
-                          🏥 {hasHealthInfo ? 'Edit Health & Vet Info' : 'Add Health & Vet Info'}
+                          ✏️ {hasHealthInfo ? 'Edit Pet' : 'Edit Pet · Add Health Info'}
                         </button>
 
                         {/* Memorial + Remove — small slim buttons under health */}
@@ -2774,7 +2818,7 @@ export default function ClientPortalDashboard() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
               <h3 style={{ margin: 0, fontSize: '20px', color: '#111827' }}>
-                🏥 Health & Vet Info
+                ✏️ Edit Pet
               </h3>
               <button
                 onClick={handleCloseEditHealth}
@@ -2793,7 +2837,7 @@ export default function ClientPortalDashboard() {
               </button>
             </div>
             <p style={{ margin: '0 0 18px', color: '#6b7280', fontSize: '13px' }}>
-              Updating <strong style={{ color: '#111827' }}>{editingHealthPet.name}</strong>'s health & vet info
+              Updating <strong style={{ color: '#111827' }}>{editingHealthPet.name}</strong>'s info. To change breed or sex, ask your groomer.
             </p>
 
             {editHealthError && (
@@ -2801,6 +2845,96 @@ export default function ClientPortalDashboard() {
                 {editHealthError}
               </div>
             )}
+
+            {/* ──────────────────────────────────────────────────────
+                BASIC INFO — Name / Weight / Age
+                Client-editable so they can fix typos or update weight
+                without having to bug the groomer.
+               ────────────────────────────────────────────────────── */}
+            <div style={{ marginBottom: '6px', fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Basic Info
+            </div>
+
+            {/* Name */}
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Name
+              </label>
+              <input
+                type="text"
+                value={editPetName}
+                onChange={function (e) { setEditPetName(e.target.value) }}
+                placeholder="Pet's name"
+                disabled={savingHealth}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  boxSizing: 'border-box',
+                  fontFamily: 'inherit'
+                }}
+              />
+            </div>
+
+            {/* Weight + Age side-by-side */}
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '14px' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Weight (lbs)
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.1"
+                  min="0"
+                  value={editPetWeight}
+                  onChange={function (e) { setEditPetWeight(e.target.value) }}
+                  placeholder="e.g. 22"
+                  disabled={savingHealth}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    fontSize: '16px',
+                    boxSizing: 'border-box',
+                    fontFamily: 'inherit'
+                  }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Age (years)
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.5"
+                  min="0"
+                  value={editPetAge}
+                  onChange={function (e) { setEditPetAge(e.target.value) }}
+                  placeholder="e.g. 4"
+                  disabled={savingHealth}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    fontSize: '16px',
+                    boxSizing: 'border-box',
+                    fontFamily: 'inherit'
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Divider before Health section */}
+            <div style={{ height: '1px', background: '#e5e7eb', margin: '4px 0 14px' }} />
+            <div style={{ marginBottom: '6px', fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              🏥 Health &amp; Vet
+            </div>
 
             {/* Allergies */}
             <div style={{ marginBottom: '14px' }}>
