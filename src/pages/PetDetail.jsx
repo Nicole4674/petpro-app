@@ -820,7 +820,7 @@ export default function PetDetail() {
               )}
               {pet.weight && <span className="pd-tag">⚖️ {pet.weight} lbs</span>}
               {pet.age && <span className="pd-tag">🎂 {pet.age}</span>}
-              {pet.sex && <span className="pd-tag">{pet.sex === 'Male' ? '♂️' : '♀️'} {pet.sex}</span>}
+              {pet.sex && <span className="pd-tag">{(pet.sex || '').toLowerCase() === 'male' ? '♂️' : '♀️'} {pet.sex.charAt(0).toUpperCase() + pet.sex.slice(1).toLowerCase()}</span>}
               {pet.is_spayed_neutered && <span className="pd-tag pd-tag-green">✅ Fixed</span>}
               {!pet.is_spayed_neutered && pet.sex && <span className="pd-tag pd-tag-amber">⚠️ Intact</span>}
               {pet.coat_type && <span className="pd-tag">🧶 {pet.coat_type}</span>}
@@ -918,7 +918,7 @@ export default function PetDetail() {
                   </div>
                   <div className="pd-info-row">
                     <span className="pd-info-label">Sex</span>
-                    <span className="pd-info-value">{pet.sex || '—'}</span>
+                    <span className="pd-info-value">{pet.sex ? (pet.sex.charAt(0).toUpperCase() + pet.sex.slice(1).toLowerCase()) : '—'}</span>
                   </div>
                   <div className="pd-info-row">
                     <span className="pd-info-label">Spayed/Neutered</span>
@@ -1532,8 +1532,8 @@ export default function PetDetail() {
                     onChange={function(e) { setEditForm(Object.assign({}, editForm, { sex: e.target.value })) }}
                   >
                     <option value="">Select...</option>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
                   </select>
                 </div>
                 <div className="sl-form-group">
