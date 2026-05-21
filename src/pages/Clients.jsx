@@ -21,6 +21,10 @@ export default function Clients() {
   const [massSmsSending, setMassSmsSending] = useState(false)
   const [massSmsResults, setMassSmsResults] = useState(null) // { sent, failed, errors }
   const [massSmsQuota, setMassSmsQuota] = useState({ remaining: null, total: null, founder: false, loaded: false })
+  // Inside-modal search — for when you have lots of clients and only want
+  // to text a handful. Filters the visible list but doesn't unselect
+  // anyone already checked outside the current view.
+  const [massSmsSearch, setMassSmsSearch] = useState('')
 
   useEffect(() => {
     fetchClients()
@@ -94,6 +98,7 @@ export default function Clients() {
     setMassSmsRecipients(preChecked)
     setMassSmsMessage('')
     setMassSmsResults(null)
+    setMassSmsSearch('')
     setShowMassSms(true)
   }
 
@@ -101,6 +106,23 @@ export default function Clients() {
     if (massSmsSending) return
     setShowMassSms(false)
     setMassSmsResults(null)
+    setMassSmsSearch('')
+  }
+
+  // Search-filtered eligible list — drives the visible recipient rows AND
+  // the Select all / Clear all buttons (so "search Smith → Select all"
+  // ONLY checks the matching Smiths, leaving everyone else untouched).
+  function filterSmsList(list) {
+    const q = massSmsSearch.toLowerCase().trim()
+    if (!q) return list
+    const qDigits = q.replace(/[^0-9]/g, '')
+    return list.filter(function (c) {
+      const fullName = ((c.first_name || '') + ' ' + (c.last_name || '')).toLowerCase()
+      if (fullName.includes(q)) return true
+      const phoneDigits = (c.phone || '').replace(/[^0-9]/g, '')
+      if (qDigits.length >= 3 && phoneDigits.includes(qDigits)) return true
+      return false
+    })
   }
 
   const selectedSmsCount = smsEligible.filter(c => massSmsRecipients[c.id] !== false).length
@@ -450,68 +472,132 @@ export default function Clients() {
                 ) : (
                   <>
                     {/* Recipient list — checkbox per eligible client */}
-                    <div style={{ marginBottom: '6px', fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                      Recipients ({selectedSmsCount}/{smsEligible.length})
-                    </div>
-                    <div style={{
-                      maxHeight: '180px',
-                      overflowY: 'auto',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px',
-                      marginBottom: '12px',
-                    }}>
-                      {smsEligible.map(function (c) {
-                        const checked = massSmsRecipients[c.id] !== false
-                        return (
-                          <label key={c.id} style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '10px',
-                            padding: '8px 12px',
-                            borderBottom: '1px solid #f1f5f9',
-                            cursor: 'pointer',
-                            fontSize: '13px',
-                          }}>
+                    {(() => {
+                      const visibleEligible = filterSmsList(smsEligible)
+                      const isSearching = massSmsSearch.trim().length > 0
+                      return (
+                        <>
+                          <div style={{ marginBottom: '6px', fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                            Recipients ({selectedSmsCount}/{smsEligible.length})
+                            {isSearching && (
+                              <span style={{ marginLeft: '6px', color: '#7c3aed', textTransform: 'none', letterSpacing: 'normal', fontWeight: 600 }}>
+                                · showing {visibleEligible.length} match{visibleEligible.length === 1 ? '' : 'es'}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Search box — name or phone, case-insensitive */}
+                          <div style={{ position: 'relative', marginBottom: '8px' }}>
                             <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={(e) => setMassSmsRecipients(prev => ({ ...prev, [c.id]: e.target.checked }))}
-                              style={{ accentColor: '#7c3aed' }}
+                              type="text"
+                              value={massSmsSearch}
+                              onChange={(e) => setMassSmsSearch(e.target.value)}
+                              placeholder="🔍 Search clients by name or phone…"
+                              disabled={massSmsSending}
+                              style={{
+                                width: '100%',
+                                padding: '8px 12px',
+                                border: '1px solid #d1d5db',
+                                borderRadius: '8px',
+                                fontSize: '13px',
+                                boxSizing: 'border-box',
+                              }}
                             />
-                            <span style={{ flex: 1 }}>
-                              {c.first_name} {c.last_name}
-                              <span style={{ color: '#9ca3af', marginLeft: '6px', fontSize: '12px' }}>{formatPhone(c.phone)}</span>
-                            </span>
-                          </label>
-                        )
-                      })}
-                    </div>
-                    {/* Quick toggles */}
-                    <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                      <button
-                        type="button"
-                        onClick={function () {
-                          const all = {}
-                          smsEligible.forEach(function (c) { all[c.id] = true })
-                          setMassSmsRecipients(all)
-                        }}
-                        style={{ padding: '6px 10px', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
-                      >Select all</button>
-                      <button
-                        type="button"
-                        onClick={function () {
-                          const none = {}
-                          smsEligible.forEach(function (c) { none[c.id] = false })
-                          setMassSmsRecipients(none)
-                        }}
-                        style={{ padding: '6px 10px', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
-                      >Clear all</button>
-                      {smsIneligibleNoConsent.length > 0 && (
-                        <span style={{ marginLeft: 'auto', fontSize: '11px', color: '#9ca3af', alignSelf: 'center' }}>
-                          {smsIneligibleNoConsent.length} client{smsIneligibleNoConsent.length === 1 ? '' : 's'} hidden (no SMS consent)
-                        </span>
-                      )}
-                    </div>
+                            {isSearching && (
+                              <button
+                                type="button"
+                                onClick={() => setMassSmsSearch('')}
+                                style={{
+                                  position: 'absolute',
+                                  right: '8px',
+                                  top: '50%',
+                                  transform: 'translateY(-50%)',
+                                  background: 'none',
+                                  border: 'none',
+                                  color: '#6b7280',
+                                  fontSize: '18px',
+                                  cursor: 'pointer',
+                                  padding: 0,
+                                  lineHeight: 1,
+                                }}
+                                title="Clear search"
+                              >×</button>
+                            )}
+                          </div>
+
+                          <div style={{
+                            maxHeight: '180px',
+                            overflowY: 'auto',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '8px',
+                            marginBottom: '12px',
+                          }}>
+                            {visibleEligible.length === 0 ? (
+                              <div style={{ padding: '14px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                No matches for "{massSmsSearch}"
+                              </div>
+                            ) : visibleEligible.map(function (c) {
+                              const checked = massSmsRecipients[c.id] !== false
+                              return (
+                                <label key={c.id} style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '10px',
+                                  padding: '8px 12px',
+                                  borderBottom: '1px solid #f1f5f9',
+                                  cursor: 'pointer',
+                                  fontSize: '13px',
+                                }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(e) => setMassSmsRecipients(prev => ({ ...prev, [c.id]: e.target.checked }))}
+                                    style={{ accentColor: '#7c3aed' }}
+                                  />
+                                  <span style={{ flex: 1 }}>
+                                    {c.first_name} {c.last_name}
+                                    <span style={{ color: '#9ca3af', marginLeft: '6px', fontSize: '12px' }}>{formatPhone(c.phone)}</span>
+                                  </span>
+                                </label>
+                              )
+                            })}
+                          </div>
+
+                          {/* Quick toggles — operate on the VISIBLE filtered list when
+                              searching, so "search Smith → Select all" only checks
+                              the Smiths and leaves everyone else as they were. */}
+                          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              onClick={function () {
+                                setMassSmsRecipients(prev => {
+                                  const next = { ...prev }
+                                  visibleEligible.forEach(function (c) { next[c.id] = true })
+                                  return next
+                                })
+                              }}
+                              style={{ padding: '6px 10px', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
+                            >{isSearching ? 'Select matches' : 'Select all'}</button>
+                            <button
+                              type="button"
+                              onClick={function () {
+                                setMassSmsRecipients(prev => {
+                                  const next = { ...prev }
+                                  visibleEligible.forEach(function (c) { next[c.id] = false })
+                                  return next
+                                })
+                              }}
+                              style={{ padding: '6px 10px', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
+                            >{isSearching ? 'Clear matches' : 'Clear all'}</button>
+                            {smsIneligibleNoConsent.length > 0 && (
+                              <span style={{ marginLeft: 'auto', fontSize: '11px', color: '#9ca3af', alignSelf: 'center' }}>
+                                {smsIneligibleNoConsent.length} client{smsIneligibleNoConsent.length === 1 ? '' : 's'} hidden (no SMS consent)
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      )
+                    })()}
 
                     {/* Message textarea */}
                     <div style={{ marginBottom: '6px', fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
