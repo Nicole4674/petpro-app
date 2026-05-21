@@ -576,14 +576,13 @@ var toolDefinitions = [
   },
   {
     name: 'client_reschedule_appointment',
-    description: 'Move an existing appointment for the CURRENT client to a new date/time. Only works on their own appointments. If the appointment is part of a recurring series, the tool will refuse on the FIRST call and return needs_recurring_confirmation=true. You MUST then ask the client: "This is part of your recurring weekly/biweekly series. I can move JUST this one appointment to the new time, but your future appointments will stay on the original schedule. Want me to do that?" If they say yes, call this tool again with move_only_this=true. If they say no, suggest they call/text the groomer directly.',
+    description: 'Move an existing appointment for the CURRENT client to a new date/time. Only works on their own appointments. RECURRING RULES (the tool enforces these — you do not need to ask): (1) If the new date is the SAME WEEKDAY as the original, ALL future appointments in the series are AUTO-shifted by the same number of days (clean delay/advance — common case: "push my Tuesday by a week, all of them"). (2) If the new date is a DIFFERENT WEEKDAY, the tool will REFUSE with recurring_weekday_change_blocked=true and you should tell the client to call/text the groomer directly — moving a recurring series to a different weekday could conflict with other clients\' schedules.',
     input_schema: {
       type: 'object',
       properties: {
         appointment_id: { type: 'string', description: 'Must be one of the client\'s own appointments.' },
         new_date: { type: 'string', description: 'YYYY-MM-DD' },
         new_start_time: { type: 'string', description: 'HH:MM 24-hour' },
-        move_only_this: { type: 'boolean', description: 'Set to true ONLY after the client has explicitly confirmed they want to move just this one appointment from a recurring series. Decouples this appt from the series. Default false.' },
       },
       required: ['appointment_id', 'new_date', 'new_start_time'],
     },
@@ -1242,21 +1241,200 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           return { success: false, error: 'That appointment is already ' + apptCheck.status + '.' }
         }
 
-        // ─── RECURRING GUARD ─────────────────────────────────────────────
-        // If this appointment is part of a recurring series and the client
-        // hasn't explicitly confirmed "just this one", refuse and ask.
-        // This prevents the cascade bug where rescheduling one breaks the
-        // whole series schedule.
-        if (apptCheck.recurring_series_id && toolInput.move_only_this !== true) {
+        // ─── RECURRING GUARD (new logic — same-weekday auto-cascade) ─────
+        // Old behavior: refuse and ask "just this one?" — too many wrong taps
+        // by non-tech clients. New behavior:
+        //   - Same weekday (Tue→Tue) → AUTO-shift ALL future instances by the
+        //     same number of days. Clean delay/advance, no manual choice.
+        //   - Different weekday (Tue→Wed) → REFUSE. Cascading a weekday change
+        //     would scramble the recurring schedule with other clients'
+        //     bookings. Tell the client to contact the groomer instead.
+        // Either way the AI never gets to pick "move 1 vs move all" — too
+        // easy to mis-tap and trash a schedule.
+        var oldDateWeekday = new Date(apptCheck.appointment_date + 'T00:00:00').getDay()
+        var newDateWeekday = new Date(toolInput.new_date + 'T00:00:00').getDay()
+        if (apptCheck.recurring_series_id && oldDateWeekday !== newDateWeekday) {
+          var oldDowName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][oldDateWeekday]
+          var newDowName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][newDateWeekday]
           return {
             success: false,
-            needs_recurring_confirmation: true,
-            error: 'This appointment is part of a recurring series. To prevent breaking your whole schedule, ask the client: "This is part of your recurring series. I can move JUST this one appointment, but your future recurring appointments will stay on their original schedule. Want me to do that?" If yes, call this tool again with move_only_this=true. If no, tell them to call/text the groomer directly to adjust the whole series.',
-            original_date: apptCheck.appointment_date,
-            original_time: apptCheck.start_time,
+            recurring_weekday_change_blocked: true,
+            error: 'This is part of your recurring ' + oldDowName + ' series. Moving it to a ' + newDowName + ' would change the whole schedule and could conflict with other clients. Please call or text the groomer directly to adjust the schedule.',
+            original_weekday: oldDowName,
+            requested_weekday: newDowName,
           }
         }
 
+        // ─── RECURRING CASCADE PATH ────────────────────────────────────────
+        // Same weekday (we'd have refused above otherwise). Shift every future
+        // instance of the series by the same number of days and apply the new
+        // start_time. Atomic: if ANY future instance would conflict on its
+        // shifted date, refuse the whole move and tell client to call groomer.
+        if (apptCheck.recurring_series_id) {
+          var cascOldDate = new Date(apptCheck.appointment_date + 'T00:00:00')
+          var cascNewDate = new Date(toolInput.new_date + 'T00:00:00')
+          var cascShiftMs = cascNewDate.getTime() - cascOldDate.getTime()
+          var cascShiftDays = Math.round(cascShiftMs / (24 * 60 * 60 * 1000))
+
+          // Fetch all future-or-equal instances in this series. Skip past +
+          // already-resolved appointments (cancelled/completed/no_show/rescheduled).
+          var { data: seriesInstances, error: seriesErr } = await supabaseAdmin
+            .from('appointments')
+            .select('id, appointment_date, start_time, end_time, status')
+            .eq('recurring_series_id', apptCheck.recurring_series_id)
+            .in('client_id', allClientIds)
+            .eq('groomer_id', groomerId)
+            .gte('appointment_date', apptCheck.appointment_date)
+            .not('status', 'in', '(cancelled,completed,no_show,rescheduled)')
+
+          if (seriesErr) {
+            console.error('[RESCHED] cascade fetch error:', seriesErr.message)
+            return { success: false, error: seriesErr.message }
+          }
+          if (!seriesInstances || seriesInstances.length === 0) {
+            return { success: false, error: 'Could not find this appointment in the recurring series.' }
+          }
+
+          // Build update plan — new date + times for each instance
+          var cascUpdates: any[] = []
+          for (var inst of seriesInstances) {
+            var instOldDateObj = new Date(inst.appointment_date + 'T00:00:00')
+            var instNewDateObj = new Date(instOldDateObj.getTime() + cascShiftMs)
+            // Format YYYY-MM-DD in LOCAL time to avoid timezone drift
+            var instY = instNewDateObj.getFullYear()
+            var instM = String(instNewDateObj.getMonth() + 1).padStart(2, '0')
+            var instD = String(instNewDateObj.getDate()).padStart(2, '0')
+            var instNewDateStr = instY + '-' + instM + '-' + instD
+
+            // Preserve THIS instance's duration but apply the new start_time
+            var instOldSp = String(inst.start_time).split(':')
+            var instOldEp = String(inst.end_time).split(':')
+            var instOldSm = parseInt(instOldSp[0], 10) * 60 + parseInt(instOldSp[1], 10)
+            var instOldEm = parseInt(instOldEp[0], 10) * 60 + parseInt(instOldEp[1], 10)
+            var instDur = instOldEm - instOldSm
+            if (instDur <= 0) instDur = 60
+
+            var instNewSp = toolInput.new_start_time.split(':')
+            var instNewSm = parseInt(instNewSp[0], 10) * 60 + parseInt(instNewSp[1], 10)
+            var instNewEm = instNewSm + instDur
+            var instNewEhh = String(Math.floor(instNewEm / 60)).padStart(2, '0')
+            var instNewEmm = String(instNewEm % 60).padStart(2, '0')
+            var instNewEndTime = instNewEhh + ':' + instNewEmm
+
+            cascUpdates.push({
+              id: inst.id,
+              appointment_date: instNewDateStr,
+              start_time: toolInput.new_start_time,
+              end_time: instNewEndTime,
+              _newStartMin: instNewSm,
+              _newEndMin: instNewEm,
+            })
+          }
+
+          // Validate each — hours, blocked times, other appointment conflicts.
+          // Atomic: collect all issues so the AI can tell client what's blocking.
+          var cascIssues: string[] = []
+          var cascSeriesIds = cascUpdates.map(function (u) { return u.id })
+          for (var u of cascUpdates) {
+            // Hours guard for this weekday
+            var uHrsCheck = isTimeWithinHours(u.appointment_date, u.start_time)
+            if (!uHrsCheck.ok) {
+              cascIssues.push(u.appointment_date + ': ' + uHrsCheck.reason)
+              continue
+            }
+            // Blocked times
+            var { data: uBlocked } = await supabaseAdmin
+              .from('blocked_times')
+              .select('start_time, end_time, note')
+              .eq('groomer_id', groomerId)
+              .eq('block_date', u.appointment_date)
+            var uHitsBlocked = (uBlocked || []).some(function (b: any) {
+              var bSp = String(b.start_time).split(':')
+              var bEp = String(b.end_time).split(':')
+              var bSm = parseInt(bSp[0], 10) * 60 + parseInt(bSp[1], 10)
+              var bEm = parseInt(bEp[0], 10) * 60 + parseInt(bEp[1], 10)
+              return u._newStartMin < bEm && u._newEndMin > bSm
+            })
+            if (uHitsBlocked) {
+              cascIssues.push(u.appointment_date + ': overlaps a block on groomer\'s calendar')
+              continue
+            }
+            // Other appointments — exclude every instance in THIS series
+            var { data: uOther } = await supabaseAdmin
+              .from('appointments')
+              .select('id, start_time, end_time')
+              .eq('groomer_id', groomerId)
+              .eq('appointment_date', u.appointment_date)
+              .neq('status', 'cancelled')
+              .not('id', 'in', '(' + cascSeriesIds.join(',') + ')')
+            var uHitsConflict = (uOther || []).some(function (a: any) {
+              var aSp = String(a.start_time).split(':')
+              var aEp = String(a.end_time).split(':')
+              var aSm = parseInt(aSp[0], 10) * 60 + parseInt(aSp[1], 10)
+              var aEm = parseInt(aEp[0], 10) * 60 + parseInt(aEp[1], 10)
+              return u._newStartMin < aEm && u._newEndMin > aSm
+            })
+            if (uHitsConflict) {
+              cascIssues.push(u.appointment_date + ': another appointment is already booked at that time')
+            }
+          }
+
+          if (cascIssues.length > 0) {
+            return {
+              success: false,
+              cascade_conflict: true,
+              issues: cascIssues,
+              error: 'Some appointments in your series can\'t move cleanly: ' + cascIssues.join('; ') + '. Please call or text the groomer to adjust the schedule.',
+            }
+          }
+
+          // All clear — batch update all instances
+          var cascUpdateAt = new Date().toISOString()
+          var cascAutoBookOff = !toggles.client_auto_book_enabled
+          for (var cu of cascUpdates) {
+            var cuPayload: any = {
+              appointment_date: cu.appointment_date,
+              start_time: cu.start_time,
+              end_time: cu.end_time,
+              last_action: 'rescheduled_by_client_ai',
+              last_action_at: cascUpdateAt,
+              action_seen_by_groomer: false,
+            }
+            if (cascAutoBookOff) cuPayload.flag_status = 'pending'
+            var { error: cuErr } = await supabaseAdmin
+              .from('appointments')
+              .update(cuPayload)
+              .eq('id', cu.id)
+            if (cuErr) {
+              console.error('[RESCHED] cascade update error on', cu.id, cuErr.message)
+              return { success: false, error: cuErr.message }
+            }
+          }
+
+          // Notify groomer — ONE push for the whole cascade
+          try {
+            var cascPetName = (apptCheck.pets && (apptCheck.pets as any).name) || 'pet'
+            var cascDow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][oldDateWeekday]
+            var cascPushTitle = '🔄 Client moved recurring series — ' + cascPetName
+            var cascPushBody = cascUpdates.length + ' ' + cascDow + ' appointment(s) shifted by ' +
+              (cascShiftDays > 0 ? '+' : '') + cascShiftDays + ' day' + (Math.abs(cascShiftDays) === 1 ? '' : 's') +
+              ' (new time ' + toolInput.new_start_time + ')'
+            await sendPushToUser(groomerId, cascPushTitle, cascPushBody, '/calendar', 'reschedule-cascade-' + apptCheck.recurring_series_id)
+            await notifyGroomerSms(supabaseAdmin, groomerId, cascPushTitle + '\n' + cascPushBody)
+          } catch (notifyErr) {
+            console.warn('[RESCHED] cascade notify failed (non-fatal):', notifyErr)
+          }
+
+          return {
+            success: true,
+            cascaded: true,
+            instances_moved: cascUpdates.length,
+            shift_days: cascShiftDays,
+            needs_groomer_review: cascAutoBookOff,
+          }
+        }
+
+        // ─── SINGLE-APPOINTMENT PATH (non-recurring) ───────────────────────
         // Compute duration from existing start/end times, then new end
         var oldStartParts = String(apptCheck.start_time).split(':')
         var oldEndParts = String(apptCheck.end_time).split(':')
@@ -1322,11 +1500,9 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         if (!toggles.client_auto_book_enabled) {
           resUpdate.flag_status = 'pending'
         }
-        // If client confirmed "just this one" of a recurring series → decouple
-        if (apptCheck.recurring_series_id && toolInput.move_only_this === true) {
-          resUpdate.recurring_series_id = null
-          resUpdate.recurring_sequence = null
-        }
+        // (Note: recurring appointments take the cascade path above and never
+        // reach this single-update flow, so no "decouple from series" logic
+        // needed here — non-recurring appts only.)
 
         console.log('[RESCHED] updating appt:', toolInput.appointment_id, JSON.stringify(resUpdate))
         var { error: updErr } = await supabaseAdmin
@@ -1351,9 +1527,6 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
 
           var resPushTitle = '🔄 Client rescheduled — ' + petNameRes
           var resPushBody = oldDateRes + ' ' + oldTimeRes + ' → ' + newDateRes + ' ' + newTimeRes
-          if (apptCheck.recurring_series_id && toolInput.move_only_this === true) {
-            resPushBody += ' (recurring — only this one moved)'
-          }
           await sendPushToUser(groomerId, resPushTitle, resPushBody, '/calendar', 'reschedule-' + toolInput.appointment_id)
 
           // SMS notification — uses send-sms (deducts from groomer's quota,
@@ -1367,7 +1540,6 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           success: true,
           appointment_id: toolInput.appointment_id,
           needs_groomer_review: !toggles.client_auto_book_enabled,
-          decoupled_from_series: !!(apptCheck.recurring_series_id && toolInput.move_only_this === true),
         }
       }
 
