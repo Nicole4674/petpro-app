@@ -9410,8 +9410,35 @@ function RescheduleModal({ appt, appointments, onClose, onSaved }) {
     const [scope, setScope] = useState('one')
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState(null)
+    // Task #112 — change recurring frequency (every-8-wks → every-4-wks etc).
+    // seriesData holds the current interval + total count so the picker can
+    // show "currently every 8 weeks" and detect when it changed.
+    const [seriesData, setSeriesData] = useState(null)
+    const [newInterval, setNewInterval] = useState(null)
 
     const isRecurringAppt = !!appt.recurring_series_id
+
+    // Load the recurring series row so we know the current interval. Without
+    // this we can't show "Currently: every N weeks" or detect changes.
+    useEffect(() => {
+        if (!isRecurringAppt) return
+        let cancelled = false
+        ;(async () => {
+            const { data } = await supabase
+                .from('recurring_series')
+                .select('interval_weeks, total_count, status')
+                .eq('id', appt.recurring_series_id)
+                .maybeSingle()
+            if (cancelled) return
+            if (data) {
+                setSeriesData(data)
+                setNewInterval(data.interval_weeks)
+            }
+        })()
+        return () => { cancelled = true }
+    }, [appt.recurring_series_id, isRecurringAppt])
+
+    const intervalChanged = isRecurringAppt && seriesData && newInterval && newInterval !== seriesData.interval_weeks
 
     // Calculate duration from existing appointment for end_time
     const duration = (() => {
@@ -9478,6 +9505,82 @@ function RescheduleModal({ appt, appointments, onClose, onSaved }) {
 
         setSaving(true)
         const newEndTime = calcEndTime(newTime, duration)
+
+        // ═══════════ Recurring frequency change — respace future instances ═══════════
+        // If the groomer changed the interval picker (e.g. every 8 → every 4),
+        // we respace this appt + all future siblings at the new cadence,
+        // keeping the same total count. Overrides the scope picker since
+        // changing frequency only makes sense series-wide.
+        if (intervalChanged) {
+            try {
+                // 1. Pull every future-or-equal instance in this series ordered by date.
+                const { data: futureAppts, error: fetchErr } = await supabase
+                    .from('appointments')
+                    .select('id, appointment_date, start_time, end_time')
+                    .eq('recurring_series_id', appt.recurring_series_id)
+                    .gte('appointment_date', appt.appointment_date)
+                    .is('checked_out_at', null)
+                    .not('status', 'in', '(cancelled,rescheduled,completed,no_show)')
+                    .order('appointment_date', { ascending: true })
+                if (fetchErr) throw fetchErr
+                if (!futureAppts || futureAppts.length === 0) {
+                    throw new Error('No future appointments found to respace.')
+                }
+
+                // Series ids — used to skip same-series rows in conflict check
+                const seriesIds = futureAppts.map(a => a.id)
+
+                // 2. Generate new dates: index 0 = newDate (anchor), each next = +N weeks.
+                const updates = futureAppts.map((a, idx) => ({
+                    id: a.id,
+                    appointment_date: addDaysToDate(newDate, idx * newInterval * 7),
+                }))
+
+                // 3. Update each appointment (sequential so we can flag conflicts as we go).
+                //    Conflict = overlaps another appointment NOT in this series at same time slot.
+                for (const u of updates) {
+                    const conflict = appointments.find(other => {
+                        if (seriesIds.includes(other.id)) return false
+                        if (other.status === 'cancelled' || other.status === 'no_show') return false
+                        if (other.appointment_date !== u.appointment_date) return false
+                        const oStart = other.start_time ? other.start_time.slice(0, 5) : ''
+                        const oEnd = other.end_time ? other.end_time.slice(0, 5) : ''
+                        if (!oStart || !oEnd) return false
+                        return newTime < oEnd && newEndTime > oStart
+                    })
+
+                    const { error: updErr } = await supabase
+                        .from('appointments')
+                        .update({
+                            appointment_date: u.appointment_date,
+                            start_time: newTime,
+                            end_time: newEndTime,
+                            recurring_conflict: !!conflict,
+                            last_action: 'rescheduled_by_groomer',
+                            last_action_at: new Date().toISOString(),
+                            action_seen_by_groomer: true,
+                        })
+                        .eq('id', u.id)
+                    if (updErr) throw updErr
+                }
+
+                // 4. Update the recurring_series row to the new interval so any
+                //    future auto-extensions use the new cadence.
+                const { error: seriesErr } = await supabase
+                    .from('recurring_series')
+                    .update({ interval_weeks: newInterval, updated_at: new Date().toISOString() })
+                    .eq('id', appt.recurring_series_id)
+                if (seriesErr) throw seriesErr
+
+                setSaving(false)
+                onSaved()
+                return
+            } catch (err) {
+                setSaving(false)
+                setError('Error changing frequency: ' + (err.message || 'unknown'))
+                return
+            }
+        }
 
         // ═══════════ Non-recurring OR "only this one" — single row update ═══════════
         if (!isRecurringAppt || scope === 'one') {
@@ -9642,8 +9745,44 @@ function RescheduleModal({ appt, appointments, onClose, onSaved }) {
                         Appointment duration: {duration} min · new end time: {calcEndTime(newTime, duration)}
                     </div>
 
+                    {/* Task #112 — Change recurring frequency picker.
+                        Always visible for recurring appts. If the groomer changes it,
+                        ALL future appts in this series respace at the new interval
+                        (overrides the scope picker — changing frequency is series-wide). */}
+                    {isRecurringAppt && seriesData && (
+                        <div className="reschedule-field">
+                            <label>🔄 Recurring Frequency</label>
+                            <div style={{ color: '#6b7280', fontSize: '12px', marginBottom: '6px' }}>
+                                Currently: every {seriesData.interval_weeks} week{seriesData.interval_weeks === 1 ? '' : 's'} · {seriesData.total_count} total appointments
+                            </div>
+                            <select
+                                value={newInterval || seriesData.interval_weeks}
+                                onChange={(e) => setNewInterval(parseInt(e.target.value, 10))}
+                                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }}
+                            >
+                                {[1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16].map(w => (
+                                    <option key={w} value={w}>Every {w} week{w === 1 ? '' : 's'}{w === seriesData.interval_weeks ? ' (current)' : ''}</option>
+                                ))}
+                            </select>
+                            {intervalChanged && (
+                                <div style={{
+                                    marginTop: '8px',
+                                    padding: '10px 12px',
+                                    background: '#fef3c7',
+                                    border: '1px solid #fbbf24',
+                                    borderRadius: '8px',
+                                    color: '#92400e',
+                                    fontSize: '12px',
+                                    lineHeight: 1.4,
+                                }}>
+                                    ⚠️ <strong>Frequency change</strong> — all future appointments in this series will respace to every {newInterval} week{newInterval === 1 ? '' : 's'} starting from the new date. Any conflicts with other clients will be flagged yellow on the calendar so you can adjust.
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* Task #19 — 3-option picker for recurring reschedule */}
-                    {isRecurringAppt && (
+                    {isRecurringAppt && !intervalChanged && (
                         <div className="reschedule-scope">
                             <div className="reschedule-scope-title">🔄 This is a recurring appointment. What should change?</div>
                             <label className={'reschedule-scope-option' + (scope === 'one' ? ' reschedule-scope-selected' : '')}>
@@ -9696,8 +9835,9 @@ function RescheduleModal({ appt, appointments, onClose, onSaved }) {
                         </button>
                         <button type="submit" className="reschedule-btn reschedule-btn-save" disabled={saving}>
                             {saving
-                                ? (isRecurringAppt && scope !== 'one' ? 'Shifting appointments...' : 'Saving...')
-                                : (isRecurringAppt && scope === 'following' ? '📅 Shift This & Following'
+                                ? (intervalChanged ? 'Respacing series…' : (isRecurringAppt && scope !== 'one' ? 'Shifting appointments...' : 'Saving...'))
+                                : (intervalChanged ? '🔄 Change Frequency & Respace'
+                                    : isRecurringAppt && scope === 'following' ? '📅 Shift This & Following'
                                     : isRecurringAppt && scope === 'all-client' ? '🌟 Shift All Future Recurring'
                                     : '📅 Save New Date & Time')}
                         </button>
