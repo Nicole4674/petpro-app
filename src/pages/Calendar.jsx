@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { checkBookingSafety } from '../lib/claude'
@@ -6411,18 +6411,35 @@ export default function Calendar() {
                                 <div className="payment-receipt">
                                     {isMultiPet ? (
                                         <>
-                                            {/* Per-pet line items */}
+                                            {/* Per-pet line items + every add-on under each pet so
+                                                the groomer can eyeball the FULL breakdown before
+                                                hitting pay (no more "wait, did the nail trim get
+                                                charged?" moments). */}
                                             {paymentAppt.appointment_pets.map(function (ap) {
                                                 var petName = (ap.pets && ap.pets.name) || 'Pet'
                                                 var svcName = ''
                                                 // Try to resolve service name from services list if loaded
                                                 var svc = services && services.find ? services.find(function (s) { return s.id === ap.service_id }) : null
                                                 if (svc) svcName = svc.service_name
+                                                // Build addon rows inline so they nest visually under
+                                                // their pet's primary line.
+                                                var addonRows = (ap.appointment_pet_addons || []).map(function (addon) {
+                                                    var addonName = (addon.services && addon.services.service_name) || 'Add-on'
+                                                    return (
+                                                        <div key={addon.id} className="payment-receipt-row" style={{ paddingLeft: '16px', color: '#6b7280', fontSize: '13px' }}>
+                                                            <span>↳ {addonName}</span>
+                                                            <span>${parseFloat(addon.quoted_price || 0).toFixed(2)}</span>
+                                                        </div>
+                                                    )
+                                                })
                                                 return (
-                                                    <div key={ap.id} className="payment-receipt-row">
-                                                        <span>{petName}{svcName ? ' · ' + svcName : ''}</span>
-                                                        <span>${parseFloat(ap.quoted_price || 0).toFixed(2)}</span>
-                                                    </div>
+                                                    <React.Fragment key={ap.id}>
+                                                        <div className="payment-receipt-row">
+                                                            <span>{petName}{svcName ? ' · ' + svcName : ''}</span>
+                                                            <span>${parseFloat(ap.quoted_price || 0).toFixed(2)}</span>
+                                                        </div>
+                                                        {addonRows}
+                                                    </React.Fragment>
                                                 )
                                             })}
                                             <div className="payment-receipt-row payment-receipt-sub" style={{ fontWeight: 600, borderTop: '1px solid #e5e7eb', paddingTop: '6px', marginTop: '4px' }}>
