@@ -7813,6 +7813,11 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
     const [intervalWeeks, setIntervalWeeks] = useState(6)
     const [totalCount, setTotalCount] = useState(10)
     const [recurringSummary, setRecurringSummary] = useState(null) // {created: 10, conflicts: 2, conflictDates: ['Jun 15', 'Jul 27']}
+    // Task #113 — Auto-rotation suggester. If the first pet in this booking
+    // already has an active recurring series (e.g. bath every 8 weeks), we
+    // suggest the optimal start date so the new series alternates evenly
+    // with the existing one. Eliminates "off by 1 week" mistakes.
+    const [existingRecurringForPet, setExistingRecurringForPet] = useState(null) // { interval_weeks, service_name, next_date, optimal_date }
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState(null)
     const [filteredPets, setFilteredPets] = useState([])
@@ -7880,6 +7885,59 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
         setIsMobileVisit(!!c.default_mobile_visit)
         setIsMobilePickup(!!c.default_mobile_pickup)
     }, [form.client_id, clients])
+
+    // Task #113 — Auto-rotation suggester.
+    // When the first pet in this booking already has an active recurring
+    // series (e.g. Bath every 8 weeks), find its next future appointment
+    // and compute the "optimal" start date for a NEW recurring series so
+    // the two interleave with perfectly even gaps. Eliminates off-by-1-week
+    // mistakes that took Nicole 8 tries to spot.
+    useEffect(() => {
+        var firstPet = petsInBooking && petsInBooking[0]
+        var petId = firstPet && firstPet.pet_id
+        if (!petId) {
+            setExistingRecurringForPet(null)
+            return
+        }
+        var cancelled = false
+        ;(async () => {
+            var today = new Date().toISOString().slice(0, 10)
+            var { data: nextAppt } = await supabase
+                .from('appointments')
+                .select('id, appointment_date, recurring_series_id, services:service_id(service_name), recurring_series:recurring_series_id(interval_weeks, status)')
+                .eq('pet_id', petId)
+                .not('recurring_series_id', 'is', null)
+                .gte('appointment_date', today)
+                .not('status', 'in', '(cancelled,rescheduled,completed,no_show)')
+                .order('appointment_date', { ascending: true })
+                .limit(1)
+                .maybeSingle()
+            if (cancelled) return
+            if (nextAppt && nextAppt.recurring_series && nextAppt.recurring_series.status === 'active') {
+                var iv = parseInt(nextAppt.recurring_series.interval_weeks, 10) || 0
+                if (iv > 0) {
+                    // Optimal = next existing appointment + half the interval.
+                    // For odd intervals (every 5 weeks), Math.round picks the
+                    // closest whole-week halfway point.
+                    var halfWeeks = Math.round(iv / 2)
+                    var anchor = new Date(nextAppt.appointment_date + 'T00:00:00')
+                    var optimal = new Date(anchor.getTime() + halfWeeks * 7 * 24 * 60 * 60 * 1000)
+                    var oy = optimal.getFullYear()
+                    var om = String(optimal.getMonth() + 1).padStart(2, '0')
+                    var od = String(optimal.getDate()).padStart(2, '0')
+                    setExistingRecurringForPet({
+                        interval_weeks: iv,
+                        service_name: (nextAppt.services && nextAppt.services.service_name) || 'existing service',
+                        next_date: nextAppt.appointment_date,
+                        optimal_date: oy + '-' + om + '-' + od,
+                    })
+                    return
+                }
+            }
+            setExistingRecurringForPet(null)
+        })()
+        return () => { cancelled = true }
+    }, [petsInBooking])
 
     // Pre-fill first pet if preFillPetId provided (Book Again / Quick Book flows)
     useEffect(() => {
@@ -8960,6 +9018,54 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
 
                         {isRecurring && (
                             <div className="recurring-options">
+                                {/* Task #113 — Auto-rotation banner. If this pet already
+                                    has an active recurring series, one click sets the
+                                    optimal start date so the two interleave evenly.
+                                    No more counting weeks in your head. */}
+                                {existingRecurringForPet && (
+                                    <div style={{
+                                        padding: '12px 14px',
+                                        background: '#eef2ff',
+                                        border: '1.5px solid #c7d2fe',
+                                        borderRadius: '10px',
+                                        color: '#3730a3',
+                                        fontSize: '13px',
+                                        lineHeight: 1.5,
+                                        marginBottom: '12px',
+                                    }}>
+                                        <div>
+                                            💡 <strong>{(petsInBooking[0] && petsInBooking[0].pet_name) || 'This pet'}</strong> already has a recurring <strong>{existingRecurringForPet.service_name}</strong> every {existingRecurringForPet.interval_weeks} week{existingRecurringForPet.interval_weeks === 1 ? '' : 's'} (next: {existingRecurringForPet.next_date}).
+                                        </div>
+                                        <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                                            <span>Auto-pick start date so they alternate evenly:</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setForm(prev => ({ ...prev, appointment_date: existingRecurringForPet.optimal_date }))
+                                                    setIntervalWeeks(existingRecurringForPet.interval_weeks)
+                                                }}
+                                                style={{
+                                                    padding: '6px 12px',
+                                                    background: '#4f46e5',
+                                                    color: '#fff',
+                                                    border: 'none',
+                                                    borderRadius: '6px',
+                                                    fontSize: '12px',
+                                                    fontWeight: 700,
+                                                    cursor: 'pointer',
+                                                }}
+                                            >
+                                                ✨ Use {existingRecurringForPet.optimal_date}
+                                            </button>
+                                            {form.appointment_date === existingRecurringForPet.optimal_date && (
+                                                <span style={{ color: '#15803d', fontWeight: 700, fontSize: '12px' }}>✓ aligned</span>
+                                            )}
+                                        </div>
+                                        <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '6px' }}>
+                                            Math: {existingRecurringForPet.next_date} + {Math.round(existingRecurringForPet.interval_weeks / 2)} weeks = perfect alternation.
+                                        </div>
+                                    </div>
+                                )}
                                 <div className="recurring-row">
                                     <span>Every</span>
                                     <input
