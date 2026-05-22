@@ -339,13 +339,16 @@ function buildLineItems(appt) {
           petName,
         })
       }
-      // Add-ons under this pet
+      // Add-ons under this pet — the addon's own quoted_price wins (groomer
+      // may have overridden the catalog price for this specific appointment,
+      // e.g. waived a dematting fee). Falls back to the service catalog
+      // price only if no quoted_price was stored.
       if (ap.appointment_pet_addons && ap.appointment_pet_addons.length > 0) {
         for (const addon of ap.appointment_pet_addons) {
           const addonSvc = addon.services
           items.push({
             label: addonSvc?.service_name || 'Add-on',
-            price: parseFloat(addon.price ?? addonSvc?.price ?? 0),
+            price: parseFloat(addon.quoted_price ?? addonSvc?.price ?? 0),
             petName,
             indent: true,
           })

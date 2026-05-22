@@ -598,7 +598,7 @@ export default function Calendar() {
         const [apptResult, clientResult, petResult, serviceResult, staffResult, blockedResult] = await Promise.all([
             supabase
                 .from('appointments')
-                .select('*, clients(id, first_name, last_name, phone, sms_consent, address), pets(name, breed, behavior_tags), services:service_id(id, service_name, price), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed, behavior_tags), services:service_id(id, service_name, price), appointment_pet_addons(id, service_id, services:service_id(id, service_name, price))), payments(id, amount, refunded_amount)')
+                .select('*, clients(id, first_name, last_name, phone, sms_consent, address), pets(name, breed, behavior_tags), services:service_id(id, service_name, price), staff_members(id, first_name, last_name, color_code), appointment_pets(id, pet_id, service_id, quoted_price, pets(id, name, breed, behavior_tags), services:service_id(id, service_name, price), appointment_pet_addons(id, service_id, quoted_price, services:service_id(id, service_name, price))), payments(id, amount, refunded_amount)')
                 .gte('appointment_date', startDate)
                 .lte('appointment_date', endDate)
                 .order('start_time'),
@@ -2284,12 +2284,19 @@ export default function Calendar() {
         setExistingPayments(payments || [])
 
         // Pre-fill the form with balance due
-        // MULTI-PET: if this booking has appointment_pets rows, sum their quoted_price.
+        // MULTI-PET: if this booking has appointment_pets rows, sum the
+        // primary service quoted_price PLUS every add-on's quoted_price
+        // (dematting fees, nail dremels, etc. were silently dropped before
+        // — clients were getting undercharged at checkout).
         // LEGACY single-pet: fall back to the parent appointment's price.
         var servicePrice
         if (appt.appointment_pets && appt.appointment_pets.length > 0) {
             servicePrice = appt.appointment_pets.reduce(function (sum, ap) {
-                return sum + parseFloat(ap.quoted_price || 0)
+                var primary = parseFloat(ap.quoted_price || 0)
+                var addonSum = (ap.appointment_pet_addons || []).reduce(function (s, addon) {
+                    return s + parseFloat(addon.quoted_price || 0)
+                }, 0)
+                return sum + primary + addonSum
             }, 0)
         } else {
             servicePrice = parseFloat(appt.final_price || appt.quoted_price || 0)
@@ -6342,12 +6349,19 @@ export default function Calendar() {
 
             {/* Payment at Checkout Popup */}
             {showPaymentPopup && paymentAppt && (() => {
-                // MULTI-PET: sum appointment_pets prices if present; otherwise use parent appt price (legacy)
+                // MULTI-PET: sum primary service quoted_price PLUS every
+                // add-on's quoted_price so the live balance reflects the
+                // real total (dematting fees, nail dremels, etc.).
+                // LEGACY single-pet: fall back to parent appt price.
                 var isMultiPet = paymentAppt.appointment_pets && paymentAppt.appointment_pets.length > 0
                 var servicePrice
                 if (isMultiPet) {
                     servicePrice = paymentAppt.appointment_pets.reduce(function (sum, ap) {
-                        return sum + parseFloat(ap.quoted_price || 0)
+                        var primary = parseFloat(ap.quoted_price || 0)
+                        var addonSum = (ap.appointment_pet_addons || []).reduce(function (s, addon) {
+                            return s + parseFloat(addon.quoted_price || 0)
+                        }, 0)
+                        return sum + primary + addonSum
                     }, 0)
                 } else {
                     servicePrice = parseFloat(paymentAppt.final_price || paymentAppt.quoted_price || 0)
