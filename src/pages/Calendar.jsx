@@ -9022,6 +9022,24 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                                     has an active recurring series, one click sets the
                                     optimal start date so the two interleave evenly.
                                     No more counting weeks in your head. */}
+                                {/* Discoverability — even when there's NO existing recurring,
+                                    show a tiny note so the groomer knows the feature is alive
+                                    (otherwise the absence of the banner looks like a bug). */}
+                                {!existingRecurringForPet && petsInBooking[0] && petsInBooking[0].pet_id && (
+                                    <div style={{
+                                        padding: '8px 12px',
+                                        background: '#f9fafb',
+                                        border: '1px dashed #d1d5db',
+                                        borderRadius: '8px',
+                                        color: '#6b7280',
+                                        fontSize: '12px',
+                                        marginBottom: '10px',
+                                        lineHeight: 1.4,
+                                    }}>
+                                        💡 No existing recurring series for <strong>{petsInBooking[0].pet_name || 'this pet'}</strong> yet — nothing to alternate with. (If you book this as recurring, the NEXT new recurring you create for this pet will auto-suggest the right start date.)
+                                    </div>
+                                )}
+
                                 {existingRecurringForPet && (
                                     <div style={{
                                         padding: '12px 14px',
