@@ -1169,6 +1169,10 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         // Each row stores its OWN pet's service quoted_price so Calendar's
         // popup itemizes per-pet correctly (e.g. "Bella · Bath $40 / Max ·
         // Full Groom $60") instead of showing one lump on the primary.
+        // groomer_id is REQUIRED (NOT NULL + RLS) — without it the insert
+        // fails silently and the appointment ends up with no junction rows,
+        // which made the Calendar popup show the legacy single-pet view
+        // with NO Add Pet / Change Service buttons. That was Nicole's bug.
         var junctionPayloads: any[] = []
         for (var ptbJ of allPetsToBook) {
           var ptbSvc = svcInfoMap[ptbJ.service_id]
@@ -1177,6 +1181,7 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
             pet_id: ptbJ.pet_id,
             service_id: ptbJ.service_id || null,
             quoted_price: ptbSvc && ptbSvc.price > 0 ? ptbSvc.price : null,
+            groomer_id: groomerId,
           })
         }
         var { error: junctionErr } = await supabaseAdmin

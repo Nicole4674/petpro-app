@@ -1009,6 +1009,45 @@ export default function Calendar() {
             }
             console.log('[handleApptClick] loaded appt with', fullAppt.appointment_pets?.length || 0, 'pets')
 
+            // ─── Auto-heal Suds-booked appointments missing appointment_pets row ───
+            // Bug fix: older Suds bookings were missing groomer_id on the junction
+            // insert, so they had NO appointment_pets rows. Without a junction, the
+            // popup fell into the legacy single-pet branch with no Add Pet / Change
+            // Service buttons. Auto-create the missing row from the legacy pet_id +
+            // service_id so the groomer can edit normally on first open.
+            if (fullAppt.pet_id && (!fullAppt.appointment_pets || fullAppt.appointment_pets.length === 0)) {
+                try {
+                    let healPrice = parseFloat(fullAppt.quoted_price || 0)
+                    if (!healPrice && fullAppt.service_id) {
+                        const { data: healSvc } = await supabase
+                            .from('services')
+                            .select('price')
+                            .eq('id', fullAppt.service_id)
+                            .maybeSingle()
+                        if (healSvc && healSvc.price) healPrice = parseFloat(healSvc.price)
+                    }
+                    const { data: healedRow, error: healErr } = await supabase
+                        .from('appointment_pets')
+                        .insert({
+                            appointment_id: fullAppt.id,
+                            pet_id: fullAppt.pet_id,
+                            service_id: fullAppt.service_id || null,
+                            quoted_price: healPrice > 0 ? healPrice : null,
+                            groomer_id: fullAppt.groomer_id,
+                        })
+                        .select('id, pet_id, service_id, quoted_price, pets:pet_id(id, name, breed, behavior_tags), services:service_id(id, service_name, price), appointment_pet_addons(id, service_id, quoted_price, services:service_id(id, service_name, price))')
+                        .single()
+                    if (!healErr && healedRow) {
+                        fullAppt.appointment_pets = [healedRow]
+                        console.log('[handleApptClick] auto-healed legacy appt — added junction row for pet', fullAppt.pet_id)
+                    } else if (healErr) {
+                        console.warn('[handleApptClick] auto-heal insert error (non-fatal):', healErr.message)
+                    }
+                } catch (healEx) {
+                    console.warn('[handleApptClick] auto-heal threw (non-fatal):', healEx)
+                }
+            }
+
             // Task #19 — If this is a recurring appointment, count how many future instances remain
             // Task #77 — ALSO fetch all siblings (full list, ordered by sequence) for the clickable dates list
             if (fullAppt?.recurring_series_id) {
