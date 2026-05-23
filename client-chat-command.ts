@@ -1078,14 +1078,47 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
 
         // (regularStaffId was already looked up earlier, before the rule check)
 
-        // ── Sum service prices across ALL pets being booked so the
-        // appointment's quoted_price reflects the real total (single-pet =
-        // primary only; multi-pet = sum of every sibling's service). Without
-        // this the Calendar popup top reads only the primary pet's price.
+        // ── Last-paid price lookup (grandfathered pricing) ───────────────
+        // Suds should book at what this client ACTUALLY paid last time for
+        // this exact pet + service, not the current catalog price. If the
+        // shop raised the catalog price, existing clients keep their rate.
+        // Only swaps in last-paid if (a) there's a past checked-out visit
+        // for the same pet+service AND (b) the recorded quoted_price is >0.
+        // Falls back to catalog price otherwise (no history = first-time
+        // booking for this combo).
+        var perPetPriceMap: Record<string, number> = {}
+        for (var ptbHist of allPetsToBook) {
+          if (!ptbHist.pet_id || !ptbHist.service_id) continue
+          var histKey = ptbHist.pet_id + ':' + ptbHist.service_id
+          var { data: lastPaidRow } = await supabaseAdmin
+            .from('appointment_pets')
+            .select('quoted_price, appointments!inner(appointment_date, checked_out_at, groomer_id)')
+            .eq('pet_id', ptbHist.pet_id)
+            .eq('service_id', ptbHist.service_id)
+            .eq('groomer_id', groomerId)
+            .not('appointments.checked_out_at', 'is', null)
+            .order('appointments(appointment_date)', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          if (lastPaidRow && lastPaidRow.quoted_price != null) {
+            var lp = parseFloat(String(lastPaidRow.quoted_price))
+            if (lp > 0) perPetPriceMap[histKey] = lp
+          }
+        }
+
+        // ── Sum prices for ALL pets (last-paid where available, catalog
+        // otherwise) so the appointment's quoted_price matches what each
+        // client expects to pay.
         var bookingServicePrice: number = 0
         for (var ptbPrice of allPetsToBook) {
-          var svcPx = svcInfoMap[ptbPrice.service_id]
-          if (svcPx) bookingServicePrice += svcPx.price
+          var ppKey = ptbPrice.pet_id + ':' + ptbPrice.service_id
+          var historicalPrice = perPetPriceMap[ppKey]
+          if (historicalPrice && historicalPrice > 0) {
+            bookingServicePrice += historicalPrice
+          } else {
+            var svcPx = svcInfoMap[ptbPrice.service_id]
+            if (svcPx) bookingServicePrice += svcPx.price
+          }
         }
 
         // Always 'confirmed' so it shows on the calendar. Flagged bookings get
@@ -1176,11 +1209,20 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         var junctionPayloads: any[] = []
         for (var ptbJ of allPetsToBook) {
           var ptbSvc = svcInfoMap[ptbJ.service_id]
+          // Per-pet price: prefer this client's last-paid for this exact
+          // pet+service (grandfathered), fall back to catalog. Matches the
+          // sum calc above so each junction row reflects what's been
+          // charged historically, not the current shop catalog.
+          var ptbJKey = ptbJ.pet_id + ':' + ptbJ.service_id
+          var ptbJHistorical = perPetPriceMap[ptbJKey]
+          var ptbJPrice = (ptbJHistorical && ptbJHistorical > 0)
+            ? ptbJHistorical
+            : (ptbSvc && ptbSvc.price > 0 ? ptbSvc.price : 0)
           junctionPayloads.push({
             appointment_id: newAppt.id,
             pet_id: ptbJ.pet_id,
             service_id: ptbJ.service_id || null,
-            quoted_price: ptbSvc && ptbSvc.price > 0 ? ptbSvc.price : null,
+            quoted_price: ptbJPrice > 0 ? ptbJPrice : null,
             groomer_id: groomerId,
           })
         }
@@ -2112,7 +2154,7 @@ Deno.serve(async function(req) {
     // Widened to allClientIds so pets on a duplicate row also surface.
     var { data: myPets } = await supabaseAdmin
       .from('pets')
-      .select('id, name, breed, weight, allergies, medications, vaccination_expiry, dog_aggressive')
+      .select('id, name, breed, weight, age, allergies, medications, vaccination_expiry, dog_aggressive')
       .in('client_id', allClientIds)
       .or('is_archived.is.null,is_archived.eq.false')
       .order('created_at', { ascending: true })
@@ -2307,6 +2349,12 @@ Deno.serve(async function(req) {
     if (myPets && myPets.length > 0) {
       for (var p of myPets) {
         var pl = p.id + ' | ' + p.name + (p.breed ? ' (' + p.breed + ')' : '')
+        // Weight + age — used to be missing from this line, so Suds kept
+        // asking clients "what's your pet's weight?" even though it was
+        // right in the system. Now Suds sees it and picks the right service
+        // tier automatically.
+        if (p.weight != null && p.weight !== '') pl += ' | weight: ' + p.weight + ' lbs'
+        if (p.age != null && p.age !== '') pl += ' | age: ' + p.age
         if (p.allergies) pl += ' | allergies: ' + p.allergies
         if (p.medications) pl += ' | meds: ' + p.medications
 
