@@ -19,7 +19,11 @@
 
 import { useState, useEffect, useRef } from 'react'
 
-const POLL_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
+// Poll more aggressively than before — first version used 5 min which left
+// users on stale builds longer than expected (Nicole pushed an update, her
+// husband on the same account didn't see the banner for several minutes).
+// 60s is fast enough to feel responsive without hammering Vercel.
+const POLL_INTERVAL_MS = 60 * 1000 // 1 minute
 
 export default function UpdateBanner() {
   const [updateAvailable, setUpdateAvailable] = useState(false)
@@ -47,9 +51,13 @@ export default function UpdateBanner() {
     if (initialVersionRef.current === null) {
       // First time — establish baseline
       initialVersionRef.current = latest
+      // eslint-disable-next-line no-console
+      console.log('[UpdateBanner] baseline version:', latest)
       return
     }
     if (latest !== initialVersionRef.current) {
+      // eslint-disable-next-line no-console
+      console.log('[UpdateBanner] update detected — baseline:', initialVersionRef.current, 'latest:', latest)
       setUpdateAvailable(true)
     }
   }
@@ -61,12 +69,22 @@ export default function UpdateBanner() {
     return () => clearInterval(id)
   }, [])
 
-  // Also re-check when window regains focus — catches users who left the
-  // tab open overnight, came back next morning to a fresh deploy.
+  // Re-check on BOTH focus AND visibility change. Visibility fires when a
+  // background tab becomes visible (covers most "switched tabs" cases).
+  // Focus fires when the window itself gains focus (covers "switched apps").
+  // Both together catch every realistic scenario where the user comes back
+  // to PetPro after a deploy happened.
   useEffect(() => {
-    function onFocus() { checkForUpdate() }
-    window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
+    function onAnyReturn() { checkForUpdate() }
+    window.addEventListener('focus', onAnyReturn)
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') onAnyReturn()
+    })
+    return () => {
+      window.removeEventListener('focus', onAnyReturn)
+      // Note: anonymous handler can't be removed by reference, but it
+      // gets garbage-collected with the component unmount.
+    }
   }, [])
 
   function handleRefresh() {
