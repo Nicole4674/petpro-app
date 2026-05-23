@@ -621,7 +621,7 @@ var toolDefinitions = [
   },
   {
     name: 'client_check_availability',
-    description: 'REQUIRED before suggesting a specific time to a client. Returns: (a) booked_slots — appointments already on the calendar, (b) blocked_slots — groomer-blocked time (lunch, personal, closed afternoons), (c) the shop\'s open/close hours for that weekday. Only suggest times within the open hours that overlap NEITHER booked_slots NOR blocked_slots. If the day is closed (is_open=false), refuse and offer the next open day instead.',
+    description: 'REQUIRED before suggesting a specific time to a client. ALWAYS pass duration_minutes so the tool returns open_windows already filtered to slots that fit. Returns: (a) open_windows — READY-TO-OFFER start times that fit the service duration and overlap NOTHING (USE THESE FIRST, never do your own overlap math), (b) booked_slots — for reference only, (c) blocked_slots — for reference only, (d) the shop\'s open/close hours. If open_windows is empty, the day is fully booked — call client_find_next_open_slots to offer alternatives. If the day is closed (is_open=false), refuse and offer the next open day instead.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1801,6 +1801,41 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           }
         }
 
+        // ── Compute open_windows server-side ─────────────────────────────
+        // Earlier bug: the AI was returned raw booked_slots and asked to do
+        // overlap math itself. It got it wrong (suggested 9 AM for a 2-hr
+        // groom when an appointment sat at 9:30-10:30). Now we walk every
+        // 30-min start time from open to close, skip ones that overlap any
+        // booked or blocked range, and return only the survivors. AI just
+        // reads the list — no math required.
+        var availDuration = parseInt(toolInput.duration_minutes, 10) || 60
+        var availOpenMin = hhmmToMin(dayHrs.open)
+        var availCloseMin = hhmmToMin(dayHrs.close)
+        var availUnavail = (availDayAppts || []).map(function (a: any) {
+          return { s: hhmmToMin(a.start_time), e: hhmmToMin(a.end_time) }
+        }).concat((blockedRows || []).map(function (b: any) {
+          return { s: hhmmToMin(b.start_time), e: hhmmToMin(b.end_time) }
+        }))
+        availUnavail.sort(function (a, b) { return a.s - b.s })
+
+        function availFits(sMin: number): boolean {
+          var eMin = sMin + availDuration
+          if (eMin > availCloseMin) return false
+          for (var u of availUnavail) {
+            if (sMin < u.e && eMin > u.s) return false
+          }
+          return true
+        }
+        var openWindows: any[] = []
+        for (var sm = availOpenMin; sm + availDuration <= availCloseMin; sm += 30) {
+          if (availFits(sm)) {
+            openWindows.push({
+              start_time: minToHHMM(sm),
+              end_time: minToHHMM(sm + availDuration),
+            })
+          }
+        }
+
         return {
           success: true,
           date: toolInput.date,
@@ -1808,11 +1843,16 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           is_open: true,
           shop_open: dayHrs.open,
           shop_close: dayHrs.close,
+          duration_minutes: availDuration,
+          open_windows: openWindows,
+          open_window_count: openWindows.length,
           booked_slots: bookedSlots,
           booked_count: bookedSlots.length,
           blocked_slots: blockedSlots,
           blocked_count: blockedSlots.length,
-          note: 'Open ' + dayHrs.open + ' to ' + dayHrs.close + ' on ' + dayKeyAvail + 's. UNBOOKABLE TIME RANGES: (a) booked_slots — appointments already on the calendar, (b) blocked_slots — groomer blocked these off for lunch/personal/closed time. NEVER offer a time that overlaps EITHER list. Only suggest times within open hours that overlap NEITHER booked_slots NOR blocked_slots.',
+          note: openWindows.length > 0
+            ? 'Open ' + dayHrs.open + '-' + dayHrs.close + ' on ' + dayKeyAvail + '. USE open_windows DIRECTLY — those are the only times that fit the ' + availDuration + '-min service and don\'t overlap anything. NEVER suggest a time NOT in open_windows. NEVER do your own overlap math against booked_slots.'
+            : 'Open ' + dayHrs.open + '-' + dayHrs.close + ' on ' + dayKeyAvail + ' BUT zero open_windows fit a ' + availDuration + '-min service — fully booked for this duration. Call client_find_next_open_slots to offer alternative dates.',
         }
       }
 
@@ -2529,8 +2569,9 @@ Deno.serve(async function(req) {
       '',
       'AVAILABILITY CHECKING (CRITICAL — PREVENT DOUBLE BOOKINGS + ALWAYS HAVE OPTIONS):',
       '- You DO NOT automatically see the shop\'s schedule. You have TWO availability tools — pick the right one:',
-      '  1. `client_check_availability` — for ONE specific date. Use when the client said an exact day ("Friday").',
+      '  1. `client_check_availability` — for ONE specific date. Use when the client said an exact day ("Friday"). ALWAYS pass duration_minutes (from the chosen service\'s time_block_minutes). It returns `open_windows` — a pre-filtered list of start times that fit. ONLY suggest times from open_windows. NEVER do your own overlap math against booked_slots; that has caused double-bookings.',
       '  2. `client_find_next_open_slots` — finds the soonest 3 open slots in the next 14 days that fit the service duration. Use when the client said "anytime" / "what\'s open" / "this week" / OR when a specific date you checked is fully booked.',
+      '- If `client_check_availability` returns open_windows.length === 0, the day is fully booked for that duration — pivot to `client_find_next_open_slots`.',
       '',
       'GOLDEN RULE — NEVER LEAVE A CLIENT WITHOUT OPTIONS:',
       '- If the client asks for a specific date and `client_check_availability` shows that day is fully booked → IMMEDIATELY call `client_find_next_open_slots` (with duration_minutes from the service\'s time_block_minutes) and offer 2-3 real open slots. Do NOT just say "that day is full" or "doesn\'t work" without offering alternatives.',
