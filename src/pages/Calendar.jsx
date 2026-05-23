@@ -424,6 +424,11 @@ export default function Calendar() {
     const [savingTime, setSavingTime] = useState(false)
     const [pendingStaffId, setPendingStaffId] = useState('')
     const [apptNotes, setApptNotes] = useState([]) // paper trail of notes for current appointment
+    // Inline edit state for notes — typo fixes + delete (cleanup after a year
+    // so the timeline doesn't get crowded with old stuff).
+    const [editingNoteId, setEditingNoteId] = useState(null)
+    const [editingNoteText, setEditingNoteText] = useState('')
+    const [savingNoteEdit, setSavingNoteEdit] = useState(false)
     const [showAddNotePopup, setShowAddNotePopup] = useState(false)
     const [newNoteText, setNewNoteText] = useState('')
     const [savingNote, setSavingNote] = useState(false)
@@ -1926,6 +1931,62 @@ export default function Calendar() {
         setNewNoteText('')
         setShowAddNotePopup(false)
         setSavingNote(false)
+    }
+
+    // ─── Edit / Delete individual notes ──────────────────────────────────
+    // Edit = typo fix on a note we already saved (e.g. wrong pet name in a
+    // note from yesterday). Delete = pruning old notes after a year so the
+    // timeline doesn't get crowded. Both target the `notes` table directly.
+    function handleEditNoteStart(note) {
+        setEditingNoteId(note.id)
+        setEditingNoteText(note.content || '')
+    }
+
+    function handleEditNoteCancel() {
+        setEditingNoteId(null)
+        setEditingNoteText('')
+    }
+
+    async function handleEditNoteSave() {
+        if (!editingNoteId) return
+        var trimmed = editingNoteText.trim()
+        if (!trimmed) {
+            alert('Note can\'t be empty. Use Delete if you want to remove it.')
+            return
+        }
+        setSavingNoteEdit(true)
+        try {
+            var { error } = await supabase
+                .from('notes')
+                .update({ content: trimmed })
+                .eq('id', editingNoteId)
+            if (error) throw error
+            // Patch local state so it updates instantly without re-fetch
+            setApptNotes(function (prev) {
+                return (prev || []).map(function (n) {
+                    return n.id === editingNoteId ? { ...n, content: trimmed } : n
+                })
+            })
+            handleEditNoteCancel()
+        } catch (err) {
+            alert('Error saving note: ' + (err.message || 'unknown'))
+        } finally {
+            setSavingNoteEdit(false)
+        }
+    }
+
+    async function handleDeleteNote(noteId) {
+        if (!noteId) return
+        if (!window.confirm('Delete this note? This can\'t be undone.')) return
+        try {
+            var { error } = await supabase.from('notes').delete().eq('id', noteId)
+            if (error) throw error
+            setApptNotes(function (prev) {
+                return (prev || []).filter(function (n) { return n.id !== noteId })
+            })
+        } catch (err) {
+            alert('Error deleting note: ' + (err.message || 'unknown'))
+        }
     }
 
     // ---- Inline Send Message from the appointment popup ----
@@ -5747,22 +5808,69 @@ export default function Calendar() {
                                 {/* Timeline of notes — oldest first, like a conversation */}
                                 {apptNotes.length > 0 && (
                                     <div className="appt-notes-timeline">
-                                        {apptNotes.map((note) => (
-                                            <div key={note.id} className="appt-note-item">
-                                                <div className="appt-note-header">
-                                                    <span className={'appt-note-type appt-note-type-' + note.note_type}>
-                                                        {note.note_type === 'booking' ? '📅 At booking' :
-                                                         note.note_type === 'day-of' ? '🌅 Day of' :
-                                                         note.note_type === 'post-visit' ? '✂️ Post visit' :
-                                                         '📝 Note'}
-                                                    </span>
-                                                    <span className="appt-note-time">
-                                                        {new Date(note.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · {new Date(note.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                                                    </span>
+                                        {apptNotes.map((note) => {
+                                            const isEditing = editingNoteId === note.id
+                                            return (
+                                                <div key={note.id} className="appt-note-item">
+                                                    <div className="appt-note-header" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                                        <span className={'appt-note-type appt-note-type-' + note.note_type}>
+                                                            {note.note_type === 'booking' ? '📅 At booking' :
+                                                             note.note_type === 'day-of' ? '🌅 Day of' :
+                                                             note.note_type === 'post-visit' ? '✂️ Post visit' :
+                                                             '📝 Note'}
+                                                        </span>
+                                                        <span className="appt-note-time">
+                                                            {new Date(note.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · {new Date(note.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                                                        </span>
+                                                        {/* Edit + Delete — only when NOT in edit mode */}
+                                                        {!isEditing && (
+                                                            <span style={{ marginLeft: 'auto', display: 'flex', gap: '4px' }}>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={function () { handleEditNoteStart(note) }}
+                                                                    title="Edit this note"
+                                                                    style={{ background: 'transparent', border: '1px solid #d1d5db', color: '#6b7280', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', fontSize: '11px' }}
+                                                                >✏️ Edit</button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={function () { handleDeleteNote(note.id) }}
+                                                                    title="Delete this note"
+                                                                    style={{ background: 'transparent', border: '1px solid #fca5a5', color: '#dc2626', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', fontSize: '11px' }}
+                                                                >🗑️ Delete</button>
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {isEditing ? (
+                                                        <div style={{ marginTop: '6px' }}>
+                                                            <textarea
+                                                                value={editingNoteText}
+                                                                onChange={function (e) { setEditingNoteText(e.target.value) }}
+                                                                disabled={savingNoteEdit}
+                                                                rows={3}
+                                                                autoFocus
+                                                                style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box' }}
+                                                            />
+                                                            <div style={{ display: 'flex', gap: '6px', marginTop: '6px', justifyContent: 'flex-end' }}>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={handleEditNoteCancel}
+                                                                    disabled={savingNoteEdit}
+                                                                    style={{ padding: '6px 12px', background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', borderRadius: '6px', fontWeight: 600, fontSize: '12px', cursor: savingNoteEdit ? 'not-allowed' : 'pointer' }}
+                                                                >Cancel</button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={handleEditNoteSave}
+                                                                    disabled={savingNoteEdit || !editingNoteText.trim()}
+                                                                    style={{ padding: '6px 12px', background: savingNoteEdit || !editingNoteText.trim() ? '#9ca3af' : '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 700, fontSize: '12px', cursor: savingNoteEdit || !editingNoteText.trim() ? 'not-allowed' : 'pointer' }}
+                                                                >{savingNoteEdit ? 'Saving…' : '💾 Save'}</button>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="appt-note-content">{note.content}</div>
+                                                    )}
                                                 </div>
-                                                <div className="appt-note-content">{note.content}</div>
-                                            </div>
-                                        ))}
+                                            )
+                                        })}
                                     </div>
                                 )}
 

@@ -104,6 +104,7 @@ import ClientChatWidget from './components/ClientChatWidget'
 import Sidebar from './components/Sidebar'
 import SubscriptionGate from './components/SubscriptionGate'
 import WalkthroughGuide from './components/WalkthroughGuide'
+import UpdateBanner from './components/UpdateBanner'
 import './App.css'
 
 // Helper — every groomer-side route runs through this. Three checks in order:
@@ -183,6 +184,10 @@ function App() {
 
     return (
         <BrowserRouter>
+            {/* Global update banner — sits in bottom-right on every page. Polls
+                /version.json and tells the groomer when a fresh deploy is live so
+                they can refresh on their schedule (not mid-checkout). */}
+            <UpdateBanner />
             <AppLayout>
                 <Routes>
                     <Route path="/login" element={!session ? <Login /> : <Navigate to="/" />} />

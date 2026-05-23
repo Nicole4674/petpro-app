@@ -385,14 +385,22 @@ export default function ClientDetail() {
 
   const fetchGroomingHistory = async () => {
     setLoadingTab(true)
-    // Pull appointment_pets so multi-pet bookings show all pets in history
+    // Pull per-pet quoted_price + add-ons so the history list can show
+    // "Bella - Full Groom 15-20lbs - $55 / Millie - Full Groom Under 10lbs - $50"
+    // instead of a smashed-together "Service · Service" with a lump total.
     const { data, error } = await supabase
       .from('appointments')
       .select(`
         *,
         pets(id, name, breed),
         services(id, service_name, price, time_block_minutes),
-        appointment_pets(id, pets:pet_id(id, name, breed), services:service_id(id, service_name))
+        appointment_pets(
+          id,
+          quoted_price,
+          pets:pet_id(id, name, breed),
+          services:service_id(id, service_name, price),
+          appointment_pet_addons(id, quoted_price, services:service_id(id, service_name, price))
+        )
       `)
       .eq('client_id', id)
       .order('appointment_date', { ascending: false })
@@ -1647,26 +1655,52 @@ export default function ClientDetail() {
                       <div className="cp-history-details">
                         <div className="cp-history-top-row">
                           <span className="cp-history-service">
-                            {(appt.appointment_pets && appt.appointment_pets.length > 0)
-                              ? appt.appointment_pets
-                                  .map(ap => ap.services && ap.services.service_name)
-                                  .filter(Boolean)
-                                  .join(' · ') || 'Service'
-                              : (appt.services?.service_name || 'Service')}
+                            {(appt.appointment_pets && appt.appointment_pets.length > 1)
+                              ? appt.appointment_pets.length + ' pets'
+                              : (appt.appointment_pets && appt.appointment_pets[0] && appt.appointment_pets[0].services
+                                  ? appt.appointment_pets[0].services.service_name
+                                  : (appt.services?.service_name || 'Service'))}
                           </span>
                           <span className="cp-history-status" style={{ background: getStatusColor(appt.status) + '20', color: getStatusColor(appt.status) }}>
                             {appt.status}
                           </span>
                         </div>
-                        <div className="cp-history-meta">
-                          <span>🐾 {
-                            (appt.appointment_pets && appt.appointment_pets.length > 0)
-                              ? appt.appointment_pets
-                                  .map(ap => ap.pets && ap.pets.name)
-                                  .filter(Boolean)
-                                  .join(', ')
-                              : (appt.pets?.name || 'Unknown Pet')
-                          }</span>
+
+                        {/* Per-pet breakdown — one row per pet with name · service · price.
+                            Add-ons appear indented under their pet. Multi-pet appointments
+                            now itemize clearly instead of showing "Service · Service" with
+                            a mystery lump total. */}
+                        {(appt.appointment_pets && appt.appointment_pets.length > 0) ? (
+                          <div className="cp-history-pets" style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {appt.appointment_pets.map(function (ap) {
+                              const petName = (ap.pets && ap.pets.name) || 'Pet'
+                              const svcName = (ap.services && ap.services.service_name) || 'Service'
+                              const primaryPrice = parseFloat(ap.quoted_price || 0)
+                              return (
+                                <div key={ap.id}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', color: '#374151' }}>
+                                    <span>🐾 <strong>{petName}</strong> — {svcName}</span>
+                                    {primaryPrice > 0 && (
+                                      <span style={{ color: '#6b7280', fontWeight: 600 }}>${primaryPrice.toFixed(2)}</span>
+                                    )}
+                                  </div>
+                                  {(ap.appointment_pet_addons || []).map(function (addon) {
+                                    const addonName = (addon.services && addon.services.service_name) || 'Add-on'
+                                    const addonPrice = parseFloat(addon.quoted_price || 0)
+                                    return (
+                                      <div key={addon.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#6b7280', paddingLeft: '20px' }}>
+                                        <span>↳ {addonName}</span>
+                                        {addonPrice > 0 && <span>${addonPrice.toFixed(2)}</span>}
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        ) : null}
+
+                        <div className="cp-history-meta" style={{ marginTop: '6px' }}>
                           <span>🕐 {formatTime(appt.start_time)} — {formatTime(appt.end_time)}</span>
                           {appt.services?.time_block_minutes && <span>⏱️ {appt.services.time_block_minutes} min</span>}
                         </div>
