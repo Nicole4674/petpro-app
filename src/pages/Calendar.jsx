@@ -9080,7 +9080,7 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                                             )}
                                         </div>
                                         <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '6px' }}>
-                                            Math: {existingRecurringForPet.next_date} + {Math.round(existingRecurringForPet.interval_weeks / 2)} weeks = perfect alternation.
+                                            Why {existingRecurringForPet.optimal_date}? It's exactly {Math.round(existingRecurringForPet.interval_weeks / 2)} weeks after the next {existingRecurringForPet.service_name} ({existingRecurringForPet.next_date}) — the perfect halfway point.
                                         </div>
                                     </div>
                                 )}

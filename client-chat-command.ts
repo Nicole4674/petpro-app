@@ -560,16 +560,28 @@ function checkBookingAgainstRules(opts: any) {
 var toolDefinitions = [
   {
     name: 'client_book_appointment',
-    description: 'Book a grooming appointment for the CURRENT client\'s own pet. If auto-book is on and client has no spam flags, creates as scheduled. Otherwise creates as pending for groomer approval.',
+    description: 'Book a grooming appointment for the CURRENT client\'s own pet. If auto-book is on and client has no spam flags, creates as scheduled. Otherwise creates as pending for groomer approval. MULTI-PET: if the client wants to book multiple pets in the SAME slot (e.g. brings both dogs together), pass the additional pets in additional_pets — the tool will extend the appointment duration automatically.',
     input_schema: {
       type: 'object',
       properties: {
-        pet_id: { type: 'string', description: 'Must be one of the client\'s own pets (see MY PETS in context).' },
+        pet_id: { type: 'string', description: 'PRIMARY pet for this appointment. Must be one of the client\'s own pets (see MY PETS in context).' },
         appointment_date: { type: 'string', description: 'YYYY-MM-DD' },
         start_time: { type: 'string', description: 'HH:MM 24-hour' },
-        service_id: { type: 'string', description: 'REQUIRED. Which service from SERVICES OFFERED. Must ask the client which service (bath, full haircut, face/feet trim + bath, nails, etc.) before booking — DO NOT GUESS or leave blank.' },
-        duration_minutes: { type: 'number', description: 'Default 60.' },
+        service_id: { type: 'string', description: 'REQUIRED. Service for the PRIMARY pet. Must ask the client which service (bath, full haircut, face/feet trim + bath, nails, etc.) before booking — DO NOT GUESS or leave blank.' },
+        duration_minutes: { type: 'number', description: 'Default 60. (For multi-pet, leave blank — tool sums service times automatically.)' },
         service_notes: { type: 'string', description: 'Any special requests for the groomer.' },
+        additional_pets: {
+          type: 'array',
+          description: 'OPTIONAL. Use ONLY when the client confirmed multiple pets for the SAME appointment slot. Each item needs the sibling pet_id and the chosen service_id for that pet. Tool auto-extends the appointment duration to fit all services.',
+          items: {
+            type: 'object',
+            properties: {
+              pet_id: { type: 'string', description: 'Sibling pet ID from MY PETS.' },
+              service_id: { type: 'string', description: 'Service for THIS sibling pet (ask client — different pets can have different services).' },
+            },
+            required: ['pet_id', 'service_id'],
+          },
+        },
       },
       required: ['pet_id', 'appointment_date', 'start_time', 'service_id'],
     },
@@ -938,8 +950,62 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           }
         }
 
-        // Compute end time
-        var dur = toolInput.duration_minutes || 60
+        // ─── Multi-pet: gather all pets to book on this appointment ──────
+        // Primary pet + any additional_pets. Each entry: { pet_id, service_id }.
+        // We look up each service to (a) compute total duration so end_time
+        // covers all services and (b) get the catalog price for quoted_price.
+        // Validate every additional pet belongs to this client BEFORE writing.
+        var allPetsToBook: Array<{ pet_id: string, service_id: string }> = [{
+          pet_id: toolInput.pet_id,
+          service_id: toolInput.service_id,
+        }]
+        if (Array.isArray(toolInput.additional_pets) && toolInput.additional_pets.length > 0) {
+          for (var addPet of toolInput.additional_pets) {
+            if (!addPet || !addPet.pet_id || !addPet.service_id) {
+              return { success: false, error: 'Each additional_pet must have pet_id and service_id.' }
+            }
+            // Ownership guard — make sure this sibling pet belongs to the client
+            var { data: ownPetCheck } = await supabaseAdmin
+              .from('pets')
+              .select('id, client_id')
+              .eq('id', addPet.pet_id)
+              .in('client_id', allClientIds)
+              .maybeSingle()
+            if (!ownPetCheck) {
+              return { success: false, error: 'One of the additional pets isn\'t on your profile (' + addPet.pet_id + ').' }
+            }
+            allPetsToBook.push({ pet_id: addPet.pet_id, service_id: addPet.service_id })
+          }
+        }
+
+        // Look up every service we need at once — duration + price for each
+        var allServiceIds = allPetsToBook
+          .map(function (x) { return x.service_id })
+          .filter(function (s) { return !!s })
+        var svcInfoMap: Record<string, { time_block_minutes: number, price: number }> = {}
+        if (allServiceIds.length > 0) {
+          var { data: svcLookups } = await supabaseAdmin
+            .from('services')
+            .select('id, time_block_minutes, price')
+            .in('id', allServiceIds)
+          for (var sl of (svcLookups || [])) {
+            svcInfoMap[sl.id] = {
+              time_block_minutes: parseInt(String(sl.time_block_minutes || 0)) || 60,
+              price: parseFloat(String(sl.price || 0)) || 0,
+            }
+          }
+        }
+
+        // Compute end time = start + sum of every pet's service duration
+        // (If only one pet: behaves exactly like before via toolInput.duration_minutes fallback)
+        var totalServiceMinutes = 0
+        for (var ptb of allPetsToBook) {
+          var svcInfo = svcInfoMap[ptb.service_id]
+          totalServiceMinutes += svcInfo ? svcInfo.time_block_minutes : 60
+        }
+        var dur = totalServiceMinutes > 0
+          ? totalServiceMinutes
+          : (toolInput.duration_minutes || 60)
         var parts = toolInput.start_time.split(':')
         var startMin = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10)
         var endMin = startMin + dur
@@ -1012,19 +1078,14 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
 
         // (regularStaffId was already looked up earlier, before the rule check)
 
-        // ── Look up service price so we can stamp `quoted_price` on the
-        // appointment + appointment_pets row. Without this the groomer's
-        // Calendar popup top-total reads $0 because both fields are null.
+        // ── Sum service prices across ALL pets being booked so the
+        // appointment's quoted_price reflects the real total (single-pet =
+        // primary only; multi-pet = sum of every sibling's service). Without
+        // this the Calendar popup top reads only the primary pet's price.
         var bookingServicePrice: number = 0
-        if (toolInput.service_id) {
-          var { data: svcRowForPrice } = await supabaseAdmin
-            .from('services')
-            .select('price')
-            .eq('id', toolInput.service_id)
-            .maybeSingle()
-          if (svcRowForPrice) {
-            bookingServicePrice = parseFloat(String(svcRowForPrice.price || 0)) || 0
-          }
+        for (var ptbPrice of allPetsToBook) {
+          var svcPx = svcInfoMap[ptbPrice.service_id]
+          if (svcPx) bookingServicePrice += svcPx.price
         }
 
         // Always 'confirmed' so it shows on the calendar. Flagged bookings get
@@ -1104,18 +1165,23 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           return { success: false, error: createErr.message }
         }
 
-        // Multi-pet junction row (single pet booking)
-        // Also stamp `quoted_price` here so any UI that sums from
-        // appointment_pets gets a non-zero number (Calendar uses this as
-        // a fallback when appt.quoted_price is null).
+        // Multi-pet junction rows — ONE per pet (primary + any siblings).
+        // Each row stores its OWN pet's service quoted_price so Calendar's
+        // popup itemizes per-pet correctly (e.g. "Bella · Bath $40 / Max ·
+        // Full Groom $60") instead of showing one lump on the primary.
+        var junctionPayloads: any[] = []
+        for (var ptbJ of allPetsToBook) {
+          var ptbSvc = svcInfoMap[ptbJ.service_id]
+          junctionPayloads.push({
+            appointment_id: newAppt.id,
+            pet_id: ptbJ.pet_id,
+            service_id: ptbJ.service_id || null,
+            quoted_price: ptbSvc && ptbSvc.price > 0 ? ptbSvc.price : null,
+          })
+        }
         var { error: junctionErr } = await supabaseAdmin
           .from('appointment_pets')
-          .insert({
-            appointment_id: newAppt.id,
-            pet_id: toolInput.pet_id,
-            service_id: toolInput.service_id || null,
-            quoted_price: bookingServicePrice > 0 ? bookingServicePrice : null,
-          })
+          .insert(junctionPayloads)
         if (junctionErr) console.error('[BOOK] junction insert error:', junctionErr.message)
 
         // ================================================================
@@ -2086,6 +2152,71 @@ Deno.serve(async function(req) {
       .is('checked_out_at', null)
       .order('appointment_date', { ascending: true })
 
+    // ─── Multi-pet booking pattern detection ──────────────────────────
+    // Pull last ~12 completed appointments and identify which pets this
+    // client typically books TOGETHER. Suds uses this to ask "just X or
+    // both?" instead of silently booking only one when the client
+    // historically brings multiple pets per visit.
+    // (Nicole's bug: client always brings 2 dogs, Suds only booked 1.)
+    var sixMonthsAgo = new Date()
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+    var sixMonthsAgoStr = sixMonthsAgo.toISOString().slice(0, 10)
+    var { data: pastBookings } = await supabaseAdmin
+      .from('appointments')
+      .select('id, appointment_date, pet_id, appointment_pets(pet_id)')
+      .eq('client_id', clientId)
+      .eq('groomer_id', groomerId)
+      .gte('appointment_date', sixMonthsAgoStr)
+      .lte('appointment_date', todayStr)
+      .not('status', 'in', '(cancelled,rescheduled,no_show)')
+      .order('appointment_date', { ascending: false })
+      .limit(12)
+
+    // Build per-pet stats: total appearances + how often appeared with siblings
+    var petStats: Record<string, { total: number, withOthers: number, soloOnly: number }> = {}
+    var petNameMap: Record<string, string> = {}
+    for (var mp of (myPets || [])) {
+      petStats[mp.id] = { total: 0, withOthers: 0, soloOnly: 0 }
+      petNameMap[mp.id] = mp.name
+    }
+    for (var bk of (pastBookings || [])) {
+      // Collect every pet on this booking (junction rows + legacy pet_id)
+      var petsOnBooking: Record<string, true> = {}
+      for (var ap of (bk.appointment_pets || [])) {
+        if (ap.pet_id) petsOnBooking[ap.pet_id] = true
+      }
+      if (bk.pet_id) petsOnBooking[bk.pet_id] = true
+      var petIdsHere = Object.keys(petsOnBooking)
+      var multiOnThis = petIdsHere.length >= 2
+      for (var pid of petIdsHere) {
+        if (!petStats[pid]) petStats[pid] = { total: 0, withOthers: 0, soloOnly: 0 }
+        petStats[pid].total += 1
+        if (multiOnThis) petStats[pid].withOthers += 1
+        else petStats[pid].soloOnly += 1
+      }
+    }
+    // Flag pets that are "usually together" (>= 50% of past bookings included siblings)
+    var multiPetPatternLines: string[] = []
+    var hasMultiPetPattern = false
+    if (myPets && myPets.length > 1) {
+      for (var pp of myPets) {
+        var st = petStats[pp.id]
+        if (!st || st.total < 2) continue // need at least 2 past bookings to call it a pattern
+        var pct = st.withOthers / st.total
+        if (pct >= 0.5) {
+          hasMultiPetPattern = true
+          var siblingNames = (myPets || [])
+            .filter(function (sib: any) { return sib.id !== pp.id })
+            .map(function (sib: any) { return sib.name })
+            .join(' / ')
+          multiPetPatternLines.push(
+            pp.name + ': booked with sibling(s) ' + st.withOthers + ' of last ' + st.total +
+            ' visits (' + Math.round(pct * 100) + '% multi-pet). Sibling pets on file: ' + siblingNames
+          )
+        }
+      }
+    }
+
     var { data: servicesList } = await supabaseAdmin
       .from('services')
       .select('id, service_name, price, price_type, price_max, weight_min, weight_max, time_block_minutes')
@@ -2210,6 +2341,17 @@ Deno.serve(async function(req) {
     }
     contextParts.push('')
 
+    // Show multi-pet booking pattern so Suds can ask "just X or both?" when
+    // appropriate. Only renders for clients with 2+ pets who historically
+    // book together.
+    if (hasMultiPetPattern) {
+      contextParts.push('=== MULTI-PET BOOKING PATTERN ===')
+      for (var mpl of multiPetPatternLines) {
+        contextParts.push(mpl)
+      }
+      contextParts.push('')
+    }
+
     contextParts.push('=== SERVICES OFFERED ===')
     if (servicesList && servicesList.length > 0) {
       for (var s of servicesList) {
@@ -2308,6 +2450,15 @@ Deno.serve(async function(req) {
       '- Look at MY UPCOMING APPOINTMENTS in the context block at the top. If the client is asking to book a date/time that\'s ALREADY in their upcoming list (or within 90 min of an existing one on the same date), this is NOT a new booking — they\'re confused or trying to reschedule.',
       '- DO NOT call client_book_appointment when an existing same-day appointment is visible in MY UPCOMING APPOINTMENTS. Instead say something like: "Hey, looks like you already have a 2pm Saturday with Teo on the books! Did you want to keep it, change the time, or cancel? Happy to help either way."',
       '- The system also has a server-side guard that will refuse same-day duplicate bookings with a duplicate_appointment_id — if you get that error, treat it as a signal to pivot to reschedule.',
+      '',
+      'MULTI-PET BOOKINGS — DON\'T SILENTLY BOOK JUST ONE:',
+      '- If a MULTI-PET BOOKING PATTERN block exists in the context, this client typically brings 2+ pets together (e.g. "Bella: booked with sibling(s) 5 of last 6 visits"). When they ask to book, you MUST handle this carefully:',
+      '  • If they NAMED a specific single pet ("book Bella for a bath", "I need Max in for a groom") → respect that, book only the named pet. DO NOT ask about the other.',
+      '  • If they were AMBIGUOUS about which pet ("I want to book an appointment", "can I get in next Friday?", "got any openings?") → ASK before booking: "Of course! Just [Pet] this time, or both [Pet] and [Sibling] like usual?" Wait for their answer.',
+      '  • If they say "both" or "yes both" → ASK what service for EACH pet: "Got it! What service for [Pet]? And what service for [Sibling]?" Don\'t assume same service.',
+      '  • If they say "just [Pet]" → book only that pet.',
+      '- This prevents the bug where a client who always brings 2 dogs gets only 1 booked because they didn\'t specify.',
+      '- If NO multi-pet pattern is in the context, don\'t ask — just book what they said.',
       '',
       'HOW CLIENTS ACTUALLY SPEAK (parse loosely, react warmly):',
       '- Clients are casual, often grammatically loose. Don\'t make them feel dumb. Translate their words into tool params:',
