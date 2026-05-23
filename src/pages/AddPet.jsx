@@ -83,7 +83,7 @@ export default function AddPet() {
 
     // Require weight + age — Claude needs both to quote price ranges accurately
     if (!form.weight || Number(form.weight) <= 0) {
-      setError('Weight is required (in lbs) — Claude uses it to quote accurate prices.')
+      setError('Weight is required (in lbs) — Suds uses it to quote accurate prices.')
       setLoading(false)
       return
     }

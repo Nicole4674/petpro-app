@@ -1653,10 +1653,10 @@ export default function PetDetail() {
                   color: 'white',
                 }}>
                   <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '6px' }}>
-                    🤖 Skip the typing — let Claude read it
+                    🤖 Skip the typing — let Suds read it
                   </div>
                   <div style={{ fontSize: '12px', opacity: 0.95, marginBottom: '10px' }}>
-                    Snap a photo of the vax cert and Claude will fill in the fields for you.
+                    Snap a photo of the vax cert and Suds will fill in the fields for you.
                   </div>
                   <input
                     ref={autoReadTopInputRef}
@@ -1870,7 +1870,7 @@ export default function PetDetail() {
                         marginTop: '8px',
                       }}
                     >
-                      {autoReadingVax ? '🤖 Reading...' : '📸 Auto-read from photo with Claude'}
+                      {autoReadingVax ? '🤖 Reading...' : '📸 Auto-read from photo with Suds'}
                     </button>
                   </div>
                 )}
