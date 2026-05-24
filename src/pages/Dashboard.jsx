@@ -29,6 +29,10 @@ export default function Dashboard() {
   var navigate = useNavigate()
   var [view, setView] = useState('day')
   var [currentDate, setCurrentDate] = useState(new Date())
+  // Live clock — updates every second so the dashboard always shows
+  // the real-time. Groomers leave the dash open all day; this is the
+  // ambient "what time is it" answer without checking their phone.
+  var [now, setNow] = useState(new Date())
   var [appointments, setAppointments] = useState([])
   var [boardingRes, setBoardingRes] = useState([])
   var [kennels, setKennels] = useState([])
@@ -68,6 +72,14 @@ export default function Dashboard() {
     if (typeof window === 'undefined') return false
     return window.sessionStorage.getItem('petpro_wizard_banner_dismissed') === '1'
   })
+
+  // Live clock — 1-second tick. Cheap (just a tiny re-render), and groomers
+  // glancing at the dashboard while bathing a dog get the ambient "what time
+  // is it" without grabbing their phone with wet hands.
+  useEffect(function () {
+    var id = setInterval(function () { setNow(new Date()) }, 1000)
+    return function () { clearInterval(id) }
+  }, [])
 
   useEffect(function () {
     var cancelled = false
@@ -649,7 +661,28 @@ export default function Dashboard() {
           <h1 className="db-title">🐾 PetPro Dashboard</h1>
           <p className="db-date-label">{formatDateFull(currentDate)}</p>
         </div>
-        <div className="db-header-right">
+        <div className="db-header-right" style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          {/* Live clock — ambient "what time is it" for wet-handed groomers
+              who don't want to grab their phone mid-bath. Ticks every second. */}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            lineHeight: 1,
+          }}>
+            <div style={{
+              fontSize: '28px',
+              fontWeight: 800,
+              color: '#111827',
+              fontVariantNumeric: 'tabular-nums',
+              letterSpacing: '0.5px',
+            }}>
+              {now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })}
+            </div>
+            <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>
+              {now.toLocaleDateString('en-US', { weekday: 'long' })}
+            </div>
+          </div>
           <button className="db-quick-add-btn" onClick={function() { setShowQuickAdd(true) }}>
             ⚡ Quick Book
           </button>
