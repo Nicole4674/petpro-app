@@ -4,50 +4,81 @@
 // Shows current customers (and prospective ones) what's actively being
 // built. Sets expectations + signals an active product.
 //
-// Three tiers:
-//   🛠️  In Development — actively being built, ships in next ~few weeks
-//   📋  Planned        — in the pipeline, no firm date yet
-//   💭  On the Horizon — bigger features, next quarter+
+// Four tiers:
+//   ✅  Recently Shipped — already live, build the "they ship!" signal
+//   🛠️  In Development  — actively being built, ships in next ~few weeks
+//   📋  Planned         — in the pipeline, no firm date yet
+//   💭  On the Horizon  — bigger features, next quarter+
 //
 // Edit the ROADMAP_ITEMS array to add/move/remove features. The UI
-// updates automatically.
+// updates automatically. As features ship, move them to 'shipped' tier
+// so customers see momentum.
 // ====================================================================
 
 import Sidebar from '../components/Sidebar'
 
 const ROADMAP_ITEMS = [
-  // 🛠️ In Development — Tier 1 (highest priority, ships first)
-  { tier: 'in-dev', emoji: '💳', title: 'Online Payments (Stripe Connect)',
+  // ✅ Recently Shipped — Tier 0 (proves velocity to prospects)
+  { tier: 'shipped', emoji: '🤖', title: 'Smart AI Booking (Suds)',
+    description: 'AI booking assistant that learns your shop rules, breed restrictions, mobile drive times, and your client patterns. Books in chat without you lifting a finger.',
+    badge: null },
+  { tier: 'shipped', emoji: '💳', title: 'Online Payments (Stripe Connect)',
     description: 'Accept card payments directly in PetPro. Send pay-by-text links, take tap-to-pay at checkout, auto-record paid status.',
     badge: 'Pro+' },
-  { tier: 'in-dev', emoji: '📝', title: 'Digital Waivers & E-Signature',
+  { tier: 'shipped', emoji: '📝', title: 'Digital Waivers & E-Signature',
     description: 'Grooming, boarding, photo release, and emergency authorization waivers — clients sign on their phone in 30 seconds. Stored per client.',
     badge: null },
+  { tier: 'shipped', emoji: '📱', title: 'SMS Reminders, Inbox & Mass Texts',
+    description: 'Auto-reminders the day before, full two-way SMS inbox, and one-click mass texts for shop-wide news. Real Twilio numbers, customizable templates.',
+    badge: 'Pro+' },
+  { tier: 'shipped', emoji: '🏠', title: 'Boarding Calendar',
+    description: 'Full boarding kennel management — check-in/out, multi-day stays, add-ons, payments. Lives alongside grooming with no extra setup.',
+    badge: null },
+  { tier: 'shipped', emoji: '🚐', title: 'Mobile Pick Up Flow',
+    description: 'Pickup → groom at shop → drop home. Smart action buttons, GPS deep-links, and SMS texts at every stop. Built for mobile groomers who hate counting addresses.',
+    badge: null },
+  { tier: 'shipped', emoji: '🔄', title: 'Smart Recurring Reschedule',
+    description: 'Change a Tuesday client to a different Tuesday and ALL future appointments auto-shift. Change the frequency and the whole series re-spaces. Zero manual recalculation.',
+    badge: null },
+
+  // 🛠️ In Development — Tier 1 (highest priority, ships first this year)
   { tier: 'in-dev', emoji: '📸', title: 'Before & After Photos',
     description: 'Attach 2 photos per appointment. Show in pet profile, client portal, and ready to post on social media.',
     badge: null },
-
-  // 📋 Planned — Tier 2 (revenue + retention)
-  { tier: 'planned', emoji: '⭐', title: 'Loyalty / Rewards Program',
+  { tier: 'in-dev', emoji: '📊', title: 'Advanced Analytics & Reports',
+    description: 'Revenue trends, service popularity, client retention, staff productivity, breed mix. Export to CSV/PDF for accountants.',
+    badge: 'Growing+' },
+  { tier: 'in-dev', emoji: '🔗', title: 'Friend Referrals — Save 20% on Your Bill',
+    description: 'Share your PetPro link with another groomer. When they pay, you both get 20% off next month. One referral per cycle keeps it fair.',
+    badge: null },
+  { tier: 'in-dev', emoji: '⭐', title: 'Loyalty / Rewards Program',
     description: '"10 grooms = 1 free." Auto-tracks visits, notifies clients when earned, applies discount at checkout.',
     badge: null },
+  { tier: 'in-dev', emoji: '💉', title: 'Vaccine Expiry Auto-Alerts',
+    description: 'Text clients 30 days before vaccines expire. Less day-of cancellations, less liability.',
+    badge: null },
+
+  // 📋 Planned — Tier 2 (queued for after In Development)
   { tier: 'planned', emoji: '🎁', title: 'Gift Cards',
     description: 'Sell prepaid digital gift cards from your shop. Codes texted/emailed to recipients. Redeem at checkout.',
-    badge: null },
-  { tier: 'planned', emoji: '🔗', title: 'Referral Program',
-    description: 'Unique referral links per client. "Your referral gets 20% off — you get $10 credit." Auto-applied on new client signup.',
     badge: null },
   { tier: 'planned', emoji: '💬', title: 'Review Collection',
     description: 'Auto-prompt happy clients post-groom to leave a review on Google or Yelp. Rotating testimonial widget on your sales page.',
     badge: null },
-  { tier: 'planned', emoji: '💉', title: 'Vaccine Expiry Auto-Alerts',
-    description: 'Text clients 30 days before vaccines expire. Less day-of cancellations, less liability.',
+  { tier: 'planned', emoji: '📷', title: 'Photo Library per Pet',
+    description: 'Every past groom photo, saved per pet. Clients see their pup\'s glow-up timeline in the portal. Great for marketing + sentimental wins.',
+    badge: null },
+  { tier: 'planned', emoji: '🎯', title: 'Smart Rebook Nudges',
+    description: '"Hey, it\'s been 6 weeks since Bella\'s last groom — want to book?" Auto-texts at the right cadence so you don\'t lose clients to "I forgot."',
+    badge: null },
+  { tier: 'planned', emoji: '🚶', title: 'Walk-in Tracker',
+    description: 'One-tap "add walk-in" button. Captures the visit, pulls up the client, books it on the fly without breaking your day.',
+    badge: null },
+  { tier: 'planned', emoji: '💛', title: 'PetPro Community (Facebook Group)',
+    description: 'Private group for PetPro shops to share photos, swap stories, ask questions, and celebrate the wins together. Link rolls out as the community grows.',
     badge: null },
 
-  // 💭 On the Horizon — Tier 3 (longer-term)
-  { tier: 'horizon', emoji: '📊', title: 'Advanced Analytics & Reports',
-    description: 'Revenue trends, service popularity, client retention, staff productivity, breed mix. Export to CSV/PDF for accountants.',
-    badge: 'Growing+' },
+  // 💭 On the Horizon — Tier 3 (longer-term, bigger builds)
   { tier: 'horizon', emoji: '🏢', title: 'Multi-Location Dashboard',
     description: 'For shops with 2+ locations. Aggregate view + per-location drill-down. Each location keeps its own staff, schedule, and pricing.',
     badge: 'Growing+' },
@@ -57,6 +88,7 @@ const ROADMAP_ITEMS = [
 ]
 
 const TIER_META = {
+  'shipped': { title: '✅ Recently Shipped', subtitle: 'Already live in your shop right now', accent: '#16a34a' },
   'in-dev': { title: '🛠️ In Development', subtitle: 'Actively being built — first to ship this year', accent: '#7c3aed' },
   'planned': { title: '📋 Planned', subtitle: 'Queued up after the In Development list', accent: '#0891b2' },
   'horizon': { title: '💭 On the Horizon', subtitle: 'Bigger builds — landing later in the year', accent: '#94a3b8' },
@@ -64,7 +96,7 @@ const TIER_META = {
 
 export default function Roadmap() {
   // Group items by tier
-  const grouped = { 'in-dev': [], 'planned': [], 'horizon': [] }
+  const grouped = { 'shipped': [], 'in-dev': [], 'planned': [], 'horizon': [] }
   ROADMAP_ITEMS.forEach(item => grouped[item.tier].push(item))
 
   return (
@@ -97,8 +129,8 @@ export default function Roadmap() {
           </p>
         </div>
 
-        {/* Tier sections */}
-        {['in-dev', 'planned', 'horizon'].map(tier => {
+        {/* Tier sections — shipped goes first so prospects see velocity */}
+        {['shipped', 'in-dev', 'planned', 'horizon'].map(tier => {
           const items = grouped[tier]
           if (items.length === 0) return null
           const meta = TIER_META[tier]
