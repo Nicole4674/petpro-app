@@ -198,7 +198,7 @@ export default function AddPet() {
           </div>
           <div className="form-group">
             <label>Age (years) *</label>
-            <input type="number" name="age" value={form.age} onChange={handleChange} required min="0" step="0.5" placeholder="e.g. 3" />
+            <input type="number" name="age" value={form.age} onChange={handleChange} required min="0" step="0.1" placeholder="e.g. 3 or 0.25 for a 3-month puppy" />
           </div>
         </div>
 

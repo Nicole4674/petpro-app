@@ -8268,9 +8268,24 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
             var { data: dayBlocks, error: blockErr } = await blockQuery
             if (blockErr) throw new Error('Could not check blocked times: ' + blockErr.message)
 
+            // Helper: convert HH:MM or HH:MM:SS to total minutes for clean numeric
+            // comparison. Without this, string compare bites: "14:00" < "14:00:00"
+            // returns true because the shorter string wins — so booking AT 2pm
+            // when a block ends AT 2pm was falsely flagged as overlap.
+            var toMinFromStr = function (t) {
+                if (!t) return 0
+                var p = String(t).split(':')
+                return (parseInt(p[0], 10) || 0) * 60 + (parseInt(p[1], 10) || 0)
+            }
+            var apptStartMin = toMinFromStr(form.start_time)
+            var apptEndMin = toMinFromStr(endTime)
             var conflict = (dayBlocks || []).find(function (b) {
-                // overlap if appt starts before block ends AND appt ends after block starts
-                return form.start_time < b.end_time && endTime > b.start_time
+                var blockStartMin = toMinFromStr(b.start_time)
+                var blockEndMin = toMinFromStr(b.end_time)
+                // True overlap = appt starts BEFORE block ends AND appt ends AFTER
+                // block starts. Equal boundaries (booking at exact block end time)
+                // do NOT overlap — that's the whole point of this fix.
+                return apptStartMin < blockEndMin && apptEndMin > blockStartMin
             })
 
             if (conflict) {
