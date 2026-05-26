@@ -70,6 +70,10 @@ export default function PetDetail() {
   var [activeTab, setActiveTab] = useState('overview')
   var [editing, setEditing] = useState(false)
   var [editForm, setEditForm] = useState({})
+  // Age unit toggle for the edit form. Same UX as AddPet — groomers think
+  // in months for puppies, years for adults. We store decimal years in the
+  // DB so all downstream code stays unit-blind.
+  var [editAgeUnit, setEditAgeUnit] = useState('years')
   var [saving, setSaving] = useState(false)
 
   // Tab data
@@ -150,7 +154,20 @@ export default function PetDetail() {
     }
 
     setPet(petData)
-    setEditForm(petData)
+    // Convert stored decimal years to a friendly display value + auto-pick
+    // the right unit. < 1 year = show as months (e.g. 0.5 stored → "6" + Months).
+    // >= 1 year = show as years.
+    var displayPet = Object.assign({}, petData)
+    var rawAge = parseFloat(petData.age)
+    if (!isNaN(rawAge) && rawAge > 0 && rawAge < 1) {
+      // Round to nearest whole month for clean display (0.25 → 3, not 3.0000004)
+      displayPet.age = Math.round(rawAge * 12)
+      setEditAgeUnit('months')
+    } else if (!isNaN(rawAge)) {
+      displayPet.age = rawAge
+      setEditAgeUnit('years')
+    }
+    setEditForm(displayPet)
 
     // Also fetch incident count for the header badge (cheap query, always fresh)
     supabase.from('incidents').select('id', { count: 'exact', head: true }).eq('pet_id', id)
@@ -279,13 +296,20 @@ export default function PetDetail() {
 
     setSaving(true)
 
+    // Convert displayed value back to decimal years before saving.
+    // (UI shows whole numbers in the selected unit; DB stores years.)
+    var ageForDb = parseFloat(editForm.age)
+    if (!isNaN(ageForDb) && editAgeUnit === 'months') {
+      ageForDb = ageForDb / 12
+    }
+
     var { error } = await supabase
       .from('pets')
       .update({
         name: editForm.name,
         breed: editForm.breed,
         weight: editForm.weight,
-        age: editForm.age,
+        age: isNaN(ageForDb) ? null : ageForDb,
         sex: editForm.sex,
         is_spayed_neutered: editForm.is_spayed_neutered,
         allergies: editForm.allergies,
@@ -1519,9 +1543,29 @@ export default function PetDetail() {
                 </div>
                 <div className="sl-form-group">
                   <label className="sl-label">Age *</label>
-                  <input type="text" className="sl-input" value={editForm.age || ''} required placeholder="e.g. 3 years"
-                    onChange={function(e) { setEditForm(Object.assign({}, editForm, { age: e.target.value })) }}
-                  />
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <input
+                      type="number"
+                      className="sl-input"
+                      value={editForm.age || ''}
+                      required
+                      min="0"
+                      step="1"
+                      placeholder={editAgeUnit === 'months' ? 'e.g. 6' : 'e.g. 3'}
+                      onChange={function(e) { setEditForm(Object.assign({}, editForm, { age: e.target.value })) }}
+                      style={{ flex: 1, minWidth: 0 }}
+                    />
+                    <select
+                      value={editAgeUnit}
+                      onChange={function(e) { setEditAgeUnit(e.target.value) }}
+                      className="sl-input"
+                      style={{ flex: '0 0 110px', background: '#fff' }}
+                      aria-label="Age unit"
+                    >
+                      <option value="years">Years</option>
+                      <option value="months">Months</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 

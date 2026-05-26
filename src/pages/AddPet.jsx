@@ -12,6 +12,13 @@ export default function AddPet() {
   const [error, setError] = useState(null)
   // Smart auto-fill: once groomer manually picks a coat type, stop auto-filling on breed change
   const [coatManuallyChanged, setCoatManuallyChanged] = useState(false)
+  // Age unit toggle — groomers think in months for puppies, years for adults.
+  // Internally we still store as decimal years (e.g. 0.25 = 3 months) so the
+  // DB stays consistent and downstream code (Suds AI, reports, etc.) doesn't
+  // need to know about units. Default to years; users flip to months when
+  // entering a puppy.
+  const [ageUnit, setAgeUnit] = useState('years')
+
   const [form, setForm] = useState({
     // Basic Info
     name: '',
@@ -98,7 +105,16 @@ export default function AddPet() {
     // Clean up empty strings to null for optional fields
     const cleanForm = { ...form }
     if (!cleanForm.weight) cleanForm.weight = null
-    if (!cleanForm.age) cleanForm.age = null
+    // Age conversion — UI lets the groomer enter whole numbers in either
+    // years or months. We store DECIMAL YEARS in the DB so all the existing
+    // code (Suds price quoting, breed reference, etc.) keeps working without
+    // any unit awareness. 6 months → 0.5 years, 18 months → 1.5 years, etc.
+    if (!cleanForm.age) {
+      cleanForm.age = null
+    } else {
+      var ageNum = parseFloat(cleanForm.age)
+      cleanForm.age = ageUnit === 'months' ? (ageNum / 12) : ageNum
+    }
     if (!cleanForm.vaccination_expiry) cleanForm.vaccination_expiry = null
     if (!cleanForm.last_groom_date) cleanForm.last_groom_date = null
 
@@ -197,8 +213,34 @@ export default function AddPet() {
             <input type="number" name="weight" value={form.weight} onChange={handleChange} required min="0" step="0.1" placeholder="e.g. 45" />
           </div>
           <div className="form-group">
-            <label>Age (years) *</label>
-            <input type="number" name="age" value={form.age} onChange={handleChange} required min="0" step="0.1" placeholder="e.g. 3 or 0.25 for a 3-month puppy" />
+            <label>Age *</label>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <input
+                type="number"
+                name="age"
+                value={form.age}
+                onChange={handleChange}
+                required
+                min="0"
+                step="1"
+                placeholder={ageUnit === 'months' ? 'e.g. 6' : 'e.g. 3'}
+                style={{ flex: 1, minWidth: 0 }}
+              />
+              <select
+                value={ageUnit}
+                onChange={function (e) { setAgeUnit(e.target.value) }}
+                style={{ flex: '0 0 110px', background: '#fff', border: '1px solid #d1d5db', borderRadius: '6px', padding: '8px' }}
+                aria-label="Age unit"
+              >
+                <option value="years">Years</option>
+                <option value="months">Months</option>
+              </select>
+            </div>
+            <small style={{ display: 'block', marginTop: '4px', color: '#6b7280', fontSize: '11px' }}>
+              {ageUnit === 'months'
+                ? 'Use Months for puppies — flip to Years once they\'re a year old.'
+                : 'Switch to Months for puppies under 1 year.'}
+            </small>
           </div>
         </div>
 

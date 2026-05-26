@@ -107,6 +107,9 @@ export default function ClientPortalDashboard() {
   var [newPetSpecies, setNewPetSpecies] = useState('dog') // dog or cat — drives breed picker filter
   var [newPetWeight, setNewPetWeight] = useState('')
   var [newPetAge, setNewPetAge] = useState('')
+  // Age unit toggle for the Add Pet flow — clients think in months for
+  // puppies, years for adults. Convert to decimal years on save.
+  var [newPetAgeUnit, setNewPetAgeUnit] = useState('years')
   var [newPetNotes, setNewPetNotes] = useState('')
   // Health & Vet (all optional)
   var [newPetAllergies, setNewPetAllergies] = useState('')
@@ -124,6 +127,9 @@ export default function ClientPortalDashboard() {
   var [editPetName, setEditPetName] = useState('')
   var [editPetWeight, setEditPetWeight] = useState('')
   var [editPetAge, setEditPetAge] = useState('')
+  // Same unit toggle for the Edit Pet flow — auto-picks Months for stored
+  // ages < 1 year so puppies edit cleanly. Convert back to years on save.
+  var [editPetAgeUnit, setEditPetAgeUnit] = useState('years')
   var [savingHealth, setSavingHealth] = useState(false)
   var [editHealthError, setEditHealthError] = useState('')
   var [editHealthAllergies, setEditHealthAllergies] = useState('')
@@ -554,6 +560,7 @@ export default function ClientPortalDashboard() {
     setNewPetSpecies('dog')
     setNewPetWeight('')
     setNewPetAge('')
+    setNewPetAgeUnit('years')
     setNewPetNotes('')
     setNewPetAllergies('')
     setNewPetMedications('')
@@ -676,12 +683,17 @@ export default function ClientPortalDashboard() {
       // (Client never sees this field — it just saves the groomer time later)
       var breedDefaults = getBreedDefaults(newPetBreed.trim())
 
+      // Convert age from selected unit → decimal years for DB storage
+      var newPetAgeYears = parseFloat(newPetAge)
+      if (!isNaN(newPetAgeYears) && newPetAgeUnit === 'months') {
+        newPetAgeYears = newPetAgeYears / 12
+      }
       var petInsert = {
         name: newPetName.trim(),
         species: newPetSpecies,
         breed: newPetBreed.trim(),
         weight: parseFloat(newPetWeight),
-        age: parseFloat(newPetAge),
+        age: isNaN(newPetAgeYears) ? null : newPetAgeYears,
         special_notes: newPetNotes.trim() || null,
         // Health & Vet — all optional; empty strings → null
         allergies: newPetAllergies.trim() || null,
@@ -721,7 +733,19 @@ export default function ClientPortalDashboard() {
     // Basic info — preload current values so client edits not creates
     setEditPetName(pet.name || '')
     setEditPetWeight(pet.weight != null ? String(pet.weight) : '')
-    setEditPetAge(pet.age != null ? String(pet.age) : '')
+    // Smart age unit: stored < 1 year → show as Months (e.g. 0.5 → "6").
+    // >= 1 → show as Years. Lets clients edit puppies in whole-number months.
+    var storedAge = parseFloat(pet.age)
+    if (!isNaN(storedAge) && storedAge > 0 && storedAge < 1) {
+      setEditPetAge(String(Math.round(storedAge * 12)))
+      setEditPetAgeUnit('months')
+    } else if (!isNaN(storedAge)) {
+      setEditPetAge(String(storedAge))
+      setEditPetAgeUnit('years')
+    } else {
+      setEditPetAge('')
+      setEditPetAgeUnit('years')
+    }
     setEditHealthAllergies(pet.allergies || '')
     setEditHealthMedications(pet.medications || '')
     setEditHealthVaxExpiry(pet.vaccination_expiry || '')
@@ -762,9 +786,11 @@ export default function ClientPortalDashboard() {
     if (editPetAge.trim() !== '') {
       ageVal = parseFloat(editPetAge)
       if (isNaN(ageVal) || ageVal < 0) {
-        setEditHealthError('Age must be a non-negative number (in years).')
+        setEditHealthError('Age must be a positive number.')
         return
       }
+      // Convert to decimal years before saving (DB stores years; UI is unit-flexible)
+      if (editPetAgeUnit === 'months') ageVal = ageVal / 12
     }
 
     setSavingHealth(true)
@@ -2617,14 +2643,34 @@ export default function ClientPortalDashboard() {
                 type="number"
                 required
               />
-              <PetField
-                label="Age (years)"
-                value={newPetAge}
-                onChange={setNewPetAge}
-                placeholder="e.g. 3"
-                type="number"
-                required
-              />
+              {/* Age with Years/Months toggle — puppies enter cleanly as whole-month
+                  values (e.g. 6 + Months) instead of forcing decimal year math. */}
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Age
+                </label>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    step="1"
+                    min="0"
+                    value={newPetAge}
+                    onChange={function (e) { setNewPetAge(e.target.value) }}
+                    placeholder={newPetAgeUnit === 'months' ? 'e.g. 6' : 'e.g. 3'}
+                    required
+                    style={{ flex: 1, minWidth: 0, padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '16px', boxSizing: 'border-box', fontFamily: 'inherit' }}
+                  />
+                  <select
+                    value={newPetAgeUnit}
+                    onChange={function (e) { setNewPetAgeUnit(e.target.value) }}
+                    style={{ flex: '0 0 110px', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '15px', background: '#fff', fontFamily: 'inherit' }}
+                  >
+                    <option value="years">Years</option>
+                    <option value="months">Months</option>
+                  </select>
+                </div>
+              </div>
 
               {/* ——— Health & Vet Info divider ——— */}
               <div style={{ marginTop: '8px', marginBottom: '14px', paddingTop: '14px', borderTop: '1px dashed #e5e7eb' }}>
@@ -2906,27 +2952,30 @@ export default function ClientPortalDashboard() {
               </div>
               <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Age (years)
+                  Age
                 </label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.5"
-                  min="0"
-                  value={editPetAge}
-                  onChange={function (e) { setEditPetAge(e.target.value) }}
-                  placeholder="e.g. 4"
-                  disabled={savingHealth}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    fontSize: '16px',
-                    boxSizing: 'border-box',
-                    fontFamily: 'inherit'
-                  }}
-                />
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    step="1"
+                    min="0"
+                    value={editPetAge}
+                    onChange={function (e) { setEditPetAge(e.target.value) }}
+                    placeholder={editPetAgeUnit === 'months' ? 'e.g. 6' : 'e.g. 4'}
+                    disabled={savingHealth}
+                    style={{ flex: 1, minWidth: 0, padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '16px', boxSizing: 'border-box', fontFamily: 'inherit' }}
+                  />
+                  <select
+                    value={editPetAgeUnit}
+                    onChange={function (e) { setEditPetAgeUnit(e.target.value) }}
+                    disabled={savingHealth}
+                    style={{ flex: '0 0 110px', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '15px', background: '#fff', fontFamily: 'inherit' }}
+                  >
+                    <option value="years">Years</option>
+                    <option value="months">Months</option>
+                  </select>
+                </div>
               </div>
             </div>
 
