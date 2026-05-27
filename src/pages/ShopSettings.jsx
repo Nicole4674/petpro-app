@@ -98,6 +98,12 @@ export default function ShopSettings() {
   // Agreements toggle — opt-in. Some groomers (like Nicole) don't use waivers
   // and don't want clients prompted to sign at portal login. Off by default.
   var [agreementsEnabled, setAgreementsEnabled] = useState(false)
+  // ─── Retail POS receipt customization ──
+  // Applied to print + email + SMS receipts. Logo defaults to shop logo;
+  // footer is free-text (perfect for return policy + next-appt reminders).
+  // Sales tax % saves to shop_settings so it persists across devices.
+  var [receiptFooterText, setReceiptFooterText] = useState('')
+  var [salesTaxRate, setSalesTaxRate] = useState('')
   // ─── Appointment reminder settings (Phase: SMS #9) ───
   // Per-shop opt-in for automated daily reminders. The cron edge function
   // (send-reminders-cron) reads these to decide whether/when to fire.
@@ -280,6 +286,9 @@ export default function ShopSettings() {
         setIsMobile(data.is_mobile === true)
         setLateWarningsEnabled(data.late_warnings_enabled === true)
         setAgreementsEnabled(data.agreements_enabled === true)
+        // Retail receipt customization
+        setReceiptFooterText(data.receipt_footer_text || '')
+        setSalesTaxRate(data.sales_tax_rate != null ? String(data.sales_tax_rate) : '')
         // AI toggles — default to ON if the column is missing or null (existing behavior)
         setGroomerAiEnabled(data.groomer_ai_enabled !== false)
         setClientAiBookingEnabled(data.client_ai_booking_enabled !== false)
@@ -431,6 +440,9 @@ export default function ShopSettings() {
         agreements_enabled: agreementsEnabled,
         groomer_ai_enabled: groomerAiEnabled,
         client_ai_booking_enabled: clientAiBookingEnabled,
+        // Retail receipt customization
+        receipt_footer_text: receiptFooterText.trim() || null,
+        sales_tax_rate: salesTaxRate === '' ? null : parseFloat(salesTaxRate),
         // Payment policy toggles (Phase 5)
         require_prepay_to_book: requirePrepay,
         no_show_fee_amount: parseFloat(noShowFeeAmount) || 0,
@@ -1694,6 +1706,33 @@ export default function ShopSettings() {
         </div>
 
         <TextArea label="Hours (display text — what clients see)" value={hours} onChange={setHours} placeholder="Mon–Sat 9am–5pm, Closed Sundays" />
+      </div>
+
+      {/* ─── Retail / POS Receipt Section ─────────────────────────────── */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
+        <h3 style={{ margin: '0 0 4px', fontSize: '16px', color: '#111827', fontWeight: 700 }}>🛒 Retail Receipt</h3>
+        <p style={{ margin: '0 0 14px', fontSize: '12px', color: '#6b7280' }}>
+          Customize the receipt customers get from your POS / Sell page (print, email, or SMS).
+          Your shop logo shows at the top automatically.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px', gap: '12px' }}>
+          <TextArea
+            label="Receipt Footer Text"
+            value={receiptFooterText}
+            onChange={setReceiptFooterText}
+            placeholder="e.g. Thanks for choosing Paws & Claws! 30-day return policy. See you in 6 weeks! 🐾"
+          />
+          <Field
+            label="Sales Tax %"
+            value={salesTaxRate}
+            onChange={setSalesTaxRate}
+            placeholder="e.g. 8.25"
+            type="number"
+          />
+        </div>
+        <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af' }}>
+          💡 Footer is great for return policy, "Book your next groom!" reminders, or social handles.
+        </p>
       </div>
 
       {/* Save button */}

@@ -19,6 +19,7 @@ export default function Sidebar({ onToggle }) {
   const [openSections, setOpenSections] = useState({
     grooming: true,
     boarding: true,
+    retail: true,
     staff: true,
     payroll: true,
     ai: true,
@@ -349,6 +350,44 @@ export default function Sidebar({ onToggle }) {
           )}
         </div>
         )}
+
+        {/* ─── Retail Section — products + POS + reports ───
+            Available to everyone (no plan tier gate). Small shops on Basic
+            sell shampoos / treats / food too — this is a real revenue lever. */}
+        <div className="sidebar-section">
+          <div className="sidebar-section-header" onClick={function() { if (!collapsed) toggleSection('retail') }}>
+            <span className="sidebar-icon">🛒</span>
+            {!collapsed && (
+              <>
+                <span className="sidebar-section-title">Retail</span>
+                <span className={'sidebar-arrow' + (openSections.retail ? ' sidebar-arrow-open' : '')}>▸</span>
+              </>
+            )}
+          </div>
+          {!collapsed && openSections.retail && (
+            <div className="sidebar-subitems">
+              <div
+                className={'sidebar-subitem' + (isActive('/pos') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/pos') }}
+              >
+                Sell
+              </div>
+              <div
+                className={'sidebar-subitem' + (isActive('/products') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/products') }}
+              >
+                Products
+              </div>
+              <div
+                className={'sidebar-subitem' + (isActive('/refunds') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/refunds') }}
+              >
+                Refunds
+              </div>
+              {/* /reports comes in Phase 6 */}
+            </div>
+          )}
+        </div>
 
         {/* Staff Section — visible if user can view staff or clock in */}
         {canAccessAny(['staff.view_list', 'staff.clock_own']) && (

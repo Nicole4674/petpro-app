@@ -5,6 +5,8 @@ import { BehaviorTagsRow } from '../components/BehaviorTags'
 import { printDailySheet } from '../lib/printDailySheet'
 import ReportCardModal from '../components/ReportCardModal'
 import ReceiptModal from '../components/ReceiptModal'
+import AddRetailModal from '../components/AddRetailModal'
+import { loadAttached as loadAttachedRetail, saveAttached as saveAttachedRetail, markCompleted as markRetailCompleted } from '../lib/attachedRetail'
 import { formatPhone } from '../lib/phone'
 import { mapsUrl, telUrl } from '../lib/maps'
 import '../boarding-styles.css'
@@ -39,6 +41,12 @@ export default function BoardingCalendar() {
   const [payTip, setPayTip] = useState('')
   const [payNotes, setPayNotes] = useState('')
   const [recordingPayment, setRecordingPayment] = useState(false)
+  // ─── Retail items attached to boarding reservation (Phase 4 v2) ────────
+  // Persisted to DB as parked sales linked via boarding_reservation_id.
+  // Lets staff add at intake → visible at pickup → rolls into bill.
+  const [retailItems, setRetailItems] = useState([])
+  const [attachedSaleId, setAttachedSaleId] = useState(null)
+  const [showAddRetail, setShowAddRetail] = useState(false)
   // ─── Saved-card-on-file Stripe charging ─────────────────────────────────
   // When method=card we load the client's saved cards and charge the default
   // through stripe-groomer-charge-boarding. If the client has no card on file,
@@ -576,6 +584,16 @@ export default function BoardingCalendar() {
         vaccinations: vaccinations
       })
 
+      // ─── Retail (Phase 4 v2): load attached retail for this reservation ──
+      try {
+        var { data: { user: ru } } = await supabase.auth.getUser()
+        if (ru) {
+          var attached = await loadAttachedRetail({ boardingReservationId: reservation.id, groomerId: ru.id })
+          setRetailItems(attached.items || [])
+          setAttachedSaleId(attached.sale ? attached.sale.id : null)
+        }
+      } catch (e) { console.warn('[boarding retail load] failed:', e) }
+
       // Load existing report cards for this reservation (one per pet possible)
       const { data: reportCardsData } = await supabase
         .from('report_cards')
@@ -859,6 +877,22 @@ export default function BoardingCalendar() {
         if (error) throw error
       }
 
+      // ─── Convert attached retail (Phase 4 v2) → completed + inventory ──
+      if (attachedSaleId) {
+        try {
+          await markRetailCompleted({
+            saleId:        attachedSaleId,
+            paymentMethod: payMethod || 'attached_to_boarding',
+            userId:        user.id,
+          })
+          setAttachedSaleId(null)
+          setRetailItems([])
+        } catch (err) {
+          console.warn('[retail-complete boarding] failed:', err)
+          alert('⚠️ Payment recorded, but retail could not be marked paid: ' + (err.message || err))
+        }
+      }
+
       // Refresh the kennel card so the new payment shows in history + balance updates
       await openKennelCard(selectedReservation)
       // Reset modal state
@@ -867,6 +901,7 @@ export default function BoardingCalendar() {
       setPayMethod('')
       setPayTip('')
       setPayNotes('')
+      setRetailItems([])
       setGroomerSavedCards([])
       setSelectedSavedCardId(null)
     } catch (err) {
@@ -2049,6 +2084,43 @@ export default function BoardingCalendar() {
                   </div>
                 )
               })()}
+
+              {/* 🛒 Retail Items attached to this reservation (Phase 4 v2) ────
+                  Visible at intake AND pickup. Anyone who opens the card sees
+                  what's been added. Persists until pickup payment. */}
+              <div style={{ margin: '12px 0', padding: '12px', background: retailItems.length > 0 ? '#f0fdf4' : '#f9fafb', border: '1px solid ' + (retailItems.length > 0 ? '#bbf7d0' : '#e5e7eb'), borderRadius: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: retailItems.length > 0 ? '8px' : '0' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#111827' }}>
+                    🛒 Retail Items {retailItems.length > 0 ? '· ' + retailItems.length + ' on bill' : ''}
+                  </div>
+                  <button
+                    onClick={function () { setShowAddRetail(true) }}
+                    style={{ padding: '6px 12px', background: '#fff', color: '#7c3aed', border: '1px dashed #c4b5fd', borderRadius: '8px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                    title="Add food, collar, treats — visible to all staff, rolls into pickup bill"
+                  >
+                    {retailItems.length > 0 ? 'Edit' : '+ Add Retail'}
+                  </button>
+                </div>
+                {retailItems.length > 0 && (
+                  <div style={{ fontSize: '13px' }}>
+                    {retailItems.map(function (li, idx) {
+                      return (
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', color: '#374151' }}>
+                          <span>↳ {li.qty} × {li.name}</span>
+                          <span style={{ fontWeight: 600 }}>${parseFloat(li.line_total).toFixed(2)}</span>
+                        </div>
+                      )
+                    })}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #bbf7d0', paddingTop: '6px', marginTop: '4px', fontWeight: 700, color: '#065f46' }}>
+                      <span>Retail subtotal</span>
+                      <span>${retailItems.reduce(function (s, l) { return s + (parseFloat(l.line_total) || 0) }, 0).toFixed(2)}</span>
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px', fontStyle: 'italic' }}>
+                      💡 Rolls into the pickup bill. Inventory decrements at payment.
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* ═══════════════════════════════════════════════════
                   DEPARTURE SERVICES — extras added during/before pickup
@@ -3421,7 +3493,9 @@ export default function BoardingCalendar() {
           optional tip, optional notes. Amount pre-filled with the balance.
           ═══════════════════════════════════════════════════ */}
       {payingRes && (() => {
-        const total = parseFloat(payingRes.total_price || 0)
+        const baseBoarding = parseFloat(payingRes.total_price || 0)
+        const retailSubtotal = (retailItems || []).reduce(function (s, l) { return s + (parseFloat(l.line_total) || 0) }, 0)
+        const total = baseBoarding + retailSubtotal
         const paid = (resPayments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0)
         const balance = total - paid
         return (
@@ -3465,6 +3539,30 @@ export default function BoardingCalendar() {
                   <div style={{ fontSize: '15px', fontWeight: 700, color: '#dc2626' }}>${balance.toFixed(2)}</div>
                 </div>
               </div>
+
+              {/* 🛒 Retail items rolled into pickup bill (Phase 4) */}
+              {retailItems.length > 0 && (
+                <div style={{ marginBottom: '12px', padding: '10px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase' }}>
+                    🛒 Retail Items (+${retailSubtotal.toFixed(2)})
+                  </div>
+                  {retailItems.map(function (li, idx) {
+                    return (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', padding: '2px 0', color: '#374151' }}>
+                        <span>{li.qty} × {li.name}</span>
+                        <span>${parseFloat(li.line_total).toFixed(2)}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              <button
+                onClick={function () { setShowAddRetail(true) }}
+                disabled={recordingPayment}
+                style={{ width: '100%', padding: '8px', background: '#fff', color: '#7c3aed', border: '1px dashed #c4b5fd', borderRadius: '8px', fontWeight: 600, fontSize: '12px', cursor: 'pointer', marginBottom: '14px' }}
+              >
+                {retailItems.length > 0 ? '🛒 Edit Retail (' + retailItems.length + ')' : '🛒 + Add Retail at Pickup'}
+              </button>
 
               {/* Method buttons */}
               <div style={{ marginBottom: '14px' }}>
@@ -3597,6 +3695,31 @@ export default function BoardingCalendar() {
           </div>
         )
       })()}
+
+      {/* Add Retail to Bill modal — Phase 4 v2 (boarding, persisted) */}
+      <AddRetailModal
+        open={showAddRetail}
+        existingItems={retailItems}
+        onClose={function () { setShowAddRetail(false) }}
+        onSave={async function (items) {
+          var target = selectedReservation
+          if (!target) { setShowAddRetail(false); return }
+          try {
+            var { data: { user: bu } } = await supabase.auth.getUser()
+            var saved = await saveAttachedRetail({
+              boardingReservationId: target.id,
+              groomerId:             bu.id,
+              clientId:              target.client_id,
+              items:                 items,
+            })
+            setRetailItems(items)
+            setAttachedSaleId(saved ? saved.id : null)
+          } catch (err) {
+            alert('Could not save retail items: ' + (err.message || err))
+          }
+          setShowAddRetail(false)
+        }}
+      />
 
       {/* ─── Edit Booking Modal ─────────────────────────────────────── */}
       {editingReservation && (

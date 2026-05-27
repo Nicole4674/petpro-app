@@ -55,6 +55,9 @@ import Route2 from './pages/Route'  // imported as Route2 to avoid clash with re
 import PetProAI from './pages/PetProAI'
 import Expenses from './pages/Expenses'
 import Onboarding from './pages/Onboarding'
+import Products from './pages/Products'
+import POS from './pages/POS'
+import Refunds from './pages/Refunds'
 
 // ─────────────────────────────────────────────────────────────────
 // RootRedirect — smart routing at "/" based on user type.
@@ -220,6 +223,12 @@ function App() {
                     <Route path="/petpro-ai" element={gate(session, <PetProAI />)} />
                     {/* Expenses — track tax-deductible business expenses */}
                     <Route path="/expenses" element={gate(session, <Expenses />)} />
+                    {/* Retail POS — product catalog + inventory (Phase 2) */}
+                    <Route path="/products" element={gate(session, <Products />)} />
+                    {/* Retail POS — standalone sell page / cash register (Phase 3) */}
+                    <Route path="/pos" element={gate(session, <POS />)} />
+                    {/* Retail POS — refunds (Phase 3.7 Step 7) */}
+                    <Route path="/refunds" element={gate(session, <Refunds />)} />
                     <Route path="/flagged" element={gate(session, <FlaggedBookings />)} />
                     <Route path="/voice" element={gate(session, <VoiceMode />)} />
                     <Route path="/import" element={gate(session, <ImportClients />)} />

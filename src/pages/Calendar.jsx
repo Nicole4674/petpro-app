@@ -8,6 +8,8 @@ import { resolveHighPriorityTags } from '../lib/behaviorTags'
 import { printDailySheet } from '../lib/printDailySheet'
 import ReportCardModal from '../components/ReportCardModal'
 import ReceiptModal from '../components/ReceiptModal'
+import AddRetailModal from '../components/AddRetailModal'
+import { loadAttached as loadAttachedRetail, saveAttached as saveAttachedRetail, markCompleted as markRetailCompleted } from '../lib/attachedRetail'
 import MobileDriveTimeWarning from '../components/MobileDriveTimeWarning'
 import SmartBookModal from '../components/SmartBookModal'
 import { formatPhone } from '../lib/phone'
@@ -455,6 +457,13 @@ export default function Calendar() {
     const [discountReason, setDiscountReason] = useState('')
     const [paymentNotes, setPaymentNotes] = useState('')
     const [recordingPayment, setRecordingPayment] = useState(false)
+    // ─── Retail items attached to the appointment (Phase 4 v2) ────────────
+    // Persist to DB as a "parked" sale linked via appointment_id. Items get
+    // added at drop-off / mid-appointment and roll into the Take Payment bill
+    // automatically at pickup. Inventory decrements only when paid.
+    const [retailItems, setRetailItems] = useState([])
+    const [attachedSaleId, setAttachedSaleId] = useState(null)  // parked sales row id
+    const [showAddRetail, setShowAddRetail] = useState(false)
     // ─── Subscription coverage state (Phase 3) ─────────────────────────────
     // Set by openPaymentPopup if client has an active subscription that covers
     // any service on this appointment. Drives the "🔁 Subscription covers $X"
@@ -1141,6 +1150,16 @@ export default function Calendar() {
                 .eq('appointment_id', appt.id)
                 .order('created_at', { ascending: true })
             setApptPayments(paymentsData || [])
+
+            // ─── Retail (Phase 4 v2): pending items attached to this appt ──
+            try {
+                var { data: { user: u } } = await supabase.auth.getUser()
+                if (u) {
+                    var attached = await loadAttachedRetail({ appointmentId: appt.id, groomerId: u.id })
+                    setRetailItems(attached.items || [])
+                    setAttachedSaleId(attached.sale ? attached.sale.id : null)
+                }
+            } catch (e) { console.warn('[retail load] failed:', e) }
 
             // Fetch existing report cards for this appointment (one per pet)
             const { data: reportCardsData } = await supabase
@@ -2383,6 +2402,18 @@ export default function Calendar() {
 
         setExistingPayments(payments || [])
 
+        // ─── Load attached retail (Phase 4 v2) ───────────────────────
+        // In case Take Payment is opened without first opening the
+        // appointment popup, we still need the bill to include retail.
+        try {
+            var { data: { user: pu } } = await supabase.auth.getUser()
+            if (pu) {
+                var attached = await loadAttachedRetail({ appointmentId: appt.id, groomerId: pu.id })
+                setRetailItems(attached.items || [])
+                setAttachedSaleId(attached.sale ? attached.sale.id : null)
+            }
+        } catch (e) { console.warn('[retail load in openPaymentPopup] failed:', e) }
+
         // Pre-fill the form with balance due
         // MULTI-PET: if this booking has appointment_pets rows, sum the
         // primary service quoted_price PLUS every add-on's quoted_price
@@ -2605,6 +2636,25 @@ export default function Calendar() {
             }
         }
 
+        // ─── Convert attached retail (Phase 4 v2) → completed + inventory ──
+        // Retail was already saved as a 'parked' sale when the groomer added
+        // it at drop-off. Now that payment is happening, flip it to
+        // 'completed' and decrement inventory.
+        if (attachedSaleId) {
+            try {
+                await markRetailCompleted({
+                    saleId:        attachedSaleId,
+                    paymentMethod: paymentMethod || 'attached_to_appointment',
+                    userId:        user.id,
+                })
+                setAttachedSaleId(null)
+                setRetailItems([])
+            } catch (err) {
+                console.warn('[retail-complete] failed:', err)
+                alert('⚠️ Payment recorded, but retail items could not be marked paid: ' + (err.message || err))
+            }
+        }
+
         // ─── Subscription usage tracking (Phase 3) ────────────────────────
         // Record that this appointment "used" the client's subscription so
         // bundle caps tick down + history is preserved.
@@ -2643,6 +2693,7 @@ export default function Calendar() {
         }
         setShowPaymentPopup(false)
         setPaymentAppt(null)
+        setRetailItems([])
         setRecordingPayment(false)
     }
 
@@ -2681,6 +2732,23 @@ export default function Calendar() {
             await recordSubscriptionUsage(subCoverage.usage_records, paymentAppt.id)
         }
 
+        // ─── Convert attached retail (Phase 4 v2) on $0-balance path too ──
+        // Subscription covered the groom, but they bought a shampoo bottle.
+        if (attachedSaleId) {
+            try {
+                await markRetailCompleted({
+                    saleId:        attachedSaleId,
+                    paymentMethod: 'attached_to_appointment',
+                    userId:        user.id,
+                })
+                setAttachedSaleId(null)
+                setRetailItems([])
+            } catch (err) {
+                console.warn('[retail-complete $0-path] failed:', err)
+                alert('⚠️ Check-out done, but retail could not be marked paid: ' + (err.message || err))
+            }
+        }
+
         await supabase.from('appointments').update({
             checked_out_at: now,
             checked_out_by: user.id
@@ -2699,6 +2767,7 @@ export default function Calendar() {
         await fetchData()
         setShowPaymentPopup(false)
         setPaymentAppt(null)
+        setRetailItems([])
         setRecordingPayment(false)
     }
 
@@ -3915,6 +3984,31 @@ export default function Calendar() {
                     </div>
                 )
             })()}
+
+            {/* Add Retail to Bill modal — Phase 4 v2 (persists to DB) */}
+            <AddRetailModal
+                open={showAddRetail}
+                existingItems={retailItems}
+                onClose={function () { setShowAddRetail(false) }}
+                onSave={async function (items) {
+                    var targetAppt = paymentAppt || selectedAppt
+                    if (!targetAppt) { setShowAddRetail(false); return }
+                    try {
+                        var { data: { user: au } } = await supabase.auth.getUser()
+                        var saved = await saveAttachedRetail({
+                            appointmentId: targetAppt.id,
+                            groomerId:     au.id,
+                            clientId:      targetAppt.client_id,
+                            items:         items,
+                        })
+                        setRetailItems(items)
+                        setAttachedSaleId(saved ? saved.id : null)
+                    } catch (err) {
+                        alert('Could not save retail items: ' + (err.message || err))
+                    }
+                    setShowAddRetail(false)
+                }}
+            />
 
             {/* Receipt modal — clean printable receipt for the appointment */}
             {receiptOpen && selectedAppt && (
@@ -6150,6 +6244,44 @@ export default function Calendar() {
                             )}
                         </div>
 
+                        {/* 🛒 Retail attached to this appointment (Phase 4 v2) */}
+                        {/* Visible on the popup itself so every staff member who opens
+                            the appointment knows what's been added at drop-off, mid-groom,
+                            or whenever. Persists until payment. */}
+                        <div style={{ margin: '12px 16px', padding: '12px', background: retailItems.length > 0 ? '#f0fdf4' : '#f9fafb', border: '1px solid ' + (retailItems.length > 0 ? '#bbf7d0' : '#e5e7eb'), borderRadius: '10px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: retailItems.length > 0 ? '8px' : '0' }}>
+                                <div style={{ fontSize: '13px', fontWeight: 700, color: '#111827' }}>
+                                    🛒 Retail Items {retailItems.length > 0 ? '· ' + retailItems.length + ' on bill' : ''}
+                                </div>
+                                <button
+                                    onClick={function () { setShowAddRetail(true) }}
+                                    style={{ padding: '6px 12px', background: '#fff', color: '#7c3aed', border: '1px dashed #c4b5fd', borderRadius: '8px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                                    title="Add a shampoo bottle, treats, etc. to this customer's bill"
+                                >
+                                    {retailItems.length > 0 ? 'Edit' : '+ Add Retail'}
+                                </button>
+                            </div>
+                            {retailItems.length > 0 && (
+                                <div style={{ fontSize: '13px' }}>
+                                    {retailItems.map(function (li, idx) {
+                                        return (
+                                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', color: '#374151' }}>
+                                                <span>↳ {li.qty} × {li.name}</span>
+                                                <span style={{ fontWeight: 600 }}>${parseFloat(li.line_total).toFixed(2)}</span>
+                                            </div>
+                                        )
+                                    })}
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #bbf7d0', paddingTop: '6px', marginTop: '4px', fontWeight: 700, color: '#065f46' }}>
+                                        <span>Retail subtotal</span>
+                                        <span>${retailItems.reduce(function (s, l) { return s + (parseFloat(l.line_total) || 0) }, 0).toFixed(2)}</span>
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px', fontStyle: 'italic' }}>
+                                        💡 Adds to the bill when you take payment. Inventory decrements then.
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
                         {/* Footer with Actions */}
                         <div className="appt-detail-footer">
                             <div className="appt-detail-actions">
@@ -6513,6 +6645,13 @@ export default function Calendar() {
                 } else {
                     servicePrice = parseFloat(paymentAppt.final_price || paymentAppt.quoted_price || 0)
                 }
+                // ─── Retail roll-in (Phase 4) ────────────────────────────────
+                // Sum of any retail items the groomer added before taking
+                // payment. Folds into the existing balance math so the same
+                // popup ends with ONE total covering groom + retail.
+                const retailTotal = (retailItems || []).reduce(function (s, l) {
+                    return s + (parseFloat(l.line_total) || 0)
+                }, 0)
                 const discount = parseFloat(discountAmount || 0)
                 // Subtract refunded amounts so refunded charges flip back to unpaid
                 const totalPaid = existingPayments.reduce((sum, p) => {
@@ -6520,7 +6659,7 @@ export default function Calendar() {
                     const refunded = parseFloat(p.refunded_amount || 0)
                     return sum + Math.max(0, paidAmt - refunded)
                 }, 0)
-                const amountDue = Math.max(0, servicePrice - discount)
+                const amountDue = Math.max(0, servicePrice + retailTotal - discount)
                 const balance = Math.max(0, amountDue - totalPaid)
                 const thisPayment = parseFloat(paymentAmount || 0)
                 const thisTip = parseFloat(tipAmount || 0)
@@ -6600,6 +6739,35 @@ export default function Calendar() {
                                             <span>${servicePrice.toFixed(2)}</span>
                                         </div>
                                     )}
+
+                                    {/* 🛒 Retail items rolled into this bill (Phase 4) */}
+                                    {retailItems.length > 0 && (
+                                        <>
+                                            <div className="payment-receipt-row" style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed #e5e7eb', fontSize: '11px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>
+                                                <span>🛒 Retail Items</span>
+                                                <span></span>
+                                            </div>
+                                            {retailItems.map(function (li, idx) {
+                                                return (
+                                                    <div key={idx} className="payment-receipt-row" style={{ paddingLeft: '16px', color: '#374151', fontSize: '13px' }}>
+                                                        <span>↳ {li.qty} × {li.name}</span>
+                                                        <span>${parseFloat(li.line_total).toFixed(2)}</span>
+                                                    </div>
+                                                )
+                                            })}
+                                        </>
+                                    )}
+
+                                    {/* + Add Retail button */}
+                                    <div className="payment-receipt-row" style={{ marginTop: '8px' }}>
+                                        <button
+                                            onClick={function () { setShowAddRetail(true) }}
+                                            disabled={recordingPayment}
+                                            style={{ padding: '6px 12px', background: '#fff', color: '#7c3aed', border: '1px dashed #c4b5fd', borderRadius: '8px', fontWeight: 600, fontSize: '12px', cursor: 'pointer', width: '100%' }}
+                                        >
+                                            {retailItems.length > 0 ? '🛒 Edit Retail Items (' + retailItems.length + ')' : '🛒 + Add Retail to Bill'}
+                                        </button>
+                                    </div>
 
                                     {/* Discount field — editable */}
                                     <div className="payment-receipt-row payment-receipt-discount">
