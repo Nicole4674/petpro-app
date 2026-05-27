@@ -152,10 +152,12 @@ export default function Dashboard() {
     var dateStr = formatDateISO(currentDate)
     var range = getDateRange()
 
-    // Fetch appointments for range
+    // Fetch appointments for range — joins both legacy pets FK (single-pet
+    // bookings) AND the appointment_pets junction (multi-pet) so the
+    // upcoming list shows ALL pets, not just the first one.
     var apptQuery = supabase
       .from('appointments')
-      .select('*, clients(first_name, last_name), pets(name, breed)')
+      .select('*, clients(first_name, last_name), pets(name, breed), appointment_pets(pets(name, breed))')
       .eq('groomer_id', user.id)
       .gte('appointment_date', range.start)
       .lte('appointment_date', range.end)
@@ -1059,14 +1061,24 @@ export default function Dashboard() {
           ) : (
             <div className="db-appt-list">
               {(view === 'day' ? todayAppts : appointments).map(function(a) {
+                // Multi-pet aware: prefer the appointment_pets junction when
+                // it has rows, otherwise fall back to the legacy single-pet FK.
+                var junctionPets = (a.appointment_pets || [])
+                  .map(function (ap) { return ap.pets })
+                  .filter(Boolean)
+                var displayPets = junctionPets.length > 0 ? junctionPets : (a.pets ? [a.pets] : [])
+                var petsName = displayPets.length > 0
+                  ? displayPets.map(function (p) { return p.name }).join(', ')
+                  : 'Unknown'
+                var petsBreed = displayPets.length === 1 ? (displayPets[0].breed || '') : ''
                 return (
                   <div key={a.id} className="db-appt-row" onClick={function() { navigate('/calendar') }}>
                     <div className="db-appt-time">{formatTime(a.start_time)}</div>
                     <div className="db-appt-status-dot" style={{ backgroundColor: STATUS_COLORS[a.status] || '#7c3aed' }}></div>
                     <div className="db-appt-info">
                       <div className="db-appt-name">
-                        {a.pets ? a.pets.name : 'Unknown'}
-                        <span className="db-appt-breed">{a.pets ? a.pets.breed : ''}</span>
+                        {petsName}
+                        <span className="db-appt-breed">{petsBreed}</span>
                       </div>
                       <div className="db-appt-client">
                         {a.clients ? a.clients.first_name + ' ' + a.clients.last_name : 'Unknown'}
