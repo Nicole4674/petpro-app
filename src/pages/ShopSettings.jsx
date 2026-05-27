@@ -104,6 +104,10 @@ export default function ShopSettings() {
   // Sales tax % saves to shop_settings so it persists across devices.
   var [receiptFooterText, setReceiptFooterText] = useState('')
   var [salesTaxRate, setSalesTaxRate] = useState('')
+  // ─── Low-stock email alerts (Phase 6b) ──
+  var [lowStockAlertsEnabled, setLowStockAlertsEnabled] = useState(false)
+  var [testingLowStock, setTestingLowStock] = useState(false)
+  var [lowStockResult, setLowStockResult] = useState(null)
   // ─── Appointment reminder settings (Phase: SMS #9) ───
   // Per-shop opt-in for automated daily reminders. The cron edge function
   // (send-reminders-cron) reads these to decide whether/when to fire.
@@ -289,6 +293,7 @@ export default function ShopSettings() {
         // Retail receipt customization
         setReceiptFooterText(data.receipt_footer_text || '')
         setSalesTaxRate(data.sales_tax_rate != null ? String(data.sales_tax_rate) : '')
+        setLowStockAlertsEnabled(data.low_stock_alerts_enabled === true)
         // AI toggles — default to ON if the column is missing or null (existing behavior)
         setGroomerAiEnabled(data.groomer_ai_enabled !== false)
         setClientAiBookingEnabled(data.client_ai_booking_enabled !== false)
@@ -443,6 +448,7 @@ export default function ShopSettings() {
         // Retail receipt customization
         receipt_footer_text: receiptFooterText.trim() || null,
         sales_tax_rate: salesTaxRate === '' ? null : parseFloat(salesTaxRate),
+        low_stock_alerts_enabled: lowStockAlertsEnabled,
         // Payment policy toggles (Phase 5)
         require_prepay_to_book: requirePrepay,
         no_show_fee_amount: parseFloat(noShowFeeAmount) || 0,
@@ -1733,6 +1739,63 @@ export default function ShopSettings() {
         <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af' }}>
           💡 Footer is great for return policy, "Book your next groom!" reminders, or social handles.
         </p>
+
+        {/* Low-stock email alerts toggle */}
+        <div style={{ marginTop: '20px', padding: '14px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={lowStockAlertsEnabled}
+              onChange={function (e) { setLowStockAlertsEnabled(e.target.checked) }}
+              style={{ marginTop: '3px' }}
+            />
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#854d0e' }}>📦 Daily Low-Stock Alerts</div>
+              <div style={{ fontSize: '12px', color: '#92400e', marginTop: '2px' }}>
+                Email me each morning if any active product hits its low-stock threshold. Default OFF.
+              </div>
+            </div>
+          </label>
+          {lowStockAlertsEnabled && (
+            <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #fde68a' }}>
+              <button
+                onClick={async function () {
+                  setTestingLowStock(true)
+                  setLowStockResult(null)
+                  try {
+                    var { data: { user } } = await supabase.auth.getUser()
+                    var { data, error } = await supabase.functions.invoke('check-low-stock', { body: { groomer_id: user.id } })
+                    if (error) throw error
+                    if (data && data.error) throw new Error(data.error)
+                    var mine = (data.results || []).find(function (r) { return r.groomer_id === user.id })
+                    if (mine && mine.status === 'emailed') {
+                      setLowStockResult({ ok: true, text: '✓ Emailed ' + mine.count + ' low-stock item' + (mine.count === 1 ? '' : 's') + ' to ' + mine.sent_to })
+                    } else if (mine && mine.status === 'nothing_low') {
+                      setLowStockResult({ ok: true, text: '✓ Everything stocked above threshold — no email sent.' })
+                    } else if (mine && mine.status === 'skipped_no_email') {
+                      setLowStockResult({ ok: false, text: 'No email address on file. Add one above.' })
+                    } else {
+                      setLowStockResult({ ok: false, text: 'Test could not run (unknown status).' })
+                    }
+                  } catch (err) {
+                    setLowStockResult({ ok: false, text: err.message || 'Test failed' })
+                  } finally {
+                    setTestingLowStock(false)
+                  }
+                }}
+                disabled={testingLowStock}
+                style={{ padding: '8px 14px', background: '#fff', color: '#854d0e', border: '1px solid #fde68a', borderRadius: '8px', fontWeight: 600, fontSize: '13px', cursor: testingLowStock ? 'wait' : 'pointer' }}
+              >
+                {testingLowStock ? 'Running…' : '🧪 Run Test Now'}
+              </button>
+              {lowStockResult && (
+                <div style={{ marginTop: '8px', padding: '8px 12px', background: lowStockResult.ok ? '#ecfdf5' : '#fef2f2', borderRadius: '6px', fontSize: '12px', color: lowStockResult.ok ? '#065f46' : '#991b1b', fontWeight: 600 }}>
+                  {lowStockResult.text}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Save button */}

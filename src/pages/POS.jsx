@@ -31,6 +31,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import TerminalCheckout from '../components/TerminalCheckout'
 
 // ─── Category emoji map + ordered list (mirrors Products.jsx) ─────────────
 const CATEGORY_EMOJI = {
@@ -60,12 +61,13 @@ const SORT_OPTIONS = [
 ]
 
 const PAYMENT_METHODS = [
-  { id: 'cash',   label: 'Cash',   emoji: '💵' },
-  { id: 'card',   label: 'Card',   emoji: '💳' },
-  { id: 'zelle',  label: 'Zelle',  emoji: '⚡' },
-  { id: 'venmo',  label: 'Venmo',  emoji: '💜' },
-  { id: 'check',  label: 'Check',  emoji: '🧾' },
-  { id: 'other',  label: 'Other',  emoji: '📝' },
+  { id: 'cash',            label: 'Cash',     emoji: '💵' },
+  { id: 'card',            label: 'Card',     emoji: '💳' },
+  { id: 'stripe_terminal', label: 'Terminal', emoji: '📟' },
+  { id: 'zelle',           label: 'Zelle',    emoji: '⚡' },
+  { id: 'venmo',           label: 'Venmo',    emoji: '💜' },
+  { id: 'check',           label: 'Check',    emoji: '🧾' },
+  { id: 'other',           label: 'Other',    emoji: '📝' },
 ]
 
 function money(n) {
@@ -104,6 +106,13 @@ export default function POS() {
   const [drawerSession, setDrawerSession] = useState(null)
   const [showOpenDrawer, setShowOpenDrawer] = useState(false)
   const [showCloseDrawer, setShowCloseDrawer] = useState(false)
+  // ─── Stripe Terminal (Phase 5) ───────────────────────────────────────
+  // When user picks "stripe_terminal" as a payment method + clicks Charge,
+  // we route through this modal first to collect the card via reader. On
+  // success it returns a PaymentIntent ID which we attach to the
+  // sale_payments row for the audit trail.
+  const [showTerminal, setShowTerminal] = useState(false)
+  const [terminalIntentId, setTerminalIntentId] = useState(null)
   const [bestSellerIds, setBestSellerIds] = useState([])   // top 6 product IDs (last 30 days)
   const [bestSellerCounts, setBestSellerCounts] = useState({})  // { productId: qtySold }
   const [search, setSearch] = useState('')
@@ -369,6 +378,7 @@ export default function POS() {
     setTipStaffId(null)
     setPayments([{ id: 1, method: 'cash', amount: '', cash_tendered: '' }])
     setSplitMode(false)
+    setTerminalIntentId(null)
   }
 
   // ─── Parked sales: save / resume / delete ────────────────────────────
@@ -595,8 +605,39 @@ export default function POS() {
   }, [payments])
   const changeOwed = cashTotalTendered > 0 ? (cashTotalTendered - cashTotalDue) : null
 
-  // ─── CHARGE: write sale + items + payments + inventory ───────────────
+  // ─── CHARGE: entry point ─────────────────────────────────────────────
+  // If any payment row uses stripe_terminal, route through TerminalCheckout
+  // first to collect via reader. On success it sets terminalIntentId and
+  // re-triggers via finishCharge(). Otherwise (cash/zelle/check/etc.) it
+  // calls finishCharge() directly.
   async function handleCharge() {
+    if (cart.length === 0) { setError('Cart is empty.'); return }
+    if (discountNum > 0 && !discountReason) {
+      setError('Please pick a reason for the discount.')
+      return
+    }
+    if (!paymentsBalanced) {
+      var diff = paymentsRemaining
+      if (diff > 0) setError('Payments are $' + diff.toFixed(2) + ' short of the total.')
+      else setError('Payments are $' + Math.abs(diff).toFixed(2) + ' over the total.')
+      return
+    }
+    var hasTerminal = payments.some(function (p) { return p.method === 'stripe_terminal' })
+    if (hasTerminal) {
+      if (payments.length > 1) {
+        setError('Stripe Terminal only supports single-payment mode for now. Collapse split first.')
+        return
+      }
+      setError('')
+      setShowTerminal(true)
+      return
+    }
+    // No terminal — go straight to writing the sale
+    await finishCharge()
+  }
+
+  // Called after a successful TerminalCheckout OR directly for non-terminal payments.
+  async function finishCharge() {
     if (cart.length === 0) {
       setError('Cart is empty.')
       return
@@ -645,6 +686,7 @@ export default function POS() {
         payment_method:           primaryMethod,
         payment_status:           'paid',
         status:                   'completed',
+        stripe_payment_id:        terminalIntentId || null,
         cash_drawer_session_id:   drawerSession ? drawerSession.id : null,
         note:                     note.trim() || null,
       }).select().single()
@@ -677,6 +719,10 @@ export default function POS() {
         if (p.method === 'cash' && !isNaN(tend)) {
           row.cash_tendered = tend
           row.cash_change   = Math.max(0, tend - amt)
+        }
+        // Stripe Terminal: attach the PaymentIntent id we got from the reader
+        if (p.method === 'stripe_terminal' && terminalIntentId) {
+          row.stripe_payment_id = terminalIntentId
         }
         return row
       })
@@ -1507,6 +1553,22 @@ export default function POS() {
           onCloseDrawer={closeDrawer}
         />
       )}
+
+      {/* 📟 Stripe Terminal (Phase 5) — opens when user picks Terminal + clicks Charge */}
+      <TerminalCheckout
+        open={showTerminal}
+        amountCents={Math.round(total * 100)}
+        description={selectedClient ? selectedClient.first_name + ' ' + (selectedClient.last_name || '') : 'Walk-in retail sale'}
+        metadata={selectedClient ? { client_id: selectedClient.id } : {}}
+        onSuccess={async function (piId) {
+          setTerminalIntentId(piId)
+          setShowTerminal(false)
+          // Now write the sale + sale_payments with this PI attached.
+          // Use setTimeout to ensure terminalIntentId state has propagated.
+          setTimeout(function () { finishCharge() }, 100)
+        }}
+        onCancel={function () { setShowTerminal(false) }}
+      />
     </div>
   )
 }

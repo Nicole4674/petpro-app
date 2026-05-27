@@ -58,6 +58,7 @@ import Onboarding from './pages/Onboarding'
 import Products from './pages/Products'
 import POS from './pages/POS'
 import Refunds from './pages/Refunds'
+import RetailReports from './pages/RetailReports'
 
 // ─────────────────────────────────────────────────────────────────
 // RootRedirect — smart routing at "/" based on user type.
@@ -229,6 +230,8 @@ function App() {
                     <Route path="/pos" element={gate(session, <POS />)} />
                     {/* Retail POS — refunds (Phase 3.7 Step 7) */}
                     <Route path="/refunds" element={gate(session, <Refunds />)} />
+                    {/* Retail POS — sales reports (Phase 6) */}
+                    <Route path="/retail-reports" element={gate(session, <RetailReports />)} />
                     <Route path="/flagged" element={gate(session, <FlaggedBookings />)} />
                     <Route path="/voice" element={gate(session, <VoiceMode />)} />
                     <Route path="/import" element={gate(session, <ImportClients />)} />

@@ -384,7 +384,12 @@ export default function Sidebar({ onToggle }) {
               >
                 Refunds
               </div>
-              {/* /reports comes in Phase 6 */}
+              <div
+                className={'sidebar-subitem' + (isActive('/retail-reports') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/retail-reports') }}
+              >
+                Reports
+              </div>
             </div>
           )}
         </div>
