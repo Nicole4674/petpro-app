@@ -573,8 +573,17 @@ export default function Dashboard() {
   var completedToday = todayAppts.filter(function(a) {
     return a.status === 'completed' || !!a.checked_out_at
   })
+  // "Still to come" = appointments that haven't happened YET today.
+  // Use a denylist instead of allowlist so we don't have to keep adding new
+  // statuses (unconfirmed used to be missed → the count showed 3 when it
+  // should've been 5+ because some clients never reply Y/N to text reminders).
+  // Excluded: cancelled, no-show, already done, rescheduled away, currently
+  // being served (checked-in / in-progress).
   var stillComing = todayAppts.filter(function(a) {
-    return (a.status === 'scheduled' || a.status === 'confirmed') && !a.checked_out_at
+    var doneOrGone = ['cancelled', 'no_show', 'completed', 'rescheduled', 'checked_in', 'in_progress']
+    if (doneOrGone.indexOf(a.status) >= 0) return false
+    if (a.checked_out_at) return false
+    return true
   })
   var noShows = todayAppts.filter(function(a) { return a.status === 'no_show' })
 
@@ -596,6 +605,32 @@ export default function Dashboard() {
     var tip = parseFloat(tipsByAppt[a.id] || 0)
     return sum + service + tip
   }, 0)
+
+  // ─── Revenue for the SELECTED view/date range ──────────────────────────
+  // The "todayAppts" filter above was always 'today's actual calendar date'
+  // — so Week view showed only Wed's revenue, Month showed today only, and
+  // clicking back to yesterday showed $0. Fix: sum across all loaded appts
+  // (which are already filtered by getDateRange via the fetch). Picks
+  // completed/checked-out only so this still represents real earned revenue.
+  var completedInRange = appointments.filter(function (a) {
+    return a.status === 'completed' || !!a.checked_out_at
+  })
+  var revenueInRange = completedInRange.reduce(function(sum, a) {
+    var service = (parseFloat(a.final_price) || parseFloat(a.quoted_price) || 0)
+    var tip = parseFloat(tipsByAppt[a.id] || 0)
+    return sum + service + tip
+  }, 0)
+
+  // Friendly label that matches the active view + date
+  var revenueLabel = (function () {
+    if (view === 'week') return 'Revenue This Week'
+    if (view === 'month') return 'Revenue This Month'
+    // Day view — if the selected date is today, say "Today"; otherwise show the date
+    var selectedStr = formatDateISO(currentDate)
+    if (selectedStr === todayStr) return 'Revenue Today'
+    var d = new Date(currentDate)
+    return 'Revenue ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  })()
 
   // Quick add — active pets only (memorial + archived pets filtered out of dropdowns)
   var filteredPets = pets.filter(function(p) { return p.client_id === quickForm.client_id && !p.is_memorial && !p.is_archived })
@@ -792,8 +827,8 @@ export default function Dashboard() {
         <div className="db-stat-card db-stat-gold">
           <div className="db-stat-icon">💰</div>
           <div className="db-stat-info">
-            <div className="db-stat-number">${revenueToday.toFixed(0)}</div>
-            <div className="db-stat-label">Revenue Today</div>
+            <div className="db-stat-number">${revenueInRange.toFixed(0)}</div>
+            <div className="db-stat-label">{revenueLabel}</div>
           </div>
         </div>
         {/* ─── Subscriptions quick-glance (Phase 4) ─── */}
