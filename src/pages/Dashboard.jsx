@@ -573,6 +573,9 @@ export default function Dashboard() {
     return (a.status === 'checked_in' || a.status === 'in_progress') && !a.checked_out_at
   })
   var completedToday = todayAppts.filter(function(a) {
+    // Exclude cancelled/no_show/rescheduled even if checked_out_at was
+    // stamped at payment time — those don't count as earned revenue.
+    if (a.status === 'cancelled' || a.status === 'no_show' || a.status === 'rescheduled') return false
     return a.status === 'completed' || !!a.checked_out_at
   })
   // "Still to come" = appointments that haven't happened YET today.
@@ -615,6 +618,9 @@ export default function Dashboard() {
   // (which are already filtered by getDateRange via the fetch). Picks
   // completed/checked-out only so this still represents real earned revenue.
   var completedInRange = appointments.filter(function (a) {
+    // Exclude cancelled/no_show/rescheduled even if checked_out_at was
+    // stamped at payment time — those don't count as earned revenue.
+    if (a.status === 'cancelled' || a.status === 'no_show' || a.status === 'rescheduled') return false
     return a.status === 'completed' || !!a.checked_out_at
   })
   var revenueInRange = completedInRange.reduce(function(sum, a) {
