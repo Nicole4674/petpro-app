@@ -639,6 +639,12 @@ export default function Sidebar({ onToggle }) {
                 🚀 Coming Soon
               </div>
               <div
+                className={'sidebar-subitem' + (isActive('/meet-suds') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/meet-suds') }}
+              >
+                🦦 Meet Suds
+              </div>
+              <div
                 className={'sidebar-subitem' + (isActive('/help') ? ' sidebar-subitem-active' : '')}
                 onClick={function() { goTo('/help') }}
               >

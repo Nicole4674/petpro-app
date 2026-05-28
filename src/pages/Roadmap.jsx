@@ -15,6 +15,7 @@
 // so customers see momentum.
 // ====================================================================
 
+import { Link } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 
 const ROADMAP_ITEMS = [
@@ -136,6 +137,26 @@ export default function Roadmap() {
               nicole@trypetpro.com
             </a>
           </p>
+          <div style={{ marginTop: '16px' }}>
+            <Link
+              to="/meet-suds"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '8px 14px',
+                background: 'rgba(255,255,255,0.15)',
+                color: '#fff',
+                border: '1px solid rgba(255,255,255,0.3)',
+                borderRadius: '999px',
+                fontSize: '13px',
+                fontWeight: 700,
+                textDecoration: 'none',
+              }}
+            >
+              🦦 Meet Suds, your AI teammate →
+            </Link>
+          </div>
         </div>
 
         {/* Tier sections — shipped goes first so prospects see velocity */}

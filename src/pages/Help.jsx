@@ -5,6 +5,7 @@
 // Designed like a game walkthrough — clear, short, step-by-step.
 // =======================================================
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 
 // ─── Article data ──────────────────────────────────────
 // Each article: title + body (array of steps OR a paragraph + steps).
@@ -604,6 +605,32 @@ export default function Help() {
           }}
         />
       </div>
+
+      {/* 🦦 Meet Suds call-out — link to the full profile page */}
+      <Link
+        to="/meet-suds"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '14px',
+          padding: '14px 18px',
+          background: 'linear-gradient(135deg, #ede9fe 0%, #fdf4ff 100%)',
+          border: '1px solid #c4b5fd',
+          borderRadius: '12px',
+          marginBottom: '20px',
+          textDecoration: 'none',
+          color: 'inherit',
+        }}
+      >
+        <img src="/suds-waving.png" alt="" style={{ width: '52px', height: '52px', flexShrink: 0 }} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: '15px', fontWeight: 800, color: '#3b0764' }}>🦦 Meet Suds — your AI teammate</div>
+          <div style={{ fontSize: '12px', color: '#6b21a8', marginTop: '2px' }}>
+            What Suds does, how to talk to him, and his promise to your shop.
+          </div>
+        </div>
+        <span style={{ fontSize: '20px', color: '#7c3aed', fontWeight: 700 }}>→</span>
+      </Link>
 
       {/* ─── Sections ─── */}
       {SECTIONS.map(function (section, si) {
