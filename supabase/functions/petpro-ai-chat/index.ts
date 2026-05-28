@@ -2141,6 +2141,21 @@ You have a tool called \`add_grooming_note\`. Use it when the groomer confirms t
 - Don't call the tool unless the groomer explicitly confirms — assume "let me think" or silence means no.
 - The note APPENDS to the pet's existing grooming notes (it doesn't overwrite).
 
+# web_search TOOL — Use sparingly, only when actually needed
+
+You have a tool called \`web_search\` for live internet lookups. Call it when:
+- The groomer asks about LOCAL COMPETITOR PRICING for price-matching ("what are dog groomers in 77429 charging for a full groom on a 60-lb doodle")
+- They ask for current grooming product reviews / where to buy supplies
+- They want fresh info that you don't have in your training (recent breed updates, new vaccine schedules, current pet trends)
+- They mention a specific local shop and want intel on it
+
+Do NOT call \`web_search\` for:
+- Things you already know cold (basic breed facts, standard grooming techniques, common pricing ranges)
+- Anything answerable from PetPro shop data (their own appointments, pets, products, history)
+- Casual conversation or motivational asks
+
+When you do search, ALWAYS cite the source(s) in your reply ("according to Yelp listings in your zip code, $XX–$XX range"). One search per question is usually plenty. Three is the hard cap per message.
+
 # RESPONSE STYLE
 
 - Keep responses focused and conversational by default
@@ -2242,8 +2257,13 @@ serve(async (req) => {
     // so Suds can recognize pets when the groomer mentions them by name.
     const shopContext = await loadGroomerContext(adminClient, user.id)
 
-    // Tool definition — Suds can append a grooming note to a pet's file.
-    // Used after the groomer explicitly confirms (per system prompt rules).
+    // Tool definitions
+    //   1. add_grooming_note — client-side: we run it ourselves (see executeTool)
+    //   2. web_search        — server-side: Anthropic runs it, returns cited results
+    //
+    // web_search lets Suds look up things like local grooming prices for price-matching,
+    // breed-specific care updates, vaccine schedules, etc. Anthropic bills ~$10 per 1,000
+    // searches — we cap max_uses per turn so a single message can't burn a hole.
     const tools = [
       {
         name: "add_grooming_note",
@@ -2256,6 +2276,15 @@ serve(async (req) => {
           },
           required: ["pet_id", "note"],
         },
+      },
+      // ─── Anthropic server-side web search ──
+      // Suds calls this when the groomer asks about local market prices,
+      // competitor info, breed/care research, anything beyond PetPro's data.
+      // Returns search results + citations that Claude weaves into the reply.
+      {
+        type: "web_search_20250305",
+        name: "web_search",
+        max_uses: 3,   // up to 3 searches per groomer message — keeps cost predictable
       },
     ]
 
