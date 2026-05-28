@@ -2176,6 +2176,30 @@ export default function BoardingCalendar() {
                     >
                       💰 Take Payment (${balance.toFixed(2)})
                     </button>
+                    {/* 🛒 Checkout via POS — jumps to /pos pre-loaded with this reservation.
+                        Lets the groomer use Stripe Terminal + tips + drawer for the whole bill. */}
+                    <button
+                      onClick={function () {
+                        var resId = selectedReservation.id
+                        setSelectedReservation(null)
+                        navigate('/pos?boarding=' + resId)
+                      }}
+                      style={{
+                        width: '100%',
+                        marginTop: '8px',
+                        padding: '12px',
+                        background: '#fff',
+                        color: '#7c3aed',
+                        border: '1px dashed #c4b5fd',
+                        borderRadius: '10px',
+                        fontWeight: 700,
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                      }}
+                      title="Open the POS register — Stripe Terminal, tips, splits, drawer all work there"
+                    >
+                      🛒 Checkout via POS
+                    </button>
                   </div>
                 )
               })()}

@@ -29,9 +29,10 @@
 // =============================================================================
 
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import TerminalCheckout from '../components/TerminalCheckout'
+import { loadAttached as loadAttachedRetail, deleteAttached as deleteAttachedRetail } from '../lib/attachedRetail'
 
 // ─── Category emoji map + ordered list (mirrors Products.jsx) ─────────────
 const CATEGORY_EMOJI = {
@@ -92,7 +93,18 @@ function readSavedTaxRate() {
 // =============================================================================
 export default function POS() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const searchRef = useRef(null)
+
+  // ─── Appointment / Boarding checkout mode (Phase 6 unification) ─────
+  // When opened with ?appointment=xxx or ?boarding=xxx, POS pre-loads
+  // that bill's services + attached retail and writes the payment back
+  // to the source so the appointment marks paid + checks out.
+  const apptIdParam = searchParams.get('appointment')
+  const boardingIdParam = searchParams.get('boarding')
+  const [contextLoaded, setContextLoaded] = useState(false)
+  const [contextInfo, setContextInfo] = useState(null)   // { kind, label, balance, source_id }
+  const [attachedRetailSaleId, setAttachedRetailSaleId] = useState(null)
 
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState(null)
@@ -164,6 +176,143 @@ export default function POS() {
   useEffect(function () {
     if (searchRef.current && !completedSale) searchRef.current.focus()
   }, [completedSale])
+
+  // ─── Appointment / Boarding context loader ──────────────────────────
+  // Runs once when POS opens with ?appointment=xxx or ?boarding=xxx —
+  // pulls the services + add-ons + attached retail and seeds the cart.
+  useEffect(function () {
+    if (contextLoaded) return
+    if (!apptIdParam && !boardingIdParam) { setContextLoaded(true); return }
+    if (!userId) return  // wait for auth to populate
+
+    var load = async function () {
+      try {
+        if (apptIdParam) {
+          // ─── Grooming appointment ──
+          const { data: appt, error } = await supabase
+            .from('appointments')
+            .select(`
+              id, client_id, appointment_date, discount_amount, discount_reason,
+              clients(first_name, last_name),
+              appointment_pets(
+                id, quoted_price, service_id,
+                pets(id, name),
+                services(service_name, price),
+                appointment_pet_addons(quoted_price, services(service_name, price))
+              )
+            `)
+            .eq('id', apptIdParam)
+            .eq('groomer_id', userId)
+            .maybeSingle()
+          if (error) throw error
+          if (!appt) { alert('Appointment not found.'); setContextLoaded(true); return }
+
+          // Build line items: one per pet's primary service + one per add-on
+          var newCart = []
+          var petNames = []
+          ;(appt.appointment_pets || []).forEach(function (ap) {
+            var petName = (ap.pets && ap.pets.name) || 'Pet'
+            petNames.push(petName)
+            var svcName = (ap.services && ap.services.service_name) || 'Service'
+            var primaryPrice = parseFloat(ap.quoted_price) || 0
+            newCart.push({
+              custom: true,
+              key: 'svc-' + ap.id,
+              custom_name: petName + ' · ' + svcName,
+              qty: 1,
+              unit_price: primaryPrice,
+            })
+            ;(ap.appointment_pet_addons || []).forEach(function (addon, ai) {
+              var addonName = (addon.services && addon.services.service_name) || 'Add-on'
+              var addonPrice = parseFloat(addon.quoted_price) || 0
+              newCart.push({
+                custom: true,
+                key: 'addon-' + ap.id + '-' + ai,
+                custom_name: petName + ' · ' + addonName,
+                qty: 1,
+                unit_price: addonPrice,
+              })
+            })
+          })
+
+          // Pull any attached retail items into the same cart
+          var attached = await loadAttachedRetail({ appointmentId: appt.id, groomerId: userId })
+          ;(attached.items || []).forEach(function (li) {
+            newCart.push({
+              product: li.product,
+              custom: false,
+              qty: li.qty,
+              unit_price: li.unit_price,
+            })
+          })
+          if (attached.sale) setAttachedRetailSaleId(attached.sale.id)
+
+          // Apply discount if there was one on the appointment
+          if (appt.discount_amount && parseFloat(appt.discount_amount) > 0) {
+            setDiscountAmount(String(appt.discount_amount))
+            setDiscountReason(appt.discount_reason || 'other')
+          }
+
+          setCart(newCart)
+          setClientId(appt.client_id)
+          setContextInfo({
+            kind:      'appointment',
+            source_id: appt.id,
+            label:     ((appt.clients && (appt.clients.first_name + ' ' + (appt.clients.last_name || '')).trim()) || 'Walk-in') + ' · ' + petNames.join(', '),
+          })
+        } else if (boardingIdParam) {
+          // ─── Boarding reservation ──
+          const { data: res, error } = await supabase
+            .from('boarding_reservations')
+            .select(`
+              id, client_id, total_price, start_date, end_date,
+              clients(first_name, last_name),
+              boarding_reservation_pets(pets(name))
+            `)
+            .eq('id', boardingIdParam)
+            .eq('groomer_id', userId)
+            .maybeSingle()
+          if (error) throw error
+          if (!res) { alert('Reservation not found.'); setContextLoaded(true); return }
+
+          var newCart2 = []
+          var petNames2 = (res.boarding_reservation_pets || []).map(function (rp) { return rp.pets && rp.pets.name }).filter(Boolean)
+          newCart2.push({
+            custom: true,
+            key: 'boarding-' + res.id,
+            custom_name: '🏨 Boarding · ' + (petNames2.join(', ') || 'Pet'),
+            qty: 1,
+            unit_price: parseFloat(res.total_price) || 0,
+          })
+
+          var attached2 = await loadAttachedRetail({ boardingReservationId: res.id, groomerId: userId })
+          ;(attached2.items || []).forEach(function (li) {
+            newCart2.push({
+              product: li.product,
+              custom: false,
+              qty: li.qty,
+              unit_price: li.unit_price,
+            })
+          })
+          if (attached2.sale) setAttachedRetailSaleId(attached2.sale.id)
+
+          setCart(newCart2)
+          setClientId(res.client_id)
+          setContextInfo({
+            kind:      'boarding',
+            source_id: res.id,
+            label:     ((res.clients && (res.clients.first_name + ' ' + (res.clients.last_name || '')).trim()) || 'Walk-in') + ' · ' + (petNames2.join(', ') || 'pets'),
+          })
+        }
+      } catch (err) {
+        console.warn('[pos appt loader]', err)
+        alert('Could not load appointment into POS: ' + (err.message || err))
+      } finally {
+        setContextLoaded(true)
+      }
+    }
+    load()
+  }, [userId, apptIdParam, boardingIdParam, contextLoaded])
 
   async function loadAll() {
     setLoading(true)
@@ -265,10 +414,14 @@ export default function POS() {
     return list
   }, [products, search, categoryFilter, sortBy, bestSellerCounts])
 
-  // Lookup map: { productId: qty in cart } — used for the highlight badge
+  // Lookup map: { productId: qty in cart } — used for the highlight badge.
+  // Skips custom line items (services, custom charges) which have no product.
   const cartQtyByProductId = useMemo(function () {
     var map = {}
-    cart.forEach(function (l) { map[l.product.id] = l.qty })
+    cart.forEach(function (l) {
+      if (l.custom || !l.product) return
+      map[l.product.id] = l.qty
+    })
     return map
   }, [cart])
 
@@ -750,7 +903,49 @@ export default function POS() {
         if (e4) throw e4
       }
 
-      // 5) Show receipt screen
+      // 5) Appointment / Boarding writeback (Phase 6 unification) ────────
+      // If this POS sale was opened from an appointment or boarding
+      // reservation, also write a payments row + mark it checked out,
+      // and delete the now-redundant parked retail sale.
+      if (contextInfo && contextInfo.kind === 'appointment') {
+        try {
+          await supabase.from('payments').insert({
+            appointment_id: contextInfo.source_id,
+            client_id:      clientId,
+            groomer_id:     userId,
+            amount:         total - tipNum,   // services + retail (tip below)
+            tip_amount:     tipNum,
+            method:         primaryMethod,
+            notes:          'Paid via POS (sale #' + saleRow.id.slice(0, 8) + ')',
+          })
+          await supabase.from('appointments').update({
+            checked_out_at: new Date().toISOString(),
+            checked_out_by: userId,
+          }).eq('id', contextInfo.source_id)
+          // Link the sale to the appointment too
+          await supabase.from('sales').update({ appointment_id: contextInfo.source_id }).eq('id', saleRow.id)
+        } catch (err) { console.warn('[pos appt writeback]', err) }
+      } else if (contextInfo && contextInfo.kind === 'boarding') {
+        try {
+          await supabase.from('payments').insert({
+            boarding_reservation_id: contextInfo.source_id,
+            client_id:               clientId,
+            groomer_id:              userId,
+            amount:                  total - tipNum,
+            tip_amount:              tipNum,
+            method:                  primaryMethod,
+            notes:                   'Paid via POS (sale #' + saleRow.id.slice(0, 8) + ')',
+          })
+          await supabase.from('sales').update({ boarding_reservation_id: contextInfo.source_id }).eq('id', saleRow.id)
+        } catch (err) { console.warn('[pos boarding writeback]', err) }
+      }
+      // Clean up the parked retail sale — its items are already in the new completed sale
+      if (attachedRetailSaleId) {
+        try { await deleteAttachedRetail(attachedRetailSaleId) } catch (err) { console.warn('[pos parked cleanup]', err) }
+        setAttachedRetailSaleId(null)
+      }
+
+      // 6) Show receipt screen
       setCompletedSale({
         sale:      saleRow,
         items:     cart.slice(),
@@ -760,6 +955,9 @@ export default function POS() {
         tipStaff:  tipStaffId ? staff.find(function (s) { return s.id === tipStaffId }) : null,
       })
       clearCart()
+      // Clear context so the receipt's "New Sale →" returns a fresh POS, not a re-loaded appointment
+      setContextInfo(null)
+      setSearchParams({})
       loadAll()
     } catch (err) {
       setError(err.message || 'Could not complete sale.')
@@ -803,6 +1001,29 @@ export default function POS() {
       {error && (
         <div style={{ padding: '12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#991b1b', fontSize: '13px', marginBottom: '12px' }}>
           {error}
+        </div>
+      )}
+
+      {/* 🛒 Appointment / Boarding checkout context banner (Phase 6 unification) */}
+      {contextInfo && (
+        <div style={{ marginBottom: '12px', padding: '12px 16px', background: '#ede9fe', border: '1px solid #c4b5fd', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+          <div style={{ fontSize: '13px', color: '#3b0764' }}>
+            <strong>{contextInfo.kind === 'appointment' ? '✂️ Grooming Checkout' : '🏨 Boarding Checkout'}:</strong> {contextInfo.label}
+            <div style={{ fontSize: '11px', color: '#7c3aed', marginTop: '2px' }}>
+              💡 Charging will mark the {contextInfo.kind} as paid + checked out.
+            </div>
+          </div>
+          <button
+            onClick={function () {
+              if (cart.length > 0 && !window.confirm('Cancel this checkout? Your cart will clear.')) return
+              clearCart()
+              setContextInfo(null)
+              setSearchParams({})
+            }}
+            style={{ padding: '6px 12px', background: '#fff', color: '#7c3aed', border: '1px solid #c4b5fd', borderRadius: '8px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+          >
+            ✕ Cancel
+          </button>
         </div>
       )}
 
@@ -1864,9 +2085,15 @@ function ReceiptScreen({ completed, shopSettings, onDone }) {
     if (!phoneOverride || !phoneOverride.trim()) { setShowSmsField(true); return }
     setDelivering(true); setDeliverResult(null)
     try {
-      var body = 'Receipt from ' + shopName + ': $' + (parseFloat(sale.total) || 0).toFixed(2) + ' on ' + new Date(sale.created_at).toLocaleDateString() + '. Thanks!'
+      var { data: { user } } = await supabase.auth.getUser()
+      var msgText = 'Receipt from ' + shopName + ': $' + (parseFloat(sale.total) || 0).toFixed(2) + ' on ' + new Date(sale.created_at).toLocaleDateString() + '. Thanks!'
       const { data, error } = await supabase.functions.invoke('send-sms', {
-        body: { to: phoneOverride.trim(), body: body, kind: 'receipt' },
+        body: {
+          to:          phoneOverride.trim(),
+          message:     msgText,
+          groomer_id:  user && user.id,
+          sms_type:    'receipt',
+        },
       })
       if (error) throw error
       if (data && data.error) throw new Error(data.error)

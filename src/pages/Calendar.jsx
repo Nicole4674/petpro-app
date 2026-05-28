@@ -4859,6 +4859,31 @@ export default function Calendar() {
                                         >
                                             {checkingOut ? 'Checking out...' : '→ Check Out'}
                                         </button>
+                                        {/* 🛒 Checkout via POS — Phase 6 unification.
+                                            Jumps to /pos with this appointment loaded so the groomer
+                                            can use Stripe Terminal + tips + drawer for the whole bill. */}
+                                        <button
+                                            onClick={function () {
+                                                var apptId = selectedAppt.id
+                                                setSelectedAppt(null)
+                                                routerNavigate('/pos?appointment=' + apptId)
+                                            }}
+                                            disabled={checkingOut}
+                                            style={{
+                                                marginLeft: '8px',
+                                                padding: '8px 14px',
+                                                background: '#7c3aed',
+                                                color: '#fff',
+                                                border: 'none',
+                                                borderRadius: '8px',
+                                                fontWeight: 700,
+                                                fontSize: '13px',
+                                                cursor: 'pointer',
+                                            }}
+                                            title="Use the POS register — Stripe Terminal, tips, splits, drawer all work here"
+                                        >
+                                            🛒 Checkout via POS
+                                        </button>
                                     </>
                                 )}
                                 {selectedAppt.checked_in_at && selectedAppt.checked_out_at && (
