@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { formatPhone, formatPhoneOnInput } from '../lib/phone'
 import { mapsUrl, telUrl } from '../lib/maps'
 import AddressInput from '../components/AddressInput'
+import GroomingNotesText from '../components/GroomingNotesText'
 
 const TABS = [
   { key: 'overview', label: '🐾 Overview' },
@@ -1454,7 +1455,7 @@ export default function ClientDetail() {
                         </div>
 
                         {pet.grooming_notes && (
-                          <div className="cp-pet-groom-notes">✂️ {pet.grooming_notes}</div>
+                          <div className="cp-pet-groom-notes">✂️ <GroomingNotesText text={pet.grooming_notes} compact={true} /></div>
                         )}
 
                         {/* Book Again button for this specific pet */}
@@ -2536,7 +2537,7 @@ export default function ClientDetail() {
                   <div className="cp-groom-imported-title">📌 From Pet Profiles</div>
                   {pets.filter(p => p.grooming_notes).map(pet => (
                     <div key={pet.id} className="cp-groom-imported-item">
-                      <strong>{pet.name}:</strong> {pet.grooming_notes}
+                      <strong>{pet.name}:</strong> <GroomingNotesText text={pet.grooming_notes} />
                     </div>
                   ))}
                 </div>

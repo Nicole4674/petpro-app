@@ -47,6 +47,11 @@ export default function BoardingCalendar() {
   const [retailItems, setRetailItems] = useState([])
   const [attachedSaleId, setAttachedSaleId] = useState(null)
   const [showAddRetail, setShowAddRetail] = useState(false)
+  // ─── Per-pet split payment (mom paying Bella, daughter paying Max) ──
+  // Same model as grooming — but boarding has ONE total_price, so amounts
+  // default to equal split (total / N pets). Groomer can override.
+  const [splitByPet, setSplitByPet] = useState(false)
+  const [petPayments, setPetPayments] = useState({})  // keyed by pet_id
   // ─── Saved-card-on-file Stripe charging ─────────────────────────────────
   // When method=card we load the client's saved cards and charge the default
   // through stripe-groomer-charge-boarding. If the client has no card on file,
@@ -802,8 +807,96 @@ export default function BoardingCalendar() {
   //     which writes the payment row + fires receipt email.
   //   • Manual path: any other method (cash/zelle/venmo/other) OR card
   //     when client has no saved card → just insert a payments row directly.
+  // ─── Per-pet split charge handler (boarding) ─────────────────────────
+  // Writes one payment row per pet — same model as grooming. Tip stays at
+  // the bill level. After all rows save, marks reservation paid + checks
+  // for retail items and converts those too.
+  async function handleRecordBoardingPaymentSplitByPet() {
+    if (!payingRes) return
+    var entries = Object.entries(petPayments)
+    if (entries.length === 0) return
+    // Validate each row
+    var rows = []
+    for (var i = 0; i < entries.length; i++) {
+      var petId = entries[i][0]
+      var pp = entries[i][1]
+      if (!pp.method) { alert('Pick a payment method for every pet.'); return }
+      var amt = parseFloat(pp.amount)
+      if (isNaN(amt) || amt < 0) { alert('Enter a valid amount for every pet.'); return }
+      rows.push({ petId: petId, pp: pp, amt: amt })
+    }
+    setRecordingPayment(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      // One payment row per pet
+      for (var j = 0; j < rows.length; j++) {
+        var r = rows[j]
+        if (r.amt === 0) continue
+        var noteParts = []
+        if (r.pp.payerName && r.pp.payerName.trim()) noteParts.push('Paid by ' + r.pp.payerName.trim())
+        if (r.pp.notes && r.pp.notes.trim()) noteParts.push(r.pp.notes.trim())
+        const { error } = await supabase.from('payments').insert({
+          boarding_reservation_id: payingRes.id,
+          client_id:               payingRes.client_id,
+          groomer_id:              user.id,
+          pet_id:                  r.petId,
+          payer_name:              r.pp.payerName.trim() || null,
+          amount:                  r.amt,
+          tip_amount:              0,
+          method:                  r.pp.method,
+          notes:                   noteParts.join(' · ') || null,
+        })
+        if (error) { alert('Error recording payment for ' + r.pp.petName + ': ' + error.message); setRecordingPayment(false); return }
+      }
+      // Whole-bill tip
+      var tip = parseFloat(payTip) || 0
+      if (tip > 0) {
+        const { error: tErr } = await supabase.from('payments').insert({
+          boarding_reservation_id: payingRes.id,
+          client_id:               payingRes.client_id,
+          groomer_id:              user.id,
+          pet_id:                  null,
+          payer_name:              null,
+          amount:                  0,
+          tip_amount:              tip,
+          method:                  rows[0].pp.method,
+          notes:                   'Tip',
+        })
+        if (tErr) { alert('Tip insert failed: ' + tErr.message); setRecordingPayment(false); return }
+      }
+      // Convert attached retail like the single-payment path does
+      if (attachedSaleId) {
+        try {
+          await markRetailCompleted({
+            saleId:        attachedSaleId,
+            paymentMethod: 'attached_to_boarding',
+            userId:        user.id,
+          })
+          setAttachedSaleId(null)
+          setRetailItems([])
+        } catch (err) { console.warn('[retail-complete boarding split] failed:', err) }
+      }
+      await openKennelCard(selectedReservation)
+      setPayingRes(null)
+      setPayAmount('')
+      setPayMethod('')
+      setPayTip('')
+      setPayNotes('')
+      setRetailItems([])
+      setSplitByPet(false)
+      setPetPayments({})
+      setGroomerSavedCards([])
+      setSelectedSavedCardId(null)
+    } catch (err) {
+      alert('Error split-charging boarding: ' + (err.message || err))
+    } finally {
+      setRecordingPayment(false)
+    }
+  }
+
   async function handleRecordBoardingPayment() {
     if (!payingRes) return
+    if (splitByPet) { return handleRecordBoardingPaymentSplitByPet() }
     if (!payMethod) {
       alert('Pick a payment method (Cash, Zelle, Venmo, Card, or Other).')
       return
@@ -902,6 +995,8 @@ export default function BoardingCalendar() {
       setPayTip('')
       setPayNotes('')
       setRetailItems([])
+      setSplitByPet(false)
+      setPetPayments({})
       setGroomerSavedCards([])
       setSelectedSavedCardId(null)
     } catch (err) {
@@ -3564,7 +3659,148 @@ export default function BoardingCalendar() {
                 {retailItems.length > 0 ? '🛒 Edit Retail (' + retailItems.length + ')' : '🛒 + Add Retail at Pickup'}
               </button>
 
-              {/* Method buttons */}
+              {/* 💵 Split by Pet — only when reservation has 2+ pets */}
+              {payingRes.boarding_reservation_pets && payingRes.boarding_reservation_pets.length > 1 && (
+                <button
+                  type="button"
+                  onClick={function () {
+                    if (splitByPet) {
+                      setSplitByPet(false)
+                      setPetPayments({})
+                    } else {
+                      // Pre-fill equal split of the BALANCE (not the total) across pets
+                      var petsList = payingRes.boarding_reservation_pets || []
+                      var perPet = petsList.length > 0 ? (balance / petsList.length) : 0
+                      var seed = {}
+                      petsList.forEach(function (rp) {
+                        var pId = rp.pet_id || (rp.pets && rp.pets.id)
+                        if (!pId) return
+                        seed[pId] = {
+                          method:    'cash',
+                          amount:    perPet > 0 ? perPet.toFixed(2) : '',
+                          payerName: '',
+                          notes:     '',
+                          petName:   (rp.pets && rp.pets.name) || 'Pet',
+                        }
+                      })
+                      setPetPayments(seed)
+                      setSplitByPet(true)
+                    }
+                  }}
+                  disabled={recordingPayment}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    background: splitByPet ? '#ede9fe' : '#fff',
+                    color: '#7c3aed',
+                    border: '1px dashed #c4b5fd',
+                    borderRadius: '8px',
+                    fontWeight: 700,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    marginBottom: '14px',
+                  }}
+                  title="Different people paying for different dogs? Split the bill."
+                >
+                  {splitByPet ? '✕ Cancel Split — back to single payment' : '💵 Split by Pet (mom pays Bella, daughter pays Max)'}
+                </button>
+              )}
+
+              {/* ──── PER-PET SPLIT FORMS (boarding) ──── */}
+              {splitByPet ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '14px' }}>
+                  {Object.entries(petPayments).map(function (entry) {
+                    var petId = entry[0]
+                    var row = entry[1]
+                    function updateRow(field, value) {
+                      setPetPayments(function (prev) {
+                        var n = Object.assign({}, prev)
+                        n[petId] = Object.assign({}, prev[petId] || {}, { [field]: value })
+                        return n
+                      })
+                    }
+                    return (
+                      <div key={petId} style={{ padding: '12px', background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '10px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <div style={{ fontSize: '14px', fontWeight: 800, color: '#3b0764' }}>🐾 {row.petName}</div>
+                          <div style={{ fontSize: '11px', color: '#7c3aed' }}>Pet bill</div>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '6px', marginBottom: '6px' }}>
+                          <select
+                            value={row.method}
+                            onChange={function (e) { updateRow('method', e.target.value) }}
+                            disabled={recordingPayment}
+                            style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', background: '#fff' }}
+                          >
+                            <option value="cash">💵 Cash</option>
+                            <option value="zelle">⚡ Zelle</option>
+                            <option value="venmo">🔵 Venmo</option>
+                            <option value="check">📝 Check</option>
+                            <option value="card">💳 Card (manual)</option>
+                            <option value="other">📦 Other</option>
+                          </select>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <span style={{ fontSize: '12px', color: '#6b7280' }}>$</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={row.amount}
+                              onChange={function (e) { updateRow('amount', e.target.value) }}
+                              onFocus={function (e) { e.target.select() }}
+                              disabled={recordingPayment}
+                              style={{ flex: 1, padding: '8px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', textAlign: 'right' }}
+                            />
+                          </div>
+                        </div>
+                        <input
+                          type="text"
+                          value={row.payerName}
+                          onChange={function (e) { updateRow('payerName', e.target.value) }}
+                          placeholder="Paid by (e.g. Mom, Daughter Lisa)"
+                          disabled={recordingPayment}
+                          style={{ width: '100%', padding: '8px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', marginBottom: '6px' }}
+                        />
+                        <input
+                          type="text"
+                          value={row.notes}
+                          onChange={function (e) { updateRow('notes', e.target.value) }}
+                          placeholder="Note (optional)"
+                          disabled={recordingPayment}
+                          style={{ width: '100%', padding: '8px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                    )
+                  })}
+                  {/* Sum check */}
+                  {(function () {
+                    var entered = Object.values(petPayments).reduce(function (s, p) {
+                      var n = parseFloat(p.amount)
+                      return s + (isNaN(n) ? 0 : n)
+                    }, 0)
+                    var diff = balance - entered
+                    var balanced = Math.abs(diff) < 0.01
+                    return (
+                      <div style={{
+                        padding: '10px',
+                        background: balanced ? '#ecfdf5' : '#fef3c7',
+                        border: '1px solid ' + (balanced ? '#bbf7d0' : '#fde047'),
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        color: balanced ? '#065f46' : '#854d0e',
+                        fontWeight: 700,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                      }}>
+                        <span>Total entered: ${entered.toFixed(2)}</span>
+                        <span>{balanced ? '✓ Matches balance' : (diff > 0 ? 'Need $' + diff.toFixed(2) + ' more' : '$' + Math.abs(diff).toFixed(2) + ' over')}</span>
+                      </div>
+                    )
+                  })()}
+                </div>
+              ) : (
+              <>
+              {/* Method buttons (single-payment mode) */}
               <div style={{ marginBottom: '14px' }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                   Method <span style={{ color: '#dc2626' }}>*</span>
@@ -3674,6 +3910,8 @@ export default function BoardingCalendar() {
                   placeholder="Anything to remember about this payment?"
                   style={{ width: '100%', padding: '10px 12px', fontSize: '14px', border: '1px solid #d1d5db', borderRadius: '8px', boxSizing: 'border-box', minHeight: '60px', resize: 'vertical', fontFamily: 'inherit' }}/>
               </div>
+              </>
+              )}{/* end of splitByPet ternary */}
 
               {/* Actions */}
               <div style={{ display: 'flex', gap: '8px' }}>

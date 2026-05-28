@@ -11,7 +11,7 @@ import AIUsageWidget from '../components/AIUsageWidget'
 import SMSBalanceWidget from '../components/SMSBalanceWidget'
 import { formatPhoneOnInput } from '../lib/phone'
 import AddressInput from '../components/AddressInput'
-import { DEFAULT_SMS_TEMPLATES, SMS_TEMPLATE_LABELS } from '../lib/smsTemplates'
+import { DEFAULT_SMS_TEMPLATES, SMS_TEMPLATE_LABELS, renderSmsTemplate } from '../lib/smsTemplates'
 
 export default function ShopSettings() {
   var navigate = useNavigate()
@@ -42,6 +42,9 @@ export default function ShopSettings() {
   var [testSmsBody, setTestSmsBody] = useState("Test from PetPro 🦦 — your SMS setup is working!")
   var [testSmsSending, setTestSmsSending] = useState(false)
   var [testSmsResult, setTestSmsResult] = useState(null)  // { ok, text } | null
+  // ─── Test Reminder state (uses the actual reminder template, not plain text) ──
+  var [testReminderSending, setTestReminderSending] = useState(false)
+  var [testReminderResult, setTestReminderResult] = useState(null)
 
   async function sendTestSMS() {
     setTestSmsResult(null)
@@ -76,6 +79,69 @@ export default function ShopSettings() {
       setTestSmsResult({ ok: false, text: 'Send failed: ' + (e.message || 'unknown error') })
     } finally {
       setTestSmsSending(false)
+    }
+  }
+
+  // ─── Send Test Reminder ──────────────────────────────────────────────
+  // Uses the ACTUAL reminder template (with merge tags filled in from sample
+  // data) so the groomer sees exactly what their customers see — including
+  // their custom template edits.
+  async function sendTestReminder() {
+    setTestReminderResult(null)
+    if (!testSmsTo || !testSmsTo.trim()) {
+      setTestReminderResult({ ok: false, text: 'Enter a phone number above first.' })
+      return
+    }
+    setTestReminderSending(true)
+    try {
+      var { data: { user } } = await supabase.auth.getUser()
+      if (!user) { setTestReminderResult({ ok: false, text: 'You must be signed in.' }); return }
+
+      // Pull this shop's templates + name so we render the real reminder
+      var { data: settings } = await supabase
+        .from('shop_settings')
+        .select('shop_name, sms_templates')
+        .eq('groomer_id', user.id)
+        .maybeSingle()
+
+      var customTemplates = (settings && settings.sms_templates) || {}
+      var reminderTemplate = customTemplates.reminder || DEFAULT_SMS_TEMPLATES.reminder
+
+      // Sample values — what a real reminder would look like for "Bella"
+      var tomorrow = new Date()
+      tomorrow.setDate(tomorrow.getDate() + 1)
+      var dateStr = tomorrow.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+      var rendered = renderSmsTemplate(reminderTemplate, {
+        client_first_name: 'Nicole',
+        client_last_name:  'Treadwell',
+        pet_name:          'Bella',
+        service_name:      'Full Groom',
+        date:              dateStr,
+        time:              '10:00 AM',
+        shop_name:         (settings && settings.shop_name) || 'Your Shop',
+        phone:             '',
+        minutes:           '',
+      })
+
+      var { data, error } = await supabase.functions.invoke('send-sms', {
+        body: {
+          to: testSmsTo.trim(),
+          message: '[TEST REMINDER] ' + rendered,
+          groomer_id: user.id,
+          sms_type: 'test',
+        },
+      })
+      if (error) {
+        setTestReminderResult({ ok: false, text: 'Send failed: ' + error.message })
+      } else if (data && data.success) {
+        setTestReminderResult({ ok: true, text: '✅ Reminder sent! Check your phone — preview of "' + rendered.slice(0, 60) + '…"' })
+      } else {
+        setTestReminderResult({ ok: false, text: (data && data.error) || 'Unknown error' })
+      }
+    } catch (e) {
+      setTestReminderResult({ ok: false, text: 'Send failed: ' + (e.message || 'unknown error') })
+    } finally {
+      setTestReminderSending(false)
     }
   }
 
@@ -1118,22 +1184,55 @@ export default function ShopSettings() {
             />
           </div>
         </div>
-        <button
-          onClick={sendTestSMS}
-          disabled={testSmsSending}
-          style={{
-            background: testSmsSending ? '#9ca3af' : '#7c3aed',
-            color: '#fff',
-            border: 'none',
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            onClick={sendTestSMS}
+            disabled={testSmsSending}
+            style={{
+              background: testSmsSending ? '#9ca3af' : '#7c3aed',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '10px 20px',
+              fontSize: '14px',
+              fontWeight: 600,
+              cursor: testSmsSending ? 'wait' : 'pointer',
+            }}
+          >
+            {testSmsSending ? 'Sending…' : '📤 Send Test SMS'}
+          </button>
+          <button
+            onClick={sendTestReminder}
+            disabled={testReminderSending}
+            style={{
+              background: '#fff',
+              color: '#7c3aed',
+              border: '1px solid #c4b5fd',
+              borderRadius: '8px',
+              padding: '10px 20px',
+              fontSize: '14px',
+              fontWeight: 600,
+              cursor: testReminderSending ? 'wait' : 'pointer',
+            }}
+            title="Sends your actual reminder template with sample data (Bella · Full Groom · tomorrow 10am) — so you see exactly what clients see"
+          >
+            {testReminderSending ? 'Sending…' : '📬 Send Test Reminder'}
+          </button>
+        </div>
+        {testReminderResult && (
+          <div style={{
+            marginTop: '12px',
+            padding: '10px 14px',
+            background: testReminderResult.ok ? '#ecfdf5' : '#fef2f2',
+            border: '1px solid ' + (testReminderResult.ok ? '#a7f3d0' : '#fecaca'),
             borderRadius: '8px',
-            padding: '10px 20px',
-            fontSize: '14px',
-            fontWeight: 600,
-            cursor: testSmsSending ? 'wait' : 'pointer',
-          }}
-        >
-          {testSmsSending ? 'Sending…' : '📤 Send Test SMS'}
-        </button>
+            fontSize: '13px',
+            color: testReminderResult.ok ? '#065f46' : '#991b1b',
+            lineHeight: 1.5,
+          }}>
+            {testReminderResult.text}
+          </div>
+        )}
         {testSmsResult && (
           <div style={{
             marginTop: '12px',
