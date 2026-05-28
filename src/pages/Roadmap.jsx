@@ -40,6 +40,15 @@ const ROADMAP_ITEMS = [
   { tier: 'shipped', emoji: '🔄', title: 'Smart Recurring Reschedule',
     description: 'Change a Tuesday client to a different Tuesday and ALL future appointments auto-shift. Change the frequency and the whole series re-spaces. Zero manual recalculation.',
     badge: null },
+  { tier: 'shipped', emoji: '🛒', title: 'Full Retail POS',
+    description: 'Product catalog, barcode scan, inventory tracking, tips, split payment, cash drawer reconciliation, refunds, Stripe Terminal tap-to-pay, sales reports, low-stock alerts. Sell shampoos + treats + food alongside grooming — one bill, one charge.',
+    badge: null },
+  { tier: 'shipped', emoji: '👥', title: 'Per-Pet Split Payment',
+    description: 'Mom pays for Bella, daughter pays for Max. Different cards, different payers, same multi-pet appointment. Works for grooming + boarding.',
+    badge: null },
+  { tier: 'shipped', emoji: '🧾', title: 'Checkout via POS for Appointments',
+    description: 'Take any grooming or boarding payment through the full POS register — Stripe Terminal, tips with % buttons, splits, drawer. Services auto-load as line items.',
+    badge: null },
 
   // 🛠️ In Development — Tier 1 (highest priority, ships first this year)
   { tier: 'in-dev', emoji: '📸', title: 'Before & After Photos',

@@ -59,6 +59,7 @@ import Products from './pages/Products'
 import POS from './pages/POS'
 import Refunds from './pages/Refunds'
 import RetailReports from './pages/RetailReports'
+import MeetSuds from './pages/MeetSuds'
 
 // ─────────────────────────────────────────────────────────────────
 // RootRedirect — smart routing at "/" based on user type.
@@ -126,7 +127,7 @@ function AppLayout({ children }) {
 
     // Don't show sidebar on login/signup or public legal pages
     var isAuthPage = location.pathname === '/login' || location.pathname === '/signup'
-    var isPublicPage = location.pathname === '/privacy' || location.pathname === '/terms' || location.pathname === '/portal/signup' || location.pathname === '/portal/login' || location.pathname === '/portal/confirmed' || location.pathname === '/plans' || location.pathname === '/kiosk' || location.pathname === '/staff/login' || location.pathname === '/staff/me'
+    var isPublicPage = location.pathname === '/privacy' || location.pathname === '/terms' || location.pathname === '/portal/signup' || location.pathname === '/portal/login' || location.pathname === '/portal/confirmed' || location.pathname === '/plans' || location.pathname === '/kiosk' || location.pathname === '/staff/login' || location.pathname === '/staff/me' || location.pathname === '/meet-suds'
     var isPortalPage = location.pathname.indexOf('/portal') === 0
     if (isAuthPage || isPublicPage) {
         return <>{children}</>
@@ -232,6 +233,8 @@ function App() {
                     <Route path="/refunds" element={gate(session, <Refunds />)} />
                     {/* Retail POS — sales reports (Phase 6) */}
                     <Route path="/retail-reports" element={gate(session, <RetailReports />)} />
+                    {/* Meet Suds — public profile page for the AI mascot */}
+                    <Route path="/meet-suds" element={<MeetSuds />} />
                     <Route path="/flagged" element={gate(session, <FlaggedBookings />)} />
                     <Route path="/voice" element={gate(session, <VoiceMode />)} />
                     <Route path="/import" element={gate(session, <ImportClients />)} />

@@ -127,6 +127,53 @@ Instead of the generic Mailchimp slop:
 
 ---
 
+## 🎯 ACQUISITION-FOCUSED FEATURES (the moat — added after competitive research)
+
+Every grooming SaaS (MoeGo, Gingr, Pawfinity, Groomsoft) ships only **retention**
+marketing — reminders, win-backs, review boosters. **Nobody is actually making
+shops BUSY** with new client acquisition. Booksy Boost is the only true
+acquisition tool but it taxes 30% of first visit through their marketplace.
+
+PetPro's wide-open lane: own-channel acquisition powered by Suds' data.
+
+### 🌟 GBP Auto-Post Engine (top priority)
+Suds writes + publishes a weekly Google Business Profile post (photo + breed-aware
+caption). Direct local-SEO compounding. **Nobody in the grooming vertical has this.**
+Requires: Google My Business API + OAuth setup per shop.
+
+### 📸 "Just-Groomed" Social Card
+Appointment marked complete → Suds drafts an IG/FB post with pet name + breed:
+*"Bailey the Goldendoodle got the lion cut today! 🦁"* One-tap publish.
+Beats reviews-only tools by seeding NEW client discovery on social.
+
+### 🔗 Performance-Priced Referral Engine
+Steal Booksy Boost's psychology, lose the marketplace tax. Reward only fires
+when a referred client COMPLETES first appointment. Suds personalizes the
+share message per client/pet ("Refer a friend, both get $15 — share Bailey's
+makeover!"). Lives in the client portal.
+
+### ⚡ Smart Spot-Fill
+Cancellation at 2pm → Suds texts the 5 clients most likely to accept (based on
+past flexibility + breed fit for remaining time + last-visit recency).
+Mindbody ships generic spot-fill; Suds' version is breed-aware.
+
+### 🏘️ Nextdoor / Local-Group Post Generator
+On-demand drafts for the specific neighborhood, in the right tone. ZERO
+competitors ship this. Nextdoor is the channel that actually fills a NEW
+groomer's chair.
+
+### Why these win
+- **MoeGo Marketing** = retention engine wrapped in a funnel dashboard
+- **Booksy Boost** = pay-30%-tax acquisition marketplace
+- **PetPro Otter Marketing Suite** = AI-written, breed-aware, own-channel
+  acquisition + retention — paid via credits, no per-SMS gouging
+
+### Pricing — DO NOT copy MoeGo
+MoeGo's #1 review complaint is SMS metering. Bundle marketing into existing
+tiers, monetize via the existing credits system (already planned). Heavy users
+self-fund via top-ups. Light users get a "free taste."
+
+
 ## Recommended Build Order
 
 ### Phase A — "Otter starts writing" (1 weekend)
