@@ -94,7 +94,7 @@ serve(async (req: Request) => {
     // 5. Look up the appointment + verify it belongs to this groomer
     const { data: appointment, error: apptErr } = await supabase
       .from('appointments')
-      .select('id, client_id, groomer_id, service_id, status')
+      .select('id, client_id, groomer_id, service_id, status, quoted_price, final_price')
       .eq('id', appointmentId)
       .maybeSingle()
 
@@ -119,32 +119,45 @@ serve(async (req: Request) => {
       return jsonError('Client has no card on file — ask them to add one in their portal', 400)
     }
 
-    // 7. Compute total — fallback chain (same as portal flow):
-    //    a. Sum of service prices across appointment_pets (multi-pet)
-    //    b. Legacy single service.price
+    // 7. Compute total — must match the price the groomer/client actually
+    //    see, which prefers the per-booking `quoted_price` (custom/discounted
+    //    price) over the catalog `services.price`. Order:
+    //    a. Multi-pet: sum each pet's quoted_price (fallback to catalog price)
+    //    b. Legacy single appt: appointment.final_price / quoted_price
+    //    c. Last resort: catalog services.price
     let totalPrice = 0
 
     const { data: apptPets } = await supabase
       .from('appointment_pets')
-      .select('service_id')
+      .select('service_id, quoted_price')
       .eq('appointment_id', appointmentId)
 
     if (apptPets && apptPets.length > 0) {
       const serviceIds = apptPets.map(ap => ap.service_id).filter(Boolean)
+      let petServices: any[] = []
       if (serviceIds.length > 0) {
-        const { data: petServices } = await supabase
+        const { data } = await supabase
           .from('services')
           .select('id, price')
           .in('id', serviceIds)
-        if (petServices && petServices.length > 0) {
-          totalPrice = apptPets.reduce((sum: number, ap: any) => {
-            const svc = petServices.find(s => s.id === ap.service_id)
-            return sum + parseFloat((svc && svc.price) || 0)
-          }, 0)
-        }
+        petServices = data || []
       }
+      totalPrice = apptPets.reduce((sum: number, ap: any) => {
+        // Prefer the groomer's quoted_price; fall back to catalog price
+        let p = parseFloat(ap.quoted_price || 0)
+        if (!p) {
+          const svc = petServices.find(s => s.id === ap.service_id)
+          p = parseFloat((svc && svc.price) || 0)
+        }
+        return sum + p
+      }, 0)
     }
 
+    // Fallback: legacy single-service appointment. Prefer the appointment's
+    // own final_price / quoted_price (what was actually booked) over catalog.
+    if (!totalPrice) {
+      totalPrice = parseFloat(appointment.final_price || appointment.quoted_price || 0)
+    }
     if (!totalPrice && appointment.service_id) {
       const { data: svc } = await supabase
         .from('services')

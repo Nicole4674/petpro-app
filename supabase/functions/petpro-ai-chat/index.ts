@@ -32,7 +32,7 @@
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
-import Anthropic from "https://esm.sh/@anthropic-ai/sdk@0.30.0"
+import Anthropic from "https://esm.sh/@anthropic-ai/sdk@0.40.1"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -2298,7 +2298,7 @@ serve(async (req) => {
     // Tool-use loop — keep going until the model returns text only.
     // Cap iterations to prevent runaway loops (max 3 = enough for ~3 notes).
     let apiResponse = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 2048,
       system: sharedSystem,
       tools,
@@ -2325,7 +2325,7 @@ serve(async (req) => {
       messages.push({ role: "user", content: toolResults })
 
       apiResponse = await anthropic.messages.create({
-        model: "claude-sonnet-4-6",
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 2048,
         system: sharedSystem,
         tools,

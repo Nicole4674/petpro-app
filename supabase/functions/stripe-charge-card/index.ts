@@ -81,7 +81,7 @@ serve(async (req: Request) => {
     //    (Phase 5d auto-confirm flow).
     const { data: appointment, error: apptErr } = await supabase
       .from('appointments')
-      .select('id, client_id, groomer_id, service_id, status')
+      .select('id, client_id, groomer_id, service_id, status, quoted_price, final_price')
       .eq('id', appointmentId)
       .maybeSingle()
 
@@ -92,34 +92,47 @@ serve(async (req: Request) => {
     if (!appointment) return jsonError('Appointment not found', 404)
     if (appointment.client_id !== client.id) return jsonError('This appointment does not belong to you', 403)
 
-    // 6. Compute total — fallback chain:
-    //    a. Sum of service prices across appointment_pets (multi-pet)
-    //    b. Legacy single service.price
+    // 6. Compute total — this MUST match what the client portal shows as the
+    //    amount due, or we'd charge a different number than the client agreed
+    //    to. The portal prefers the groomer's per-booking `quoted_price` (their
+    //    custom/discounted price) over the catalog `services.price`. Order:
+    //    a. Multi-pet: sum each pet's quoted_price (fallback to catalog price)
+    //    b. Legacy single appt: appointment.final_price / quoted_price
+    //    c. Last resort: catalog services.price
     let totalPrice = 0
 
     // Try multi-pet bookings first
     const { data: apptPets } = await supabase
       .from('appointment_pets')
-      .select('service_id')
+      .select('service_id, quoted_price')
       .eq('appointment_id', appointmentId)
 
     if (apptPets && apptPets.length > 0) {
       const serviceIds = apptPets.map(ap => ap.service_id).filter(Boolean)
+      let petServices: any[] = []
       if (serviceIds.length > 0) {
-        const { data: petServices } = await supabase
+        const { data } = await supabase
           .from('services')
           .select('id, price')
           .in('id', serviceIds)
-        if (petServices && petServices.length > 0) {
-          totalPrice = apptPets.reduce((sum: number, ap: any) => {
-            const svc = petServices.find(s => s.id === ap.service_id)
-            return sum + parseFloat((svc && svc.price) || 0)
-          }, 0)
-        }
+        petServices = data || []
       }
+      totalPrice = apptPets.reduce((sum: number, ap: any) => {
+        // Prefer the groomer's quoted_price; fall back to catalog price
+        let p = parseFloat(ap.quoted_price || 0)
+        if (!p) {
+          const svc = petServices.find(s => s.id === ap.service_id)
+          p = parseFloat((svc && svc.price) || 0)
+        }
+        return sum + p
+      }, 0)
     }
 
-    // Fallback: legacy single-service appointment
+    // Fallback: legacy single-service appointment. Prefer the appointment's
+    // own final_price / quoted_price (what was actually booked) over catalog.
+    if (!totalPrice) {
+      totalPrice = parseFloat(appointment.final_price || appointment.quoted_price || 0)
+    }
     if (!totalPrice && appointment.service_id) {
       const { data: svc } = await supabase
         .from('services')
@@ -139,19 +152,31 @@ serve(async (req: Request) => {
     //      AND if pre-payment is required (for the auto-confirm flow).
     const { data: shopSettings } = await supabase
       .from('shop_settings')
-      .select('pass_fees_to_client, require_prepay_to_book')
-      .eq('groomer_id', groomer.id)
+      .select('pass_fees_to_client, require_prepay_to_book, allow_portal_payments')
+      .eq('groomer_id', appointment.groomer_id)
       .maybeSingle()
+
+    // Respect the shop's "let clients pay through the portal" toggle. Defaults
+    // to ON (allowed) when the column is missing/null; only an explicit false
+    // blocks the charge. This is the backend guard behind the hidden button.
+    if (shopSettings && shopSettings.allow_portal_payments === false) {
+      return jsonError('This shop has turned off online payments through the portal — please contact the shop to pay.', 403)
+    }
 
     const passFeesToClient = shopSettings && shopSettings.pass_fees_to_client === true
     const requirePrepay = shopSettings && shopSettings.require_prepay_to_book === true
 
     const { data: existingPayments } = await supabase
       .from('payments')
-      .select('amount')
+      .select('amount, refunded_amount')
       .eq('appointment_id', appointmentId)
 
-    const paidSoFar = (existingPayments || []).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0)
+    // Match the portal: net paid = sum of (amount - refunded), clamped >= 0 per row
+    const paidSoFar = (existingPayments || []).reduce((sum, p) => {
+      const paidAmt = parseFloat(p.amount || 0)
+      const refunded = parseFloat(p.refunded_amount || 0)
+      return sum + Math.max(0, paidAmt - refunded)
+    }, 0)
     const balance = totalPrice - paidSoFar
 
     if (balance <= 0.001) {

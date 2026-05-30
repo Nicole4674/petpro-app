@@ -99,9 +99,15 @@ serve(async (req: Request) => {
     // 6. Look up shop settings — pass-fees-to-client + require_prepay flags.
     const { data: shopSettings } = await supabase
       .from('shop_settings')
-      .select('pass_fees_to_client, require_prepay_to_book')
+      .select('pass_fees_to_client, require_prepay_to_book, allow_portal_payments')
       .eq('groomer_id', reservation.groomer_id)
       .maybeSingle()
+
+    // Respect the shop's "let clients pay through the portal" toggle. Defaults
+    // to ON (allowed) when the column is missing/null; only an explicit false blocks.
+    if (shopSettings && shopSettings.allow_portal_payments === false) {
+      return jsonError('This shop has turned off online payments through the portal — please contact the shop to pay.', 403)
+    }
 
     const passFeesToClient = shopSettings && shopSettings.pass_fees_to_client === true
     const requirePrepay = shopSettings && shopSettings.require_prepay_to_book === true

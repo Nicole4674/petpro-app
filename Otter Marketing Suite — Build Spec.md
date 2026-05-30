@@ -229,7 +229,48 @@ Every other tool needs the groomer to:
 
 PetPro already has every piece of data needed. **Otter writes everything, groomer just clicks "send."**
 
-## Monetization Model — Credits, not tier upsell
+## Monetization Model v2 — SEPARATE Marketing Tokens (Nicole, May 28)
+
+**Decision evolved**: Don't bundle marketing into the existing Suds token pool.
+Marketing has its own pool. Each plan includes a base allowance of BOTH
+Suds tokens AND Marketing tokens. Both refill monthly. Heavy users buy
+top-ups on whichever runs out first.
+
+**Why separate**: Different use patterns (chat = real-time, marketing =
+batch/scheduled), different costs (chat = cheap, blog posts = pricier),
+different value timing (chat = instant, marketing = compounds over weeks).
+Light shops shouldn't subsidize heavy marketers.
+
+### Plan tiers (Nicole confirmed)
+- **Basic** — $70/mo (lowest)
+- Mid-tier(s) — TBD
+- **$199/mo** — second-highest
+- **$399/mo** — highest
+
+### Proposed Marketing token allowances per plan (revisit when building)
+| Plan | Marketing tokens / mo | Worst-case cost |
+|---|---|---|
+| Basic ($70) | 100 | ~$1 |
+| Mid ($120-150) | 250-500 | ~$2.50-5 |
+| $199 | 1,000 | ~$10 |
+| $399 | 3,000-5,000 | ~$30-50 |
+
+### Marketing top-up packs (priced slightly cheaper than Suds tokens —
+this is the growth engine, want them USING it not hoarding)
+| Pack | Price | Cost | Margin |
+|---|---|---|---|
+| 100 mt | $9.99 | $1 | 90% |
+| 250 mt | $19.99 | $2.50 | 87% |
+| 500 mt | $34.99 | $5 | 86% |
+| 1,000 mt | $59.99 | $10 | 83% |
+
+### Token weights by action (Haiku unless noted)
+- 1 token: social post / review reply / SMS win-back
+- 3 tokens: 3-part welcome sequence
+- 5 tokens: before/after image + caption
+- 10 tokens (Sonnet): full SEO blog post
+
+### Old credits-only model (deprecated, kept for reference)
 
 **Decision (Nicole): ship Otter to ALL paid plans. Monetize via the existing credit/token top-up system.**
 

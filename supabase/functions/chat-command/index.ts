@@ -57,6 +57,14 @@ async function sendPushToUser(userId, title, body, url, tag) {
 
 // Tools Claude can use - search first, then act
 var toolDefinitions = [
+  // ─── Anthropic server-side web search ──
+  // Suds calls this for local competitor pricing, breed research, fresh info
+  // beyond his training. max_uses caps cost per turn at ~$0.03 worst case.
+  {
+    type: 'web_search_20250305',
+    name: 'web_search',
+    max_uses: 3,
+  },
   {
     name: 'search_clients',
     description: 'Search for clients by name, phone, or partial match. ALWAYS use this first when the user mentions a client by name, before taking any action. Returns client IDs, names, phones, and their pets.',
@@ -3190,16 +3198,26 @@ Deno.serve(async (req) => {
       // No settings row yet
     }
 
-    // Also merge in per-day business hours from shop_settings (new JSONB column)
+    // Also merge in per-day business hours + address/contact info from shop_settings.
+    // Address is critical: without it, Suds guesses the city from zip and gets it
+    // wrong (e.g. assumes 77429 = Katy when it's actually Cypress, TX). Pulling the
+    // real address lets Suds search local-pricing-by-CITY accurately.
+    // NOTE: shop_settings uses `groomer_id` as its FK (not `user_id`). Prior code
+    // here had `user_id`, which silently returned nothing — so address + the
+    // newer business_hours JSONB column never made it into Suds' context for
+    // ANY groomer. Fixed below.
     try {
       var { data: shopHrsRow } = await supabaseAdmin
         .from('shop_settings')
-        .select('business_hours')
-        .eq('user_id', body.groomer_id)
+        .select('business_hours, shop_name, address, phone')
+        .eq('groomer_id', body.groomer_id)
         .maybeSingle()
-      if (shopHrsRow && shopHrsRow.business_hours) {
+      if (shopHrsRow) {
         if (!shopSettings) shopSettings = {}
-        shopSettings.business_hours = shopHrsRow.business_hours
+        if (shopHrsRow.business_hours) shopSettings.business_hours = shopHrsRow.business_hours
+        if (shopHrsRow.address) shopSettings.address = shopHrsRow.address
+        if (shopHrsRow.phone) shopSettings.phone = shopHrsRow.phone
+        if (shopHrsRow.shop_name) shopSettings.shop_name = shopHrsRow.shop_name
       }
     } catch (e) {
       // No shop_settings row — that's fine, groomer Suds will show defaults
@@ -3411,6 +3429,12 @@ Deno.serve(async (req) => {
         contextParts.push('Shop Hours: ' + shopSettings.business_hours_start + ' - ' + (shopSettings.business_hours_end || '?'))
       }
       if (shopSettings.slot_duration_minutes) contextParts.push('Default Slot: ' + shopSettings.slot_duration_minutes + ' min')
+      // ─── Shop location / contact (so web_search uses the real city, not a guess) ──
+      if (shopSettings.address) {
+        contextParts.push('Shop Address: ' + shopSettings.address)
+        contextParts.push('⚠️ When using web_search for local pricing or competitors, use the CITY in the shop address above. Do NOT guess the city from a zip code — zip codes can cross multiple cities (e.g. 77429 is CYPRESS TX, not Katy).')
+      }
+      if (shopSettings.phone) contextParts.push('Shop Phone: ' + shopSettings.phone)
     } else {
       contextParts.push('No shop settings yet. Use update_shop_settings when the owner wants to configure puppy age thresholds, hours, or slot size.')
     }
@@ -5433,7 +5457,15 @@ Deno.serve(async (req) => {
     var systemPrompt = [
       guardrails,
       'IDENTITY: Your name is Suds — a friendly otter mascot. The brand/product you live inside is called PetPro AI. Respond when called either "Suds" or "PetPro" (or PetPro AI). Introduce yourself as Suds when greeting someone new. Sign off / refer to yourself as Suds in casual conversation. NEVER say Sonnet, Claude, Anthropic, or any AI model name.',
-      '[Prompt v2026-05-06.multipet-fix]',  // cache-bust marker — bumps the prompt hash so Anthropic re-loads instead of serving stale cache
+      '[Prompt v2026-05-28.haiku+websearch]',  // cache-bust marker — bumps the prompt hash so Anthropic re-loads instead of serving stale cache
+      '',
+      'WEB SEARCH:',
+      'You have a web_search tool — USE IT when a groomer asks about:',
+      '  • Local competitor pricing for price-matching ("what are dog groomers in 77429 charging for a full groom on a 60-lb doodle?")',
+      '  • Current product reviews / where to buy supplies',
+      '  • Fresh info beyond your training (recent breed news, new vaccines, trends)',
+      '  • Specific local shops the groomer mentions',
+      'Cap is 3 searches per message. Always cite sources in your reply ("according to Yelp listings in 77429…"). Do NOT search for things you already know cold or for anything answerable from PetPro shop data.',
       '',
       'YOU HAVE TOOLS TO TAKE REAL ACTIONS:',
       '- Use search_clients to find any client by name or phone BEFORE editing or deleting',
@@ -5715,7 +5747,7 @@ Deno.serve(async (req) => {
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+          model: 'claude-haiku-4-5-20251001',
           max_tokens: 500,
           system: vaxCertSystem,
           messages: vaxMessages,
@@ -5924,9 +5956,11 @@ Deno.serve(async (req) => {
           'Content-Type': 'application/json',
           'x-api-key': claudeKey,
           'anthropic-version': '2023-06-01',
+          // Required for the web_search_20250305 tool to be enabled
+          'anthropic-beta': 'web-search-2025-03-05',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+          model: 'claude-haiku-4-5-20251001',
           max_tokens: 1500,
           // ════════════ Prompt Caching ════════════
           // System prompt is HUGE (Groomer Brain + Breed Ref + tools + rules).

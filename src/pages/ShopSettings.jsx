@@ -246,6 +246,9 @@ export default function ShopSettings() {
   var [requirePrepay, setRequirePrepay] = useState(false)
   var [noShowFeeAmount, setNoShowFeeAmount] = useState('')
   var [passFeesToClient, setPassFeesToClient] = useState(false)
+  // allow_portal_payments: lets clients pay their balance through the portal.
+  // Defaults to ON; turn off if you collect payment another way (e.g. Square).
+  var [allowPortalPayments, setAllowPortalPayments] = useState(true)
   // Auto-cancel unpaid bookings — only applies when require_prepay is on.
   // Lets each shop pick if/when to auto-cancel pending unpaid bookings.
   var [autoCancelUnpaid, setAutoCancelUnpaid] = useState(false)
@@ -367,6 +370,8 @@ export default function ShopSettings() {
         setRequirePrepay(data.require_prepay_to_book === true)
         setNoShowFeeAmount(data.no_show_fee_amount ? String(data.no_show_fee_amount) : '')
         setPassFeesToClient(data.pass_fees_to_client === true)
+        // Portal payments default ON when the column is missing or null
+        setAllowPortalPayments(data.allow_portal_payments !== false)
         setAutoCancelUnpaid(data.auto_cancel_unpaid_bookings === true)
         setAutoCancelMinutes(data.auto_cancel_unpaid_minutes != null ? String(data.auto_cancel_unpaid_minutes) : '15')
         // Waitlist quiet hours (defaults to 9-20 / Chicago if column is null)
@@ -519,6 +524,7 @@ export default function ShopSettings() {
         require_prepay_to_book: requirePrepay,
         no_show_fee_amount: parseFloat(noShowFeeAmount) || 0,
         pass_fees_to_client: passFeesToClient,
+        allow_portal_payments: allowPortalPayments,
         auto_cancel_unpaid_bookings: autoCancelUnpaid,
         auto_cancel_unpaid_minutes: parseInt(autoCancelMinutes) || 15,
         // Waitlist quiet hours
@@ -1417,6 +1423,31 @@ export default function ShopSettings() {
         <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #e5e7eb' }}>
           <div style={{ fontSize: '13px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '14px' }}>
             Payment Policies
+          </div>
+
+          {/* Allow clients to pay through the portal */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px 0', borderBottom: '1px solid #f3f4f6' }}>
+            <label style={{ position: 'relative', display: 'inline-block', width: '46px', height: '24px', flexShrink: 0, marginTop: '2px' }}>
+              <input type="checkbox" checked={allowPortalPayments} onChange={e => setAllowPortalPayments(e.target.checked)}
+                style={{ opacity: 0, width: 0, height: 0 }} />
+              <span style={{
+                position: 'absolute', cursor: 'pointer', inset: 0,
+                background: allowPortalPayments ? '#10b981' : '#d1d5db',
+                borderRadius: '24px', transition: '0.2s',
+              }}>
+                <span style={{
+                  position: 'absolute', height: '18px', width: '18px',
+                  left: allowPortalPayments ? '25px' : '3px', top: '3px',
+                  background: '#fff', borderRadius: '50%', transition: '0.2s',
+                }}/>
+              </span>
+            </label>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#1f2937' }}>💳 Let clients pay through the portal</div>
+              <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '2px' }}>
+                When on, clients can pay their appointment and boarding balances from their portal with a saved card. Turn off if you collect payment another way (in person, Square, etc.).
+              </div>
+            </div>
           </div>
 
           {/* Require prepay */}

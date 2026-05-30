@@ -1939,6 +1939,9 @@ export default function ClientPortalDashboard() {
                                     </div>
                                   )
                                 }
+                                // Respect the shop's "allow clients to pay through portal"
+                                // toggle. When off, hide the Pay button (balance still shows).
+                                if (shopSettings && shopSettings.allow_portal_payments === false) return null
                                 return (
                                   <button
                                     type="button"
@@ -2070,6 +2073,8 @@ export default function ClientPortalDashboard() {
                                     </div>
                                   )
                                 }
+                                // Respect the shop's portal-payments toggle (boarding).
+                                if (shopSettings && shopSettings.allow_portal_payments === false) return null
                                 return (
                                   <button
                                     type="button"
