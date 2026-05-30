@@ -235,6 +235,9 @@ export default function ShopSettings() {
   var [stripeChargesEnabled, setStripeChargesEnabled] = useState(false)
   var [stripePayoutsEnabled, setStripePayoutsEnabled] = useState(false)
   var [stripeAccountId, setStripeAccountId] = useState(null)
+  // What (if anything) Stripe still needs. Empty = nothing due from the groomer.
+  var [stripeCurrentlyDue, setStripeCurrentlyDue] = useState([])
+  var [stripeDisabledReason, setStripeDisabledReason] = useState(null)
   var [connectingStripe, setConnectingStripe] = useState(false)
   var [connectError, setConnectError] = useState('')
   var [refreshingStripe, setRefreshingStripe] = useState(false)
@@ -290,6 +293,8 @@ export default function ShopSettings() {
         if (data.status) setStripeConnectStatus(data.status)
         if (typeof data.charges_enabled === 'boolean') setStripeChargesEnabled(data.charges_enabled)
         if (typeof data.payouts_enabled === 'boolean') setStripePayoutsEnabled(data.payouts_enabled)
+        if (Array.isArray(data.currently_due)) setStripeCurrentlyDue(data.currently_due)
+        setStripeDisabledReason(data.disabled_reason || null)
       }
     } catch (err) {
       console.warn('refreshStripeStatus failed (non-fatal):', err)
@@ -1317,8 +1322,9 @@ export default function ShopSettings() {
           </>
         )}
 
-        {/* PENDING — partway through onboarding (account exists but not enabled) */}
-        {(stripeConnectStatus === 'pending' || (stripeAccountId && !stripeChargesEnabled)) && stripeConnectStatus !== 'enabled' && (
+        {/* PENDING — partway through onboarding (account exists but not enabled).
+            Excludes in_review + restricted, which have their own banners below. */}
+        {(stripeConnectStatus === 'pending' || (stripeAccountId && !stripeChargesEnabled)) && stripeConnectStatus !== 'enabled' && stripeConnectStatus !== 'in_review' && stripeConnectStatus !== 'restricted' && (
           <>
             <div style={{ padding: '12px 14px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '8px', marginBottom: '12px' }}>
               <div style={{ fontSize: '14px', fontWeight: 700, color: '#92400e', marginBottom: '4px' }}>
@@ -1382,7 +1388,28 @@ export default function ShopSettings() {
           </div>
         )}
 
-        {/* RESTRICTED — Stripe needs more info or has paused the account */}
+        {/* IN REVIEW — info submitted, Stripe is verifying. No groomer action needed. */}
+        {stripeConnectStatus === 'in_review' && (
+          <div style={{ padding: '14px', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+              <span style={{ fontSize: '18px' }}>⏳</span>
+              <span style={{ fontSize: '15px', fontWeight: 700, color: '#92400e' }}>Stripe is reviewing your info</span>
+            </div>
+            <div style={{ fontSize: '13px', color: '#92400e', lineHeight: 1.5, marginBottom: '10px' }}>
+              You've submitted everything Stripe asked for — nothing more is needed from you right now. Stripe is verifying your details, which usually finishes within a day or two. This page updates on its own once you're approved.
+              {stripeChargesEnabled ? ' You can already accept card payments in the meantime.' : ''}
+            </div>
+            <button
+              onClick={() => refreshStripeStatus(false)}
+              disabled={refreshingStripe}
+              style={{ padding: '10px 14px', background: '#fff', color: '#92400e', border: '1px solid #fcd34d', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: refreshingStripe ? 'not-allowed' : 'pointer' }}
+            >
+              {refreshingStripe ? 'Checking…' : '🔄 Check status'}
+            </button>
+          </div>
+        )}
+
+        {/* RESTRICTED — Stripe lists items currently due from the groomer */}
         {stripeConnectStatus === 'restricted' && (
           <>
             <div style={{ padding: '12px 14px', background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', marginBottom: '12px' }}>
@@ -1390,8 +1417,15 @@ export default function ShopSettings() {
                 ⚠️ Action required by Stripe
               </div>
               <div style={{ fontSize: '13px', color: '#7f1d1d' }}>
-                Stripe needs more information from you. Click below to fix it on Stripe's side.
+                Stripe needs more information from you. Click below to finish it on Stripe's side.
               </div>
+              {stripeCurrentlyDue && stripeCurrentlyDue.length > 0 && (
+                <ul style={{ margin: '8px 0 0', paddingLeft: '18px', fontSize: '13px', color: '#7f1d1d' }}>
+                  {stripeCurrentlyDue.map((r) => (
+                    <li key={r}>{String(r).replace(/[._]/g, ' ')}</li>
+                  ))}
+                </ul>
+              )}
             </div>
             <button
               onClick={handleConnectStripe}

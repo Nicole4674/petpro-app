@@ -94,13 +94,25 @@ serve(async (req: Request) => {
       return jsonError('Could not fetch account from Stripe: ' + stripeErr.message, 500)
     }
 
-    // 6. Compute our app's status from Stripe's flags
-    let appStatus = 'pending'
+    // 6. Compute our app's status from Stripe's flags.
+    //    Key nuance: a `disabled_reason` alone does NOT mean the groomer did
+    //    something wrong — Stripe sets it (e.g. "pending_verification") while
+    //    it REVIEWS info that was already submitted. So we only call it
+    //    "restricted" (real action required) when Stripe lists items that are
+    //    currently_due / past_due. If info is in but nothing is due, it's
+    //    "in_review" — no groomer action needed, clears on its own.
     const reqs = (account.requirements as any) || {}
-    if (reqs.disabled_reason) {
-      appStatus = 'restricted'
-    } else if (account.charges_enabled && account.payouts_enabled) {
+    const currentlyDue: string[] = reqs.currently_due || []
+    const pastDue: string[] = reqs.past_due || []
+    const disabledReason: string | null = reqs.disabled_reason || null
+
+    let appStatus = 'pending'
+    if (account.charges_enabled && account.payouts_enabled) {
       appStatus = 'enabled'
+    } else if (pastDue.length > 0 || currentlyDue.length > 0) {
+      appStatus = 'restricted'
+    } else if (disabledReason || (account.details_submitted && !account.payouts_enabled)) {
+      appStatus = 'in_review'
     } else if (!account.details_submitted) {
       appStatus = 'pending'
     }
@@ -128,6 +140,10 @@ serve(async (req: Request) => {
       charges_enabled: account.charges_enabled === true,
       payouts_enabled: account.payouts_enabled === true,
       account_id: account.id,
+      // Extra detail so the UI can show the REAL reason instead of a generic banner
+      disabled_reason: disabledReason,
+      currently_due: currentlyDue,
+      past_due: pastDue,
     }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }

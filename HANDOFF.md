@@ -1,7 +1,53 @@
 # 🦦 PetPro — Session Handoff
 
 *Written May 28, 2026 to hand off context from Claude 4.7 → 4.8.*
+*Updated May 30, 2026 with payment fixes + portal-payment toggle (see next section).*
 *Read this before doing anything else. Then read the linked spec docs.*
+
+---
+
+## ⚡ Latest session — May 30, 2026 (READ FIRST — newest work)
+
+Worked entirely on **client/groomer payments**. Three things, all **edited in code but
+NOT yet deployed** unless Nicole has since run the steps below.
+
+### Bugs fixed
+1. **TDZ crash on client portal Pay** — `stripe-charge-card/index.ts` referenced
+   `groomer.id` before the `groomer` variable existed (error: *"Cannot access 'groomer'
+   before initialization"*). Now uses `appointment.groomer_id`.
+2. **OVERCHARGE bug (important)** — the charge functions computed totals from the
+   catalog `services.price` and ignored the groomer's per-booking `quoted_price`
+   override. A $1 Nail Trim (catalog $10) charged the client **$10**. Fixed in BOTH
+   `stripe-charge-card` and `stripe-groomer-charge`: now prefer per-pet
+   `quoted_price` → fallback catalog price; legacy appts use `final_price`/`quoted_price`
+   first. Also aligned "paid so far" math to subtract refunds.
+   - `stripe-charge-boarding` was checked and is fine (reads `total_price` off the row).
+
+### Feature added — "Let clients pay through the portal" toggle
+- New per-shop toggle in **Shop Settings → Payment Policies**, **default ON**.
+- When OFF: grooming + boarding Pay buttons are hidden in the client portal AND the
+  backend charge functions refuse (defense in depth).
+- Files: `ShopSettings.jsx` (state/load/save/UI), `ClientPortalDashboard.jsx` (gates
+  both Pay buttons on `shopSettings.allow_portal_payments === false`),
+  `stripe-charge-card` + `stripe-charge-boarding` (backend guard).
+- New DB column needed: `allow_portal_payments boolean default true` on `shop_settings`.
+
+### Stripe Connect banner clarity (fixed in code)
+- `stripe-connect-refresh` used to mark ANY `disabled_reason` as "restricted," so a
+  groomer whose info was merely **pending Stripe review** saw a scary red "Action
+  required" banner with nothing to do. Now: "restricted" only when Stripe lists
+  `currently_due`/`past_due` items; otherwise "in_review" (calm amber banner, no action).
+  Function now also returns `disabled_reason` + `currently_due` so the UI shows the
+  real reason. ShopSettings.jsx got a new in_review banner and lists the actual items.
+
+### ⚠️ Open / next steps for Nicole (NOT done yet)
+- [ ] Refund the bad **$10 test charge** (use the in-app Refund button so DB + Stripe stay in sync).
+- [ ] Run SQL (file: `Portal Payments Toggle Schema.sql`): `alter table shop_settings add column if not exists allow_portal_payments boolean not null default true;` ✅ DONE May 30
+- [ ] Deploy edge functions: `stripe-charge-card`, `stripe-charge-boarding`, `stripe-groomer-charge`, `stripe-connect-refresh`.
+- [ ] Push frontend (Vercel) for `ShopSettings.jsx` + `ClientPortalDashboard.jsx`.
+- [ ] Re-test: $1 appointment should charge **$1.00**; toggle OFF hides Pay button; Stripe banner shows "reviewing" not red.
+
+*(Note: there's a redundant `CHAT_HANDOFF.md` from earlier today — safe to delete; this section supersedes it.)*
 
 ---
 
