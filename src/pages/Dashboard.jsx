@@ -38,6 +38,14 @@ export default function Dashboard() {
   var [kennels, setKennels] = useState([])
   var [flagCount, setFlagCount] = useState(0)
   var [clients, setClients] = useState([])
+  // iPhone-client notification tip banner — dismissible, remembered across sessions
+  var [iphoneTipDismissed, setIphoneTipDismissed] = useState(function () {
+    try { return localStorage.getItem('petpro_iphone_notif_tip_dismissed') === '1' } catch (e) { return false }
+  })
+  function dismissIphoneTip() {
+    setIphoneTipDismissed(true)
+    try { localStorage.setItem('petpro_iphone_notif_tip_dismissed', '1') } catch (e) {}
+  }
   var [pets, setPets] = useState([])
   var [services, setServices] = useState([])
   var [loading, setLoading] = useState(true)
@@ -698,6 +706,47 @@ export default function Dashboard() {
 
   return (
     <div className="db-page">
+      {/* iPhone client notification heads-up — dismissible */}
+      {!iphoneTipDismissed && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '12px',
+          background: '#fffbeb',
+          border: '1px solid #fcd34d',
+          borderRadius: '12px',
+          padding: '12px 14px',
+          marginBottom: '16px',
+        }}>
+          <span style={{ fontSize: '20px', flexShrink: 0, lineHeight: 1.2 }}>📱</span>
+          <div style={{ flex: 1, fontSize: '13px', color: '#92400e', lineHeight: 1.5 }}>
+            <strong style={{ display: 'block', marginBottom: '2px', color: '#78350f' }}>
+              iPhone clients need one extra step to get notifications
+            </strong>
+            Texts and reminders reach everyone. But app notifications on an <strong>iPhone</strong> only
+            work if the client opens your portal link, taps <strong>Share → "Add to Home Screen,"</strong> then
+            opens it from there and turns notifications on. (Android works automatically.) Let your iPhone
+            clients know so they don't miss alerts — and use the <strong>Test</strong> button to confirm it's working.
+          </div>
+          <button
+            onClick={dismissIphoneTip}
+            aria-label="Dismiss"
+            style={{
+              flexShrink: 0,
+              background: 'transparent',
+              border: 'none',
+              color: '#92400e',
+              fontSize: '16px',
+              cursor: 'pointer',
+              lineHeight: 1,
+              padding: '2px 4px',
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="db-header">
         <div className="db-header-left">
