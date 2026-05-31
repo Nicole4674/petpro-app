@@ -7,6 +7,19 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
+// ─── Client-portal screenshot showcase ─────────────────
+// So groomers KNOW what their clients see before they share the portal link.
+// Drop the screenshot files into /public/portal-preview/ with these names.
+// To reorder or add: edit this array (and add the matching image file).
+var PORTAL_SHOTS = [
+  { src: '/portal-preview/portal-home.png',       caption: 'Portal home — contact info, emergency contacts & their pets' },
+  { src: '/portal-preview/portal-book-1.png',     caption: 'Booking with Suds — "Can I book an appointment?"' },
+  { src: '/portal-preview/portal-book-2.png',     caption: 'Suds picks the pet & service together' },
+  { src: '/portal-preview/portal-book-3.png',     caption: 'Suds quotes the right price for each pup' },
+  { src: '/portal-preview/portal-book-slots.png', caption: 'Suds offers real open time slots' },
+  { src: '/portal-preview/portal-upcoming.png',   caption: 'Upcoming appointments — with one-tap Pay' },
+]
+
 // ─── Article data ──────────────────────────────────────
 // Each article: title + body (array of steps OR a paragraph + steps).
 // To add a new article: drop it in the right SECTION array below.
@@ -504,6 +517,8 @@ export default function Help() {
   // Articles are keyed by `${sectionIdx}-${articleIdx}`.
   var [openKey, setOpenKey] = useState(null)
   var [searchTerm, setSearchTerm] = useState('')
+  // Client-portal screenshot showcase — which image is open full-size (null = closed)
+  var [lightboxImg, setLightboxImg] = useState(null)
 
   // Contact-form state — emails Nicole directly via send-help-message function
   var [contactEmail, setContactEmail] = useState('')
@@ -631,6 +646,91 @@ export default function Help() {
         </div>
         <span style={{ fontSize: '20px', color: '#7c3aed', fontWeight: 700 }}>→</span>
       </Link>
+
+      {/* ─── Client Portal Showcase — "see what your clients see" ─── */}
+      <div style={{
+        border: '1px solid #e9d5ff',
+        borderRadius: '14px',
+        padding: '18px',
+        marginBottom: '24px',
+        background: '#faf5ff',
+      }}>
+        <div style={{ fontSize: '17px', fontWeight: 800, color: '#5b21b6', marginBottom: '4px' }}>
+          👀 See what your clients see
+        </div>
+        <div style={{ fontSize: '13px', color: '#6b21a8', marginBottom: '14px', lineHeight: 1.5 }}>
+          Before you share your portal link, here's exactly what it looks like on your clients' side —
+          booking, paying, their pets, and report cards. Tap any image to enlarge.
+        </div>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+          gap: '12px',
+        }}>
+          {PORTAL_SHOTS.map(function (shot, i) {
+            return (
+              <button
+                key={i}
+                onClick={function () { setLightboxImg(shot) }}
+                style={{
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '10px',
+                  overflow: 'hidden',
+                  background: '#fff',
+                  padding: 0,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
+              >
+                <img
+                  src={shot.src}
+                  alt={shot.caption}
+                  loading="lazy"
+                  style={{ width: '100%', height: '120px', objectFit: 'cover', objectPosition: 'top', display: 'block', background: '#f3f4f6' }}
+                />
+                <span style={{ fontSize: '12px', color: '#374151', padding: '8px 10px', lineHeight: 1.4 }}>
+                  {shot.caption}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Lightbox — full-size screenshot overlay */}
+      {lightboxImg && (
+        <div
+          onClick={function () { setLightboxImg(null) }}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.8)',
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', padding: '24px',
+          }}
+        >
+          <img
+            src={lightboxImg.src}
+            alt={lightboxImg.caption}
+            onClick={function (e) { e.stopPropagation() }}
+            style={{ maxWidth: '100%', maxHeight: '82vh', borderRadius: '12px', boxShadow: '0 8px 40px rgba(0,0,0,0.5)' }}
+          />
+          <div style={{ color: '#fff', fontSize: '14px', marginTop: '14px', textAlign: 'center' }}>
+            {lightboxImg.caption}
+          </div>
+          <button
+            onClick={function () { setLightboxImg(null) }}
+            style={{
+              marginTop: '14px', padding: '10px 20px', background: '#fff',
+              border: 'none', borderRadius: '10px', fontWeight: 700,
+              fontSize: '14px', cursor: 'pointer', color: '#374151',
+            }}
+          >
+            Close
+          </button>
+        </div>
+      )}
 
       {/* ─── Sections ─── */}
       {SECTIONS.map(function (section, si) {

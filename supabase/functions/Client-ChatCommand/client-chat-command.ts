@@ -1070,8 +1070,12 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           .is('recurring_series_id', null)
           .neq('status', 'cancelled')
 
+        // Anti-spam threshold. Normal grooming clients rebook every few weeks,
+        // so >=1 flagged nearly everyone. Only treat 3+ non-recurring bookings
+        // in 30 days as suspicious enough to need groomer review.
+        var SPAM_THRESHOLD = 3
         var nonRecurringCount = (recentAppts || []).length
-        var isSpamFlagged = nonRecurringCount >= 1
+        var isSpamFlagged = nonRecurringCount >= SPAM_THRESHOLD
 
         // Decide: auto-book (clean) vs flag for groomer review (flag_status='pending')
         var shouldAutoBook = toggles.client_auto_book_enabled && !isSpamFlagged
