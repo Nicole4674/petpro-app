@@ -61,6 +61,10 @@ export default function ChatSettings() {
   // ---- Client Portal AI Toggles ----
   var [clientClaudeEnabled, setClientClaudeEnabled] = useState(true)
   var [clientAutoBookEnabled, setClientAutoBookEnabled] = useState(true)
+  // New-client self-booking (default OFF). When on, brand-new clients can book
+  // through Suds instead of having to message the groomer first.
+  var [clientNewClientBookingEnabled, setClientNewClientBookingEnabled] = useState(false)
+  var [showNewClientConfirm, setShowNewClientConfirm] = useState(false)
   var [clientCanReschedule, setClientCanReschedule] = useState(true)
   var [clientCanCancel, setClientCanCancel] = useState(true)
 
@@ -140,6 +144,7 @@ export default function ChatSettings() {
 
         if (data.client_claude_enabled != null) setClientClaudeEnabled(!!data.client_claude_enabled)
         if (data.client_auto_book_enabled != null) setClientAutoBookEnabled(!!data.client_auto_book_enabled)
+        setClientNewClientBookingEnabled(data.client_new_client_booking_enabled === true)
         if (data.client_can_reschedule != null) setClientCanReschedule(!!data.client_can_reschedule)
         if (data.client_can_cancel != null) setClientCanCancel(!!data.client_can_cancel)
       }
@@ -188,6 +193,7 @@ export default function ChatSettings() {
         custom_instructions: customInstructions || null,
         client_claude_enabled: clientClaudeEnabled,
         client_auto_book_enabled: clientAutoBookEnabled,
+        client_new_client_booking_enabled: clientNewClientBookingEnabled,
         client_can_reschedule: clientCanReschedule,
         client_can_cancel: clientCanCancel,
         waitlist_auto_notify_enabled: waitlistAutoNotifyEnabled,
@@ -477,6 +483,69 @@ export default function ChatSettings() {
             />
           </label>
         </div>
+
+        {/* New-Client Self-Booking */}
+        <div style={subToggleCardStyle(clientClaudeEnabled)}>
+          <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: clientClaudeEnabled ? 'pointer' : 'not-allowed' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+                Let New Clients Book Through Suds
+              </div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                By default, brand-new clients (no past visit) must message you to book their first
+                appointment. Turn this on to let them book themselves through Suds. Suds still flags
+                first-time bookings for your review — they won't slip by unseen.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={clientNewClientBookingEnabled}
+              disabled={!clientClaudeEnabled}
+              onChange={function (e) {
+                if (e.target.checked) {
+                  // turning ON — confirm first
+                  setShowNewClientConfirm(true)
+                } else {
+                  setClientNewClientBookingEnabled(false)
+                }
+              }}
+              style={{ width: 20, height: 20, cursor: clientClaudeEnabled ? 'pointer' : 'not-allowed', flexShrink: 0, marginLeft: 16 }}
+            />
+          </label>
+        </div>
+
+        {/* Confirmation popup when enabling new-client self-booking */}
+        {showNewClientConfirm && (
+          <div
+            onClick={function () { setShowNewClientConfirm(false) }}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}
+          >
+            <div onClick={function (e) { e.stopPropagation() }} style={{ background: '#fff', borderRadius: 14, maxWidth: 440, width: '100%', padding: 24 }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: '#1f2937', marginBottom: 8 }}>
+                Let new clients book automatically?
+              </div>
+              <div style={{ fontSize: 14, color: '#4b5563', lineHeight: 1.5, marginBottom: 20 }}>
+                Are you sure? With this ON, people who've <strong>never been to your shop</strong> can book
+                an appointment through Suds without talking to you first. Suds will still flag first-time
+                bookings for your review, but they'll land on your calendar. You can turn this off anytime.
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  onClick={function () { setShowNewClientConfirm(false) }}
+                  style={{ padding: '10px 16px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 10, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={function () { setClientNewClientBookingEnabled(true); setShowNewClientConfirm(false) }}
+                  style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}
+                >
+                  Yes, allow new clients
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Reschedule */}
         <div style={subToggleCardStyle(clientClaudeEnabled)}>

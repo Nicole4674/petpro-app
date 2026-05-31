@@ -23,13 +23,17 @@ Nothing here is built yet. Build the foundation (Phases 1–5) BEFORE templates/
 
 ## Foundation — must be built FIRST (before any templates/posting)
 
-### Phase 1 — Remove the new-client booking hard-code
-- Today: new clients CANNOT book without contacting the groomer — it's hard-coded
-  even though a toggle exists.
-- Fix: remove the hard-code so the toggle actually controls behavior.
-- Default: **OFF**.
-- When groomer flips it ON → confirmation popup:
-  *"Are you sure you want NEW clients to book through your portal automatically?"*
+### Phase 1 — Remove the new-client booking hard-code ✅ DONE (May 31)
+- Was: a hard gate in `Client-ChatCommand/client-chat-command.ts` blocked any client
+  with no past appointment from booking via Suds, regardless of settings.
+- Now: controlled by new toggle `ai_personalization.client_new_client_booking_enabled`
+  (SQL: `New Client Booking Toggle v1.sql`), DEFAULT **OFF** (existing behavior preserved).
+  Gate only blocks first-timers when the toggle is OFF.
+- Settings UI: new "Let New Clients Book Through Suds" toggle on the Chat Settings page,
+  with a confirmation popup when switching ON ("Are you sure? People who've never been to
+  your shop can book without talking to you first…").
+- Note: even with it ON, Suds still flags first-time bookings for groomer review.
+- Deploy: 🟢 SQL `New Client Booking Toggle v1.sql` · 🚀 `Client-ChatCommand` · 💾 `ChatSettings.jsx`
 
 ### Phase 2 — Referral system (client → client)
 - Every client portal has its OWN unique referral link/code.

@@ -2156,7 +2156,7 @@ Deno.serve(async function(req) {
     // --- Pull groomer's toggles ---
     var { data: personalizationRow } = await supabaseAdmin
       .from('ai_personalization')
-      .select('client_claude_enabled, client_auto_book_enabled, client_can_reschedule, client_can_cancel, shop_name, tone, emoji_level, custom_instructions')
+      .select('client_claude_enabled, client_auto_book_enabled, client_can_reschedule, client_can_cancel, client_new_client_booking_enabled, shop_name, tone, emoji_level, custom_instructions')
       .eq('groomer_id', groomerId)
       .maybeSingle()
 
@@ -2165,6 +2165,9 @@ Deno.serve(async function(req) {
       client_auto_book_enabled: personalizationRow ? (personalizationRow.client_auto_book_enabled !== false) : true,
       client_can_reschedule: personalizationRow ? (personalizationRow.client_can_reschedule !== false) : true,
       client_can_cancel: personalizationRow ? (personalizationRow.client_can_cancel !== false) : true,
+      // New-client self-booking. Default OFF — groomer must opt in. When off,
+      // first-timers are routed to Messages (the original hard-coded behavior).
+      client_new_client_booking_enabled: personalizationRow ? (personalizationRow.client_new_client_booking_enabled === true) : false,
     }
 
     // Master kill switch: if groomer turned off client Claude, return canned response
@@ -2177,7 +2180,10 @@ Deno.serve(async function(req) {
       })
     }
 
-    // --- Returning-client gate: must have at least 1 past or current appointment ---
+    // --- New-client gate ---
+    // First-timers (no past/current appointment) can only book through Suds if
+    // the groomer has turned ON new-client self-booking. Otherwise route them to
+    // Messages (the original behavior). Returning clients always pass.
     var { data: historyCheck } = await supabaseAdmin
       .from('appointments')
       .select('id')
@@ -2185,7 +2191,7 @@ Deno.serve(async function(req) {
       .eq('groomer_id', groomerId)
       .limit(1)
     var isReturning = historyCheck && historyCheck.length > 0
-    if (!isReturning) {
+    if (!isReturning && !toggles.client_new_client_booking_enabled) {
       return new Response(JSON.stringify({
         text: 'Welcome to the shop! Since this is your first appointment, please use the Messages tab to book directly with the groomer. Once you\'ve been in, I\'ll be able to handle future bookings for you here. 🐾'
       }), {
