@@ -47,6 +47,14 @@ export default function Dashboard() {
     setIphoneTipDismissed(true)
     try { localStorage.setItem('petpro_iphone_notif_tip_dismissed', '1') } catch (e) {}
   }
+  // Groomer's own "how to get notifications on my phone" hint — dismissible
+  var [groomerNotifHintDismissed, setGroomerNotifHintDismissed] = useState(function () {
+    try { return localStorage.getItem('petpro_groomer_notif_hint_dismissed') === '1' } catch (e) { return false }
+  })
+  function dismissGroomerNotifHint() {
+    setGroomerNotifHintDismissed(true)
+    try { localStorage.setItem('petpro_groomer_notif_hint_dismissed', '1') } catch (e) {}
+  }
   var [pets, setPets] = useState([])
   var [services, setServices] = useState([])
   var [loading, setLoading] = useState(true)
@@ -710,13 +718,36 @@ export default function Dashboard() {
       {/* Groomer's own notifications — install hint + enable control.
           EnableNotifications handles enable / turn-off / send-test itself and
           hides nothing, so the install hint sits above it. */}
-      <div style={{ marginBottom: '6px', fontSize: '13px', color: '#475569', lineHeight: 1.5 }}>
-        💡 Want a ping the moment a client books, signs up, or messages you? Turn on notifications below.
-        If you'd rather get them <strong>on your phone</strong>, you'll need PetPro installed on the phone first:
-        open PetPro on your phone, <strong>add it to your home screen</strong>, then open it from that new icon and turn
-        notifications on — tap <strong>Send test</strong> to confirm it works.
-      </div>
-      <EnableNotifications variant="hero" userType="groomer" />
+      {!groomerNotifHintDismissed && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '10px',
+          marginBottom: '8px',
+          fontSize: '13px',
+          color: '#475569',
+          lineHeight: 1.5,
+          background: '#f8fafc',
+          border: '1px solid #e2e8f0',
+          borderRadius: '10px',
+          padding: '10px 12px',
+        }}>
+          <div style={{ flex: 1 }}>
+            💡 Want a ping the moment a client books, signs up, or messages you? Turn on notifications below.
+            If you'd rather get them <strong>on your phone</strong>, you'll need PetPro installed on the phone first:
+            open PetPro on your phone, <strong>add it to your home screen</strong>, then open it from that new icon and turn
+            notifications on — tap <strong>Send test</strong> to confirm it works.
+          </div>
+          <button
+            onClick={dismissGroomerNotifHint}
+            aria-label="Dismiss"
+            style={{ flexShrink: 0, background: 'transparent', border: 'none', color: '#64748b', fontSize: '15px', cursor: 'pointer', lineHeight: 1, padding: '2px 4px' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+      <EnableNotifications variant="settings" userType="groomer" />
 
       {/* iPhone client notification heads-up — dismissible */}
       {!iphoneTipDismissed && (
