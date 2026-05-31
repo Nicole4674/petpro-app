@@ -712,9 +712,9 @@ export default function Dashboard() {
           hides nothing, so the install hint sits above it. */}
       <div style={{ marginBottom: '6px', fontSize: '13px', color: '#475569', lineHeight: 1.5 }}>
         💡 Want a ping the moment a client books, signs up, or messages you? Turn on notifications below.
-        To get them <strong>on your phone</strong>, first install PetPro: <strong>iPhone</strong> → tap Share → "Add to Home Screen";
-        <strong> Android</strong> → menu → "Install app." <strong>On a computer</strong>, click the install icon in your browser's address bar.
-        Then open PetPro from the installed icon and turn notifications on — use <strong>Send test</strong> to confirm it works.
+        If you'd rather get them <strong>on your phone</strong>, you'll need PetPro installed on the phone first:
+        open PetPro on your phone, <strong>add it to your home screen</strong>, then open it from that new icon and turn
+        notifications on — tap <strong>Send test</strong> to confirm it works.
       </div>
       <EnableNotifications variant="hero" userType="groomer" />
 
