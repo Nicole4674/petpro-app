@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { FEATURE_FLAGS } from '../lib/featureFlags'
+import EnableNotifications from '../components/EnableNotifications'
 
 var STATUS_COLORS = {
   scheduled: '#7c3aed',
@@ -706,6 +707,17 @@ export default function Dashboard() {
 
   return (
     <div className="db-page">
+      {/* Groomer's own notifications — install hint + enable control.
+          EnableNotifications handles enable / turn-off / send-test itself and
+          hides nothing, so the install hint sits above it. */}
+      <div style={{ marginBottom: '6px', fontSize: '13px', color: '#475569', lineHeight: 1.5 }}>
+        💡 Want a ping the moment a client books, signs up, or messages you? Turn on notifications below.
+        To get them <strong>on your phone</strong>, first install PetPro: <strong>iPhone</strong> → tap Share → "Add to Home Screen";
+        <strong> Android</strong> → menu → "Install app." <strong>On a computer</strong>, click the install icon in your browser's address bar.
+        Then open PetPro from the installed icon and turn notifications on — use <strong>Send test</strong> to confirm it works.
+      </div>
+      <EnableNotifications variant="hero" userType="groomer" />
+
       {/* iPhone client notification heads-up — dismissible */}
       {!iphoneTipDismissed && (
         <div style={{
