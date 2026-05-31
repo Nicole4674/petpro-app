@@ -12,12 +12,12 @@ import { Link } from 'react-router-dom'
 // Drop the screenshot files into /public/portal-preview/ with these names.
 // To reorder or add: edit this array (and add the matching image file).
 var PORTAL_SHOTS = [
-  { src: '/portal-preview/portal-home.png',       caption: 'Portal home — contact info, emergency contacts & their pets' },
-  { src: '/portal-preview/portal-book-1.png',     caption: 'Booking with Suds — "Can I book an appointment?"' },
-  { src: '/portal-preview/portal-book-2.png',     caption: 'Suds picks the pet & service together' },
-  { src: '/portal-preview/portal-book-3.png',     caption: 'Suds quotes the right price for each pup' },
-  { src: '/portal-preview/portal-book-slots.png', caption: 'Suds offers real open time slots' },
-  { src: '/portal-preview/portal-upcoming.png',   caption: 'Upcoming appointments — with one-tap Pay' },
+  { src: '/portal-preview/portal_fake_1.png',    caption: 'Portal home — contact info, emergency contacts & their pets' },
+  { src: '/portal-preview/portal_booking_1.png', caption: 'Booking with Suds — "Can I book an appointment?"' },
+  { src: '/portal-preview/portal_booking_2.png', caption: 'Suds asks which pup & narrows the service' },
+  { src: '/portal-preview/portal_booking_3.png', caption: 'Suds quotes the right price for each pup' },
+  { src: '/portal-preview/portal_booking_5.png', caption: 'Suds offers real open time slots' },
+  { src: '/portal-preview/portal_booking_4.png', caption: 'Upcoming appointments — with one-tap Pay' },
 ]
 
 // ─── Article data ──────────────────────────────────────
