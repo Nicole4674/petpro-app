@@ -84,6 +84,41 @@ Nothing here is built yet. Build the foundation (Phases 1–5) BEFORE templates/
 
 ---
 
+## SEPARATE SYSTEM — PetPro groomer→groomer referral (app growth, handoff #86)
+
+NOTE: This is DIFFERENT from Phase 2 (which is a groomer's clients referring friends).
+This one is groomers referring *other groomers* to subscribe to PetPro itself.
+
+**Model — "monthly referral credit" (like Claude's 3/3, but 1/1 refilling monthly):**
+- Each PetPro subscriber has **1 referral credit per month** (1/1 ticket).
+- They share their personal code/link (e.g. `trypetpro.com/signup?ref=NICOLE-4XK2`).
+- When the referred groomer **signs up AND pays their first bill**, BOTH the referrer
+  and the new groomer get **30% off that billing month**.
+- Using the credit empties it (1/1 → 0/1); it **refills to 1/1 at the next month**.
+- Repeatable monthly: refer 1/month for 3 months = 30% off for 3 months. Max one
+  30%-off reward active per month (does NOT stack to 60%).
+- Rationale: 30% to retain a happy customer who brings another paying customer is
+  cheaper than advertising.
+
+**Build pieces (multi-session — NOT a one-sitting build):**
+1. DB: `referral_codes` (one per groomer), `referrals` (referrer, referee, status,
+   month), monthly-credit tracking, reward/discount records.
+2. UI: a "Refer a Groomer" page showing their code + link, their 1/1 credit status
+   this month, and referral history.
+3. Signup attribution: `/signup?ref=CODE` reads the code, stamps the new groomer's
+   account with referred_by.
+4. Reward trigger: when the referred groomer pays their first bill (Stripe webhook),
+   apply 30% off the NEXT invoice for BOTH parties (Stripe coupon), mark credit used,
+   schedule refill next month.
+5. Guards: credit only refills monthly; reward only fires on a real paid first bill
+   (prevents gaming with free signups that never pay).
+
+**Suggested first slice (safe, testable on its own):** DB schema + the "Refer a
+Groomer" page that shows the code/link and 1/1 credit status. The Stripe reward
+automation (step 4) is the complex part — do it as its own step after.
+
+---
+
 ## Marketing layer — built AFTER the foundation
 
 ### Phase 6 — Marketing templates (~10 to start)
