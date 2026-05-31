@@ -148,6 +148,38 @@ serve(async (req) => {
       console.error("[signup-groomer] groomers row insert failed:", profileErr)
     }
 
+    // ─── Referral attribution (groomer→groomer, handoff #86) ─────
+    // If they signed up via someone's /signup?ref=CODE link, tag this new
+    // groomer and record the referral. Fully non-fatal — never block signup.
+    const refCode = (body.referral_code || "").toString().trim().toUpperCase()
+    if (refCode) {
+      try {
+        const { data: codeRow } = await adminClient
+          .from("groomer_referral_codes")
+          .select("groomer_id, code")
+          .eq("code", refCode)
+          .maybeSingle()
+        if (codeRow && codeRow.groomer_id && codeRow.groomer_id !== userId) {
+          await adminClient
+            .from("groomers")
+            .update({ referred_by_code: refCode })
+            .eq("id", userId)
+          await adminClient.from("groomer_referrals").insert({
+            referrer_groomer_id: codeRow.groomer_id,
+            referred_groomer_id: userId,
+            code: refCode,
+            status: "signed_up",
+            signed_up_at: new Date().toISOString(),
+          })
+          console.log(`[signup-groomer] referral recorded: ${refCode} → ${userId}`)
+        } else {
+          console.log(`[signup-groomer] referral code not found or self-referral: ${refCode}`)
+        }
+      } catch (e) {
+        console.error("[signup-groomer] referral attribution failed (non-fatal):", e)
+      }
+    }
+
     return jsonResponse({
       ok: true,
       user_id: userId,

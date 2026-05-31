@@ -19,6 +19,8 @@ const TURNSTILE_SITE_KEY = '0x4AAAAAADH8RMpMtYfD8GUy'
 export default function Signup() {
   const [searchParams] = useSearchParams()
   const tierFromUrl = searchParams.get('tier')
+  // Referral code from a groomer's share link (/signup?ref=THEIRCODE). Optional.
+  const refFromUrl = (searchParams.get('ref') || '').trim()
 
   // ─── Bypass guard ─────────────────────────────────────────────────────
   // /signup MUST be reached via the Plans page (which adds ?tier=...).
@@ -106,6 +108,7 @@ export default function Signup() {
           full_name: fullName,
           business_name: businessName,
           turnstile_token: turnstileToken,
+          referral_code: refFromUrl || null,
         },
       }
     )
@@ -172,6 +175,18 @@ export default function Signup() {
       <div className="login-container">
         <h1>PetPro</h1>
         <p>Create Your Groomer Account</p>
+        {refFromUrl && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '10px',
+            background: '#ecfdf5', border: '1px solid #86efac', borderRadius: '10px',
+            padding: '10px 14px', marginBottom: '14px', textAlign: 'left',
+          }}>
+            <span style={{ fontSize: '20px' }}>🎁</span>
+            <span style={{ fontSize: '13px', color: '#065f46', lineHeight: 1.4 }}>
+              You were referred by a fellow groomer — you'll both get <strong>30% off a month</strong> once you're subscribed!
+            </span>
+          </div>
+        )}
         <form onSubmit={handleSignup}>
           <input
             type="text"

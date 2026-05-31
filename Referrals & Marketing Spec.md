@@ -101,17 +101,28 @@ This one is groomers referring *other groomers* to subscribe to PetPro itself.
   cheaper than advertising.
 
 **Build pieces (multi-session — NOT a one-sitting build):**
-1. DB: `referral_codes` (one per groomer), `referrals` (referrer, referee, status,
-   month), monthly-credit tracking, reward/discount records.
-2. UI: a "Refer a Groomer" page showing their code + link, their 1/1 credit status
-   this month, and referral history.
-3. Signup attribution: `/signup?ref=CODE` reads the code, stamps the new groomer's
-   account with referred_by.
-4. Reward trigger: when the referred groomer pays their first bill (Stripe webhook),
-   apply 30% off the NEXT invoice for BOTH parties (Stripe coupon), mark credit used,
-   schedule refill next month.
-5. Guards: credit only refills monthly; reward only fires on a real paid first bill
-   (prevents gaming with free signups that never pay).
+1. ✅ DONE — DB: `groomer_referral_codes` + `groomer_referrals` tables, `referred_by_code`
+   on groomers, RLS. (File: `Groomer Referral Schema v1.sql`.) Monthly credit is DERIVED
+   (a referral row this calendar month = credit used), no refill cron needed.
+2. ✅ DONE — UI: `/refer` page (`src/pages/ReferGroomer.jsx`) shows shop-based code, share
+   link, 1/1 monthly credit meter, referral history. Sidebar link "🎁 Refer & Save 30%".
+   Code generated on first visit by `get-referral-code` edge function (shop-name slug +
+   unique fallback).
+3. ✅ DONE — Signup attribution: `/signup?ref=CODE` captured in `Signup.jsx`, passed to
+   `signup-groomer-with-captcha`, which stamps `referred_by_code` and inserts a
+   `groomer_referrals` row (status 'signed_up'). Referred user sees a 30%-off banner.
+4. ✅ DONE — Reward trigger: in the PLATFORM billing webhook (`Stripe Webhook Code v1.ts`,
+   deployed as `stripe-webhook`), `handleCheckoutCompleted` now calls `applyReferralReward`.
+   It creates/reuses a `REFERRAL30` coupon (30% off, duration: once) and applies it to BOTH
+   the referred groomer's and the referrer's subscription, then flips the referral row to
+   'rewarded'. NOTE: because groomers pay via static payment links, the first charge is full
+   price — the 30% lands on each party's NEXT invoice (not the month they just paid). Banner
+   wording updated to "30% off a month" to match. Stripe allows only one discount per
+   subscription, so it can't stack past 30%.
+5. ⚠️ PARTIAL — Guards: reward only fires on a real paid bill (webhook = real payment) ✅.
+   "Only 1 reward per referrer per month" is NOT separately enforced yet — but the
+   single-discount-per-subscription rule means a referrer can't exceed 30% off in a month
+   anyway. Revisit if we want to also CAP how many referrals earn in a month.
 
 **Suggested first slice (safe, testable on its own):** DB schema + the "Refer a
 Groomer" page that shows the code/link and 1/1 credit status. The Stripe reward

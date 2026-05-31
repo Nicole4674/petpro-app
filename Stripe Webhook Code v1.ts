@@ -405,6 +405,101 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   } catch (smsErr) {
     console.error('[stripe-webhook] SMS allocation sync failed (non-fatal):', smsErr)
   }
+
+  // ─── REFERRAL REWARD ───────────────────────────────────────────────
+  // If this groomer signed up via another groomer's referral link, give 30%
+  // off the next bill to BOTH of them. Non-fatal — never break billing sync.
+  try {
+    await applyReferralReward(groomerId, subscriptionId)
+  } catch (refErr) {
+    console.error('[stripe-webhook] Referral reward failed (non-fatal):', refErr)
+  }
+}
+
+// ─── REFERRAL REWARD HELPERS (groomer→groomer, handoff #86) ─────────────
+const REFERRAL_COUPON_ID = 'REFERRAL30'
+
+// Create the reusable "30% off one billing cycle" coupon once, then reuse it.
+async function getOrCreateReferralCoupon(): Promise<string> {
+  try {
+    await stripe.coupons.retrieve(REFERRAL_COUPON_ID)
+  } catch (_e) {
+    await stripe.coupons.create({
+      id: REFERRAL_COUPON_ID,
+      percent_off: 30,
+      duration: 'once',
+      name: 'PetPro Referral — 30% off one month',
+    })
+  }
+  return REFERRAL_COUPON_ID
+}
+
+// Apply a coupon to a subscription. Tries the new `discounts` field first, then
+// falls back to the legacy `coupon` field for older API behavior. One discount
+// per subscription, so re-applying can't stack to more than 30%.
+async function applyCouponToSub(subId: string, couponId: string): Promise<boolean> {
+  try {
+    await stripe.subscriptions.update(subId, { discounts: [{ coupon: couponId }] } as any)
+    return true
+  } catch (_e1) {
+    try {
+      await stripe.subscriptions.update(subId, { coupon: couponId } as any)
+      return true
+    } catch (e2) {
+      console.error('[referral] coupon apply failed:', (e2 as any)?.message)
+      return false
+    }
+  }
+}
+
+// When a REFERRED groomer pays their first PetPro bill, give 30% off the next
+// invoice to both them and whoever referred them. Fires once per referral.
+async function applyReferralReward(referredGroomerId: string, referredSubId?: string) {
+  // 1. Is this groomer a referred party with an unrewarded referral?
+  const { data: ref } = await supabase
+    .from('groomer_referrals')
+    .select('id, referrer_groomer_id, status, referred_rewarded')
+    .eq('referred_groomer_id', referredGroomerId)
+    .neq('status', 'rewarded')
+    .eq('referred_rewarded', false)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  if (!ref) return // not referred, or already rewarded
+
+  // 2. Look up the referrer's subscription
+  const { data: referrer } = await supabase
+    .from('groomers')
+    .select('id, stripe_subscription_id')
+    .eq('id', ref.referrer_groomer_id)
+    .maybeSingle()
+
+  const couponId = await getOrCreateReferralCoupon()
+
+  // 3. Apply to the referred groomer (just subscribed)
+  let referredOk = false
+  if (referredSubId) referredOk = await applyCouponToSub(referredSubId, couponId)
+
+  // 4. Apply to the referrer (only if they currently have a subscription)
+  let referrerOk = false
+  if (referrer && referrer.stripe_subscription_id) {
+    referrerOk = await applyCouponToSub(referrer.stripe_subscription_id, couponId)
+  }
+
+  // 5. Mark the referral rewarded
+  const nowIso = new Date().toISOString()
+  await supabase
+    .from('groomer_referrals')
+    .update({
+      status: 'rewarded',
+      referred_rewarded: referredOk,
+      referrer_rewarded: referrerOk,
+      rewarded_at: nowIso,
+      reward_month: nowIso.slice(0, 7) + '-01',
+    })
+    .eq('id', ref.id)
+
+  console.log(`[referral] rewarded ${ref.id} — referred=${referredOk} referrer=${referrerOk}`)
 }
 
 // ─── WELCOME EMAIL HELPER ──────────────────────────────────────────────
