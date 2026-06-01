@@ -720,6 +720,38 @@ export default function Route() {
                           : '📧 Send heads-up email'}
                       </button>
                     )}
+
+                    {/* Next stop — opens GPS to the FOLLOWING stop in route
+                        order. Last stop shows a finish note instead. */}
+                    {idx < displayStops.length - 1 && displayStops[idx + 1].address && (
+                      <a
+                        href={mapsUrl(displayStops[idx + 1].address)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open GPS to your next stop"
+                        style={{
+                          marginTop: '8px',
+                          display: 'block',
+                          width: '100%',
+                          padding: '10px 14px',
+                          background: '#4f46e5',
+                          color: '#fff',
+                          borderRadius: '8px',
+                          fontWeight: 700,
+                          fontSize: '13px',
+                          textAlign: 'center',
+                          textDecoration: 'none',
+                          boxSizing: 'border-box',
+                        }}
+                      >
+                        🚗 Next stop → {displayStops[idx + 1].clientName || 'next stop'}
+                      </a>
+                    )}
+                    {idx === displayStops.length - 1 && displayStops.length > 1 && (
+                      <div style={{ marginTop: '8px', fontSize: '12px', color: '#6b7280', textAlign: 'center', fontWeight: 600 }}>
+                        🏁 Last stop of the day
+                      </div>
+                    )}
                   </div>
 
                   {/* Quick actions — call + nav */}
