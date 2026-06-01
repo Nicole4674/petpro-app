@@ -269,14 +269,17 @@ export default function Route() {
       var { data: appts, error: apptErr } = await supabase
         .from('appointments')
         .select(`
-          id, appointment_date, start_time, status, client_id, is_mobile_visit,
+          id, appointment_date, start_time, status, client_id, is_mobile_visit, is_mobile_pickup,
           clients:client_id(first_name, last_name, phone, email, address, address_notes, latitude, longitude),
           pets:pet_id(name),
           services:service_id(service_name)
         `)
         .eq('groomer_id', user.id)
         .eq('appointment_date', today)
-        .eq('is_mobile_visit', true)
+        // Include BOTH mobile types: mobile visits (groom at home) AND mobile
+        // pickups (drive to client, pick up, groom at shop, drop off). Both
+        // require driving to the client, so both belong on the route.
+        .or('is_mobile_visit.eq.true,is_mobile_pickup.eq.true')
         .neq('status', 'cancelled')
         .order('start_time', { ascending: true })
 
@@ -343,19 +346,23 @@ export default function Route() {
 
       ;(appts || []).forEach(function (a) {
         var client = a.clients || {}
+        // Mobile pickups get a 🚐 marker so they read differently from a
+        // groom-at-home mobile visit on the route list.
+        var isPickup = a.is_mobile_pickup === true
+        var nameStr = [client.first_name, client.last_name].filter(Boolean).join(' ')
         var stop = makeStop({
           id: 'appt-' + a.id,
           dbId: a.id,
           type: 'grooming',
           time: a.start_time,
-          timeLabel: fmtTime(a.start_time),
+          timeLabel: fmtTime(a.start_time) + (isPickup ? ' · 🚐 pickup' : ''),
           status: a.status,
           client: client,
           clientId: a.client_id,
           petName: a.pets && a.pets.name,
           serviceName: a.services && a.services.service_name,
-          label: (a.pets && a.pets.name ? a.pets.name + ' · ' : '') +
-                 [client.first_name, client.last_name].filter(Boolean).join(' '),
+          label: (isPickup ? '🚐 ' : '') +
+                 (a.pets && a.pets.name ? a.pets.name + ' · ' : '') + nameStr,
         })
         if (stop) combined.push(stop)
       })
