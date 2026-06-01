@@ -161,7 +161,7 @@ export default function Route() {
         var { data: shop } = await supabase
           .from('shop_settings')
           .select('shop_name, sms_templates')
-          .eq('user_id', user.id)
+          .eq('groomer_id', user.id)
           .maybeSingle()
         var templates = (shop && shop.sms_templates) || {}
         var tpl = templates.running_late ||
@@ -721,14 +721,16 @@ export default function Route() {
                       </button>
                     )}
 
-                    {/* Next stop — opens GPS to the FOLLOWING stop in route
-                        order. Last stop shows a finish note instead. */}
-                    {idx < displayStops.length - 1 && displayStops[idx + 1].address && (
+                    {/* Navigate to THIS stop — each stop routes to its OWN
+                        address, so there's no "next vs first" confusion. You
+                        work the list top to bottom: tap stop 1's button, do it,
+                        then tap stop 2's. */}
+                    {s.address && (
                       <a
-                        href={mapsUrl(displayStops[idx + 1].address)}
+                        href={mapsUrl(s.address)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        title="Open GPS to your next stop"
+                        title="Open GPS to this stop"
                         style={{
                           marginTop: '8px',
                           display: 'block',
@@ -744,13 +746,8 @@ export default function Route() {
                           boxSizing: 'border-box',
                         }}
                       >
-                        🚗 Next stop → {displayStops[idx + 1].clientName || 'next stop'}
+                        🧭 Navigate to {s.firstName || s.clientName || 'this stop'}
                       </a>
-                    )}
-                    {idx === displayStops.length - 1 && displayStops.length > 1 && (
-                      <div style={{ marginTop: '8px', fontSize: '12px', color: '#6b7280', textAlign: 'center', fontWeight: 600 }}>
-                        🏁 Last stop of the day
-                      </div>
                     )}
                   </div>
 

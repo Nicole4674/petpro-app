@@ -249,7 +249,7 @@ export default function Calendar() {
             var { data: shop } = await supabase
                 .from('shop_settings')
                 .select('shop_name, sms_templates, address, phone, email')
-                .eq('user_id', user.id)
+                .eq('groomer_id', user.id)
                 .maybeSingle()
             if (shop) {
                 if (shop.shop_name) setShopName(shop.shop_name)
