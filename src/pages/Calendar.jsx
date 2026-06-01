@@ -4346,6 +4346,8 @@ export default function Calendar() {
                                 } else if (step === 'at_shop') {
                                     stepLabel = '🏪 Pet at shop — groom in progress'
                                     stepBg = '#fef3c7'; stepBorder = '#fbbf24'; stepColor = '#92400e'
+                                } else if (step === 'enroute_dropoff') {
+                                    stepLabel = '🚗 On the way — heading to drop-off'
                                 } else if (step === 'dropoff_arrived') {
                                     stepLabel = '🏠 Arrived for drop-off'
                                 } else if (step === 'completed') {
@@ -4490,15 +4492,30 @@ export default function Calendar() {
                                                 </>
                                             )}
 
-                                            {/* At shop — when ready, drop off */}
+                                            {/* At shop — groom in progress. When done, tapping GPS
+                                                STARTS the drive to drop-off (advances to en route) so
+                                                it doesn't stay stuck on "groom in progress". */}
                                             {step === 'at_shop' && (
                                                 <>
-                                                    {clientGpsUrl && (
+                                                    {clientGpsUrl ? (
                                                         <a href={clientGpsUrl} target="_blank" rel="noopener noreferrer"
+                                                            onClick={function () { advancePickupStep('enroute_dropoff') }}
                                                             style={btn({ background: '#4f46e5', color: '#fff' })}>
-                                                            🏠 Open GPS to drop off at {clientFirst}'s
+                                                            🏠 Done grooming — Open GPS to drop off at {clientFirst}'s
                                                         </a>
+                                                    ) : (
+                                                        <button
+                                                            onClick={function () { advancePickupStep('enroute_dropoff') }}
+                                                            style={btn({ background: '#4f46e5', color: '#fff' })}
+                                                        >🏠 Done grooming — head to drop-off</button>
                                                     )}
+                                                </>
+                                            )}
+
+                                            {/* En route to drop-off — arrived button (texts client)
+                                                + re-open GPS in case they need directions again. */}
+                                            {step === 'enroute_dropoff' && (
+                                                <>
                                                     <button
                                                         onClick={async function () {
                                                             var ok = await sendArrivalSms('dropoff_arrived')
@@ -4506,7 +4523,13 @@ export default function Calendar() {
                                                         }}
                                                         disabled={mobileActionBusy}
                                                         style={btn({ background: '#16a34a', color: '#fff', opacity: mobileActionBusy ? 0.7 : 1 })}
-                                                    >📱 I'm here for drop-off (sends text)</button>
+                                                    >📱 I'm here for drop-off (texts {clientFirst})</button>
+                                                    {clientGpsUrl && (
+                                                        <a href={clientGpsUrl} target="_blank" rel="noopener noreferrer"
+                                                            style={btn({ background: '#fff', color: '#4f46e5', border: '1.5px solid #c7d2fe' })}>
+                                                            🗺️ Re-open GPS to {clientFirst}
+                                                        </a>
+                                                    )}
                                                 </>
                                             )}
 
