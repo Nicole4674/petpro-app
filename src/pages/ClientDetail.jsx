@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { formatPhone, formatPhoneOnInput } from '../lib/phone'
 import { mapsUrl, telUrl } from '../lib/maps'
+import { formatPetAge } from '../lib/petAge'
 import AddressInput from '../components/AddressInput'
 import GroomingNotesText from '../components/GroomingNotesText'
 
@@ -1411,7 +1412,7 @@ export default function ClientDetail() {
                             <h4 className="cp-pet-name">{pet.name}</h4>
                             <p className="cp-pet-breed">{pet.breed} · {pet.weight}lbs</p>
                             <p className="cp-pet-details">
-                              {pet.age && <span>{pet.age}</span>}
+                              {pet.age && <span>{formatPetAge(pet.age)}</span>}
                               {pet.sex && <span> · {pet.sex}</span>}
                               {pet.is_spayed_neutered && <span> · Fixed</span>}
                               {!pet.is_spayed_neutered && pet.sex && <span> · Intact</span>}

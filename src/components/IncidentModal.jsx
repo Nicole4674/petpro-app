@@ -17,6 +17,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatPhone } from '../lib/phone'
+import { formatPetAge } from '../lib/petAge'
 
 var INCIDENT_TYPES = [
   { value: 'bite',            label: '🦷 Bite' },
@@ -276,7 +277,7 @@ export default function IncidentModal({ mode, petId, clientId, appointmentId, st
                   <div style={{ fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: '700' }}>Pet</div>
                   <div style={{ fontWeight: '700' }}>{petInfo.name}</div>
                   <div style={{ color: '#6b7280', fontSize: '12px' }}>
-                    {[petInfo.breed, petInfo.weight ? petInfo.weight + ' lbs' : null, petInfo.age ? petInfo.age + ' yrs' : null].filter(Boolean).join(' · ')}
+                    {[petInfo.breed, petInfo.weight ? petInfo.weight + ' lbs' : null, petInfo.age ? formatPetAge(petInfo.age) : null].filter(Boolean).join(' · ')}
                   </div>
                 </div>
                 <div>

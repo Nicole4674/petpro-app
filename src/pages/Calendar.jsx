@@ -17,6 +17,7 @@ import { formatPhone } from '../lib/phone'
 import { FEATURE_FLAGS } from '../lib/featureFlags'
 import { computeCoverage, recordSubscriptionUsage } from '../lib/subscriptionCoverage'
 import { mapsUrl, telUrl } from '../lib/maps'
+import { formatPetAge } from '../lib/petAge'
 
 const HOURS = []
 for (let h = 7; h <= 18; h++) {
@@ -5040,7 +5041,7 @@ export default function Calendar() {
                                                             <div className="appt-detail-pet-info">
                                                                 {ap.pets?.breed || 'Unknown breed'}
                                                                 {ap.pets?.weight ? ' · ' + ap.pets.weight + ' lbs' : ''}
-                                                                {ap.pets?.age ? ' · ' + ap.pets.age : ''}
+                                                                {ap.pets?.age ? ' · ' + formatPetAge(ap.pets.age) : ''}
                                                                 {ap.pets?.sex ? ' · ' + ap.pets.sex : ''}
                                                             </div>
                                                             <div className="appt-detail-pet-tags">
@@ -5582,7 +5583,7 @@ export default function Calendar() {
                                                     <div className="appt-detail-pet-info">
                                                         {selectedAppt.pets.breed || 'Unknown breed'}
                                                         {selectedAppt.pets.weight ? ' · ' + selectedAppt.pets.weight + ' lbs' : ''}
-                                                        {selectedAppt.pets.age ? ' · ' + selectedAppt.pets.age : ''}
+                                                        {selectedAppt.pets.age ? ' · ' + formatPetAge(selectedAppt.pets.age) : ''}
                                                         {selectedAppt.pets.sex ? ' · ' + selectedAppt.pets.sex : ''}
                                                     </div>
                                                 </div>

@@ -21,6 +21,7 @@ import { DOG_BREEDS, CAT_BREEDS } from '../lib/breeds'
 import { formatPhone, formatPhoneOnInput } from '../lib/phone'
 import { FEATURE_FLAGS } from '../lib/featureFlags'
 import { mapsUrl, telUrl } from '../lib/maps'
+import { formatPetAge } from '../lib/petAge'
 
 const TABS = [
   { key: 'overview', label: '🐾 Overview' },
@@ -1498,7 +1499,7 @@ export default function ClientPortalDashboard() {
                               {pet.weight ? ' · ' + pet.weight + 'lbs' : ''}
                             </p>
                             {pet.age && (
-                              <p className="cp-pet-details">Age: {pet.age}</p>
+                              <p className="cp-pet-details">Age: {formatPetAge(pet.age)}</p>
                             )}
                           </div>
                         </div>

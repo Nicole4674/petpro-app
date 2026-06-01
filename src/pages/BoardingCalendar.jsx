@@ -9,6 +9,7 @@ import AddRetailModal from '../components/AddRetailModal'
 import { loadAttached as loadAttachedRetail, saveAttached as saveAttachedRetail, markCompleted as markRetailCompleted } from '../lib/attachedRetail'
 import { formatPhone } from '../lib/phone'
 import { mapsUrl, telUrl } from '../lib/maps'
+import { formatPetAge } from '../lib/petAge'
 import '../boarding-styles.css'
 
 export default function BoardingCalendar() {
@@ -1318,7 +1319,7 @@ export default function BoardingCalendar() {
             <div style="width:${isClipboard ? '48' : '36'}px;height:${isClipboard ? '48' : '36'}px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#6d28d9);color:white;display:flex;align-items:center;justify-content:center;font-size:${isClipboard ? '22' : '16'}px;font-weight:700;">${pet.name ? pet.name.charAt(0).toUpperCase() : '?'}</div>
             <div>
               <div style="font-size:${isClipboard ? '22' : '16'}px;font-weight:800;color:#1e293b;">${pet.name || 'Unknown'}</div>
-              <div style="font-size:${isClipboard ? '14' : '11'}px;color:#64748b;">${pet.breed || ''} ${pet.weight ? '· ' + pet.weight + ' lbs' : ''} ${pet.age ? '· ' + pet.age : ''} ${pet.sex ? '· ' + pet.sex : ''}</div>
+              <div style="font-size:${isClipboard ? '14' : '11'}px;color:#64748b;">${pet.breed || ''} ${pet.weight ? '· ' + pet.weight + ' lbs' : ''} ${pet.age ? '· ' + formatPetAge(pet.age) : ''} ${pet.sex ? '· ' + pet.sex : ''}</div>
               <div style="margin-top:4px;">
                 <span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;background:${pet.is_spayed_neutered ? '#dcfce7;color:#16a34a' : '#fef3c7;color:#d97706'}">${pet.is_spayed_neutered ? 'Spayed/Neutered' : 'Intact'}</span>
               </div>
@@ -2418,7 +2419,7 @@ export default function BoardingCalendar() {
                         <div className="kc-pet-details">
                           {pet.breed || 'Unknown breed'}
                           {pet.weight ? ' · ' + pet.weight + ' lbs' : ''}
-                          {pet.age ? ' · ' + pet.age : ''}
+                          {pet.age ? ' · ' + formatPetAge(pet.age) : ''}
                           {pet.sex ? ' · ' + pet.sex : ''}
                         </div>
                         <div className="kc-pet-tags">

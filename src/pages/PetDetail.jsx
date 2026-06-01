@@ -5,6 +5,7 @@ import IncidentModal from '../components/IncidentModal'
 import { BehaviorTagsRow, BehaviorTagsEditor } from '../components/BehaviorTags'
 import ReportCardModal from '../components/ReportCardModal'
 import { formatPhone } from '../lib/phone'
+import { formatPetAge } from '../lib/petAge'
 
 var TABS = [
   { key: 'overview', label: '🐾 Overview' },
@@ -843,7 +844,7 @@ export default function PetDetail() {
                 </span>
               )}
               {pet.weight && <span className="pd-tag">⚖️ {pet.weight} lbs</span>}
-              {pet.age && <span className="pd-tag">🎂 {pet.age}</span>}
+              {pet.age && <span className="pd-tag">🎂 {formatPetAge(pet.age)}</span>}
               {pet.sex && <span className="pd-tag">{(pet.sex || '').toLowerCase() === 'male' ? '♂️' : '♀️'} {pet.sex.charAt(0).toUpperCase() + pet.sex.slice(1).toLowerCase()}</span>}
               {pet.is_spayed_neutered && <span className="pd-tag pd-tag-green">✅ Fixed</span>}
               {!pet.is_spayed_neutered && pet.sex && <span className="pd-tag pd-tag-amber">⚠️ Intact</span>}
@@ -938,7 +939,7 @@ export default function PetDetail() {
                   </div>
                   <div className="pd-info-row">
                     <span className="pd-info-label">Age</span>
-                    <span className="pd-info-value">{pet.age || '—'}</span>
+                    <span className="pd-info-value">{formatPetAge(pet.age) || '—'}</span>
                   </div>
                   <div className="pd-info-row">
                     <span className="pd-info-label">Sex</span>
