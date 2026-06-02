@@ -390,29 +390,42 @@ export default function Dashboard() {
     //   - balance > 0 (computed below from payments)
     // is_archived filter happens in JS after fetch because Supabase can't
     // easily filter on a nested join column. Status filter is applied here.
+    // Only pull appointments that could actually be owed: serviced (checked out
+    // or completed) OR already past-dated. Pulling every future booking too
+    // balloons the result set and breaks the payments lookup below (a large
+    // id list silently returns partial data → paid appts wrongly shown as owed).
+    var now = new Date()
+    var todayStr = now.getFullYear() + '-' +
+      String(now.getMonth() + 1).padStart(2, '0') + '-' +
+      String(now.getDate()).padStart(2, '0')
     var { data: appts } = await supabase
       .from('appointments')
       .select('id, status, quoted_price, final_price, discount_amount, appointment_date, checked_out_at, clients:client_id(id, first_name, last_name), pets:pet_id(name, is_archived)')
       .eq('groomer_id', userId)
       .not('status', 'in', '(cancelled,no_show,rescheduled)')
+      .or('checked_out_at.not.is.null,status.eq.completed,appointment_date.lt.' + todayStr)
 
     if (!appts || appts.length === 0) {
       setOwedSummary({ total: 0, clientCount: 0, top3: [] })
       return
     }
 
-    // Sum payments per appointment
+    // Sum payments per appointment — fetched in chunks. A single .in() with a
+    // large id list can hit URL limits / the 1000-row cap and return partial
+    // data, which would make fully-paid appointments wrongly look unpaid.
     var apptIds = appts.map(function(a) { return a.id })
-    var { data: payments } = await supabase
-      .from('payments')
-      .select('appointment_id, amount')
-      .in('appointment_id', apptIds)
-
     var paidMap = {}
-    ;(payments || []).forEach(function(p) {
-      if (!paidMap[p.appointment_id]) paidMap[p.appointment_id] = 0
-      paidMap[p.appointment_id] += parseFloat(p.amount || 0)
-    })
+    for (var ci = 0; ci < apptIds.length; ci += 100) {
+      var idChunk = apptIds.slice(ci, ci + 100)
+      var { data: payChunk } = await supabase
+        .from('payments')
+        .select('appointment_id, amount')
+        .in('appointment_id', idChunk)
+      ;(payChunk || []).forEach(function(p) {
+        if (!paidMap[p.appointment_id]) paidMap[p.appointment_id] = 0
+        paidMap[p.appointment_id] += parseFloat(p.amount || 0)
+      })
+    }
 
     // Compute unpaid with balance. Skip rows where the pet has been archived
     // (groomer cleaned up old records) — they're historical noise, not

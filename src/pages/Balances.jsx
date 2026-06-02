@@ -41,6 +41,10 @@ export default function Balances() {
       `)
       .eq('groomer_id', user.id)
       .not('status', 'in', '(cancelled,no_show,rescheduled)')
+      .or('checked_out_at.not.is.null,status.eq.completed,appointment_date.lt.' +
+          (new Date().getFullYear() + '-' +
+           String(new Date().getMonth() + 1).padStart(2, '0') + '-' +
+           String(new Date().getDate()).padStart(2, '0')))
       .order('appointment_date', { ascending: false })
 
     if (aErr) {
@@ -59,23 +63,27 @@ export default function Balances() {
     }
 
     // Get all payments for those appointments
+    // Fetch payments in chunks. A single .in() with a large id list can hit
+    // URL limits / the 1000-row cap and return partial data, which would make
+    // fully-paid appointments wrongly look unpaid.
     var apptIds = appts.map(function(a) { return a.id })
-    var { data: payments } = await supabase
-      .from('payments')
-      .select('appointment_id, amount, created_at')
-      .in('appointment_id', apptIds)
-
-    // Build payment totals map
     var paidMap = {}
     var lastPaidMap = {}
-    ;(payments || []).forEach(function(p) {
-      if (!paidMap[p.appointment_id]) paidMap[p.appointment_id] = 0
-      paidMap[p.appointment_id] += parseFloat(p.amount || 0)
-      var ts = new Date(p.created_at).getTime()
-      if (!lastPaidMap[p.appointment_id] || ts > lastPaidMap[p.appointment_id]) {
-        lastPaidMap[p.appointment_id] = ts
-      }
-    })
+    for (var ci = 0; ci < apptIds.length; ci += 100) {
+      var idChunk = apptIds.slice(ci, ci + 100)
+      var { data: payChunk } = await supabase
+        .from('payments')
+        .select('appointment_id, amount, created_at')
+        .in('appointment_id', idChunk)
+      ;(payChunk || []).forEach(function(p) {
+        if (!paidMap[p.appointment_id]) paidMap[p.appointment_id] = 0
+        paidMap[p.appointment_id] += parseFloat(p.amount || 0)
+        var ts = new Date(p.created_at).getTime()
+        if (!lastPaidMap[p.appointment_id] || ts > lastPaidMap[p.appointment_id]) {
+          lastPaidMap[p.appointment_id] = ts
+        }
+      })
+    }
 
     // Filter to appointments with unpaid balance. Skip archived-pet rows
     // (groomer cleaned up old records — that's historical noise, not real
