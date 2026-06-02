@@ -407,7 +407,17 @@ export default function ClientDetail() {
       .eq('client_id', id)
       .order('appointment_date', { ascending: false })
 
-    if (!error) setGroomingHistory(data || [])
+    if (!error) {
+      // "Past Grooming" = done or closed only, so it's the exact inverse of the
+      // Upcoming tab (which shows open appointments: checked_out_at null AND an
+      // active status). Without this filter, future/open appointments leaked in
+      // here too — e.g. a June 23 booking showing under "past" before it happened.
+      const closedStatuses = ['cancelled', 'no_show', 'completed', 'checked_out']
+      const history = (data || []).filter(a =>
+        a.checked_out_at != null || closedStatuses.includes(a.status)
+      )
+      setGroomingHistory(history)
+    }
     setLoadingTab(false)
   }
 
@@ -916,9 +926,14 @@ export default function ClientDetail() {
   }
 
   // Calculate stats
-  const totalGroomingSpent = groomingHistory.reduce((sum, a) => sum + (parseFloat(a.final_price || a.quoted_price) || 0), 0)
+  // "Done" = checked out OR explicitly marked completed. The checkout flow only
+  // sets checked_out_at (not status='completed'), so we must check both.
+  const isGroomDone = (a) => a.checked_out_at != null || a.status === 'completed'
+  // Total Spent = money actually collected, so only count done appointments.
+  // Cancelled / no-show appointments never generated revenue and are excluded.
+  const totalGroomingSpent = groomingHistory.reduce((sum, a) => isGroomDone(a) ? sum + (parseFloat(a.final_price || a.quoted_price) || 0) : sum, 0)
   const totalBoardingSpent = boardingHistory.reduce((sum, r) => sum + (parseFloat(r.total_price) || 0), 0)
-  const completedGrooming = groomingHistory.filter(a => a.status === 'completed').length
+  const completedGrooming = groomingHistory.filter(isGroomDone).length
   const totalBoardingNights = boardingHistory.reduce((sum, r) => {
     if (r.status === 'cancelled') return sum
     const start = new Date(r.start_date)
