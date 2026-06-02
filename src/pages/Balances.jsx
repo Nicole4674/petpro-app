@@ -40,7 +40,6 @@ export default function Balances() {
         services:service_id ( service_name )
       `)
       .eq('groomer_id', user.id)
-      .not('checked_out_at', 'is', null)
       .not('status', 'in', '(cancelled,no_show,rescheduled)')
       .order('appointment_date', { ascending: false })
 
@@ -81,12 +80,22 @@ export default function Balances() {
     // Filter to appointments with unpaid balance. Skip archived-pet rows
     // (groomer cleaned up old records — that's historical noise, not real
     // collectible debt) and skip rows missing client info entirely.
+    // Midnight today — used to tell whether an appointment's service has happened/was due.
+    var todayMidnight = new Date()
+    todayMidnight.setHours(0, 0, 0, 0)
+
     var unpaid = []
     appts.forEach(function(a) {
       if (!a.clients) return
       // No pet row at all = pet was hard-deleted. Skip; can't collect on a
       // ghost. Archived pet = groomer cleaned up records, also skip.
       if (!a.pets || a.pets.is_archived === true) return
+      // Only count money owed once the service has actually happened (or was due).
+      // Checked out, marked completed, OR a past-dated appointment all qualify.
+      // Without this, unpaid FUTURE bookings would wrongly show as money owed.
+      var apptDay = new Date(a.appointment_date + 'T00:00:00')
+      var serviced = a.checked_out_at != null || a.status === 'completed' || apptDay < todayMidnight
+      if (!serviced) return
       var servicePrice = parseFloat(a.final_price != null ? a.final_price : (a.quoted_price || 0))
       var discount = parseFloat(a.discount_amount || 0)
       var totalDue = servicePrice - discount

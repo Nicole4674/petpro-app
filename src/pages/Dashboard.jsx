@@ -392,9 +392,8 @@ export default function Dashboard() {
     // easily filter on a nested join column. Status filter is applied here.
     var { data: appts } = await supabase
       .from('appointments')
-      .select('id, status, quoted_price, final_price, discount_amount, appointment_date, clients:client_id(id, first_name, last_name), pets:pet_id(name, is_archived)')
+      .select('id, status, quoted_price, final_price, discount_amount, appointment_date, checked_out_at, clients:client_id(id, first_name, last_name), pets:pet_id(name, is_archived)')
       .eq('groomer_id', userId)
-      .not('checked_out_at', 'is', null)
       .not('status', 'in', '(cancelled,no_show,rescheduled)')
 
     if (!appts || appts.length === 0) {
@@ -418,12 +417,22 @@ export default function Dashboard() {
     // Compute unpaid with balance. Skip rows where the pet has been archived
     // (groomer cleaned up old records) — they're historical noise, not
     // collectible debt. Also skip rows missing client info entirely.
+    // Midnight today — used to tell whether an appointment's service has happened/was due.
+    var todayMidnight = new Date()
+    todayMidnight.setHours(0, 0, 0, 0)
+
     var unpaid = []
     appts.forEach(function(a) {
       if (!a.clients) return
       // No pet row at all = pet was hard-deleted. Skip; can't collect on a
       // ghost. Archived pet = groomer cleaned up records, also skip.
       if (!a.pets || a.pets.is_archived === true) return
+      // Only count money owed once the service has actually happened (or was due).
+      // Checked out, marked completed, OR a past-dated appointment all qualify.
+      // Without this, unpaid FUTURE bookings would wrongly show as money owed.
+      var apptDay = new Date(a.appointment_date + 'T00:00:00')
+      var serviced = a.checked_out_at != null || a.status === 'completed' || apptDay < todayMidnight
+      if (!serviced) return
       var servicePrice = parseFloat(a.final_price != null ? a.final_price : (a.quoted_price || 0))
       var discount = parseFloat(a.discount_amount || 0)
       var totalDue = servicePrice - discount
