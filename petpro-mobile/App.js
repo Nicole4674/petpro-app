@@ -16,6 +16,7 @@ import ClientsScreen from './screens/ClientsScreen';
 import ClientDetailScreen from './screens/ClientDetailScreen';
 import AddClientScreen from './screens/AddClientScreen';
 import PetDetailScreen from './screens/PetDetailScreen';
+import AddPetScreen from './screens/AddPetScreen';
 import AppointmentDetailScreen from './screens/AppointmentDetailScreen';
 import AddAppointmentScreen from './screens/AddAppointmentScreen';
 import MoreScreen from './screens/MoreScreen';
@@ -116,6 +117,9 @@ function ClientsStack({ session }) {
       </ClientsStackNav.Screen>
       <ClientsStackNav.Screen name="PetDetail">
         {(props) => <PetDetailScreen {...props} session={session} />}
+      </ClientsStackNav.Screen>
+      <ClientsStackNav.Screen name="AddPet">
+        {(props) => <AddPetScreen {...props} session={session} />}
       </ClientsStackNav.Screen>
       <ClientsStackNav.Screen name="AppointmentDetail">
         {(props) => <AppointmentDetailScreen {...props} session={session} />}

@@ -49,7 +49,7 @@ export default function PetDetailScreen({ route, navigation }) {
     try {
       const { data, error } = await supabase
         .from('pets')
-        .select('id, name, breed, weight, age, sex, is_spayed_neutered, coat_type, microchip_id, allergies, medications, vaccination_expiry, vet_name, vet_phone, temperament, special_handling, behavior_tags')
+        .select('*')
         .eq('id', petId)
         .maybeSingle();
       if (error) throw error;
@@ -140,7 +140,7 @@ export default function PetDetailScreen({ route, navigation }) {
           <View style={styles.card}>
             <View style={styles.cardHead}><Ionicons name="happy-outline" size={16} color={colors.primary} /><Text style={styles.cardTitle}>Temperament & Handling</Text></View>
             <InfoRow label="Temperament" value={pet.temperament || 'Not noted'} />
-            <InfoRow label="Special Handling" value={pet.special_handling || 'None needed'} color={pet.special_handling ? '#b45309' : undefined} />
+            <InfoRow label="Special Handling" value={pet.behavior_notes || pet.special_handling || 'None needed'} color={(pet.behavior_notes || pet.special_handling) ? '#b45309' : undefined} />
           </View>
         </ScrollView>
       )}

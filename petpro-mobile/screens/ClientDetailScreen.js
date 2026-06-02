@@ -144,7 +144,13 @@ export default function ClientDetailScreen({ session, route, navigation }) {
           </View>
 
           {/* Pets */}
-          <Text style={styles.section}>Pets ({pets.length})</Text>
+          <View style={styles.sectionRow}>
+            <Text style={styles.section}>Pets ({pets.length})</Text>
+            <Pressable style={({ pressed }) => [styles.addPetBtn, pressed && { opacity: 0.7 }]} onPress={() => navigation.navigate('AddPet', { clientId, clientName: fullName })}>
+              <Ionicons name="add" size={16} color={colors.primaryDark} />
+              <Text style={styles.addPetText}>Add Pet</Text>
+            </Pressable>
+          </View>
           {pets.length === 0 ? (
             <Text style={styles.muted}>No pets added yet.</Text>
           ) : (
@@ -230,6 +236,9 @@ const styles = StyleSheet.create({
   actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.primaryLight, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14 },
   actionText: { color: colors.primaryDark, fontWeight: '800', fontSize: 14 },
   section: { fontSize: 13, fontWeight: '800', color: colors.textMute, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10, marginLeft: 4 },
+  sectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  addPetBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: colors.primaryLight, borderRadius: 16, paddingVertical: 6, paddingHorizontal: 12, marginBottom: 10 },
+  addPetText: { color: colors.primaryDark, fontWeight: '800', fontSize: 13 },
   petCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: colors.border },
   petIcon: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
   petName: { fontSize: 16, fontWeight: '800', color: colors.text },
