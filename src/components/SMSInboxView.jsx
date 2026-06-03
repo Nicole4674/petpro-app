@@ -11,11 +11,12 @@
 // =============================================================================
 
 import { useState, useEffect, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { formatPhone } from '../lib/phone'
 
 export default function SMSInboxView() {
+  var navigate = useNavigate() // clickable client name -> profile
   // Deep-link support: if Messages was opened with ?client=<id> we auto-select
   // that client's conversation on mount. Used by the appointment popup "View
   // full conversation" link so one click lands the groomer on the right thread.
@@ -290,7 +291,15 @@ export default function SMSInboxView() {
                 var conv = conversations.find(function (c) { return (c.client_id || c.key) === selectedClientId })
                 return conv ? (
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: '15px', color: '#1f2937' }}>{conv.client_name}</div>
+                    {conv.client_id ? (
+                      <div
+                        onClick={function () { navigate('/clients/' + conv.client_id) }}
+                        title="View client profile"
+                        style={{ fontWeight: 700, fontSize: '15px', color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}
+                      >{conv.client_name}</div>
+                    ) : (
+                      <div style={{ fontWeight: 700, fontSize: '15px', color: '#1f2937' }}>{conv.client_name}</div>
+                    )}
                     <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>{formatPhone(conv.client_phone)}</div>
                   </div>
                 ) : <div style={{ flex: 1 }} />
