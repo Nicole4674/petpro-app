@@ -5603,16 +5603,40 @@ export default function Calendar() {
                                 </>
                             )}
 
-                            {/* Grooming Notes — historical (per-pet pinned notes are now shown inside each pet card) */}
+                            {/* Grooming Notes — recent only. Full history lives on the dog's profile
+                                so a heavily-noted dog never clutters this popup. */}
                             {selectedAppt.groomingNotes && selectedAppt.groomingNotes.length > 0 && (
                                 <div className="appt-detail-section">
-                                    <div className="appt-detail-section-title">✂️ Past Grooming Notes</div>
-                                    {selectedAppt.groomingNotes.map(note => (
-                                        <div key={note.id} className="appt-groom-note">
-                                            <span className="appt-groom-note-badge">✂️ {new Date(note.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                                            {note.note}
-                                        </div>
-                                    ))}
+                                    <div className="appt-detail-section-title">✂️ Recent Grooming Notes</div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        {selectedAppt.groomingNotes.slice(0, 3).map(note => (
+                                            <div
+                                                key={note.id}
+                                                style={{
+                                                    background: '#f0fdf4',
+                                                    border: '1px solid #bbf7d0',
+                                                    borderLeft: '4px solid #16a34a',
+                                                    borderRadius: '8px',
+                                                    padding: '8px 10px',
+                                                }}
+                                            >
+                                                <div style={{ fontSize: '11px', fontWeight: 700, color: '#166534', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                                                    ✂️ {new Date(note.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                </div>
+                                                <div style={{ fontSize: '13px', color: '#14532d', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                                                    {note.note}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {selectedAppt.pet_id && (
+                                        <Link
+                                            to={'/pets/' + selectedAppt.pet_id}
+                                            style={{ display: 'inline-block', marginTop: '8px', fontSize: '12px', fontWeight: 600, color: '#15803d', textDecoration: 'none' }}
+                                        >
+                                            See all {selectedAppt.pets?.name ? (selectedAppt.pets.name + "'s") : ''} notes on profile →
+                                        </Link>
+                                    )}
                                 </div>
                             )}
 
