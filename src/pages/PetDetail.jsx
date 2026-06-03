@@ -228,10 +228,14 @@ export default function PetDetail() {
 
   async function fetchNotes() {
     setLoadingTab(true)
+    // Grooming notes live in client_notes (note_type 'grooming') — the SAME
+    // table the appointment popup writes to. Reading it here means a note added
+    // on an appointment shows up on the dog's profile, and vice versa.
     var { data } = await supabase
-      .from('notes')
+      .from('client_notes')
       .select('*')
       .eq('pet_id', id)
+      .eq('note_type', 'grooming')
       .order('created_at', { ascending: false })
 
     setNotes(data || [])
@@ -339,16 +343,13 @@ export default function PetDetail() {
     if (!newNote.trim()) return
     setSavingNote(true)
 
-    var { data: { user } } = await supabase.auth.getUser()
-
     var { error } = await supabase
-      .from('notes')
+      .from('client_notes')
       .insert([{
         pet_id: id,
         client_id: pet.client_id,
-        groomer_id: user.id,
         note_type: 'grooming',
-        content: newNote.trim()
+        note: newNote.trim()
       }])
 
     if (!error) {
@@ -1215,13 +1216,35 @@ export default function PetDetail() {
                   <p>Add grooming notes, behavior observations, or preferences for {pet.name}.</p>
                 </div>
               ) : (
-                <div className="pd-notes-list">
+                <div className="pd-notes-list" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {notes.map(function(note) {
                     return (
-                      <div key={note.id} className="pd-note-card">
-                        <div className="pd-note-content">{note.content}</div>
-                        <div className="pd-note-meta">
-                          {note.created_at && new Date(note.created_at).toLocaleDateString()}
+                      <div
+                        key={note.id}
+                        className="pd-note-card"
+                        style={{
+                          background: '#fff',
+                          border: '1px solid #e5e7eb',
+                          borderLeft: '4px solid #7c3aed',
+                          borderRadius: '10px',
+                          padding: '12px 14px',
+                        }}
+                      >
+                        <div
+                          className="pd-note-meta"
+                          style={{
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            color: '#7c3aed',
+                            marginBottom: '6px',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.3px',
+                          }}
+                        >
+                          ✂️ {note.created_at && new Date(note.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </div>
+                        <div className="pd-note-content" style={{ fontSize: '14px', color: '#111827', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                          {note.note || note.content}
                         </div>
                       </div>
                     )
