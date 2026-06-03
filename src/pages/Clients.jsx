@@ -9,6 +9,10 @@ export default function Clients() {
   const [search, setSearch] = useState('')
   // Active/inactive toggle — default to active only
   const [showInactive, setShowInactive] = useState(false)
+  // Filter chips (overdue, owes, no upcoming, etc.) + the computed per-client
+  // meta (visit/booking/balance/vax) that drives them.
+  const [activeFilter, setActiveFilter] = useState('all')
+  const [clientMeta, setClientMeta] = useState({})
 
   // ===== Mass SMS to ALL clients (pro+ only) =====
   // Different from Calendar's Mass SMS (that one filters by day's appts).
@@ -28,6 +32,7 @@ export default function Clients() {
 
   useEffect(() => {
     fetchClients()
+    fetchClientMeta()
     loadTierAndQuota()
   }, [])
 
@@ -75,6 +80,63 @@ export default function Clients() {
       setClients(sorted)
     }
     setLoading(false)
+  }
+
+  // Compute per-client filter data: overdue / upcoming / last visit / balance /
+  // vaccination alerts. Pulls all appointments + payments + pets once and
+  // reduces into a { clientId: {...} } map. Separate from fetchClients so the
+  // basic list paints fast and the chips fill in a beat later.
+  const fetchClientMeta = async () => {
+    const today = new Date(); today.setHours(0, 0, 0, 0)
+    const todayStr = today.getFullYear() + '-' +
+      String(today.getMonth() + 1).padStart(2, '0') + '-' +
+      String(today.getDate()).padStart(2, '0')
+
+    const [{ data: appts }, { data: pays }, { data: petRows }] = await Promise.all([
+      supabase.from('appointments').select('id, client_id, appointment_date, status, checked_out_at, quoted_price, final_price, discount_amount'),
+      supabase.from('payments').select('appointment_id, amount'),
+      supabase.from('pets').select('client_id, vaccination_expiry, is_archived'),
+    ])
+
+    const paidByAppt = {}
+    ;(pays || []).forEach(function (p) {
+      paidByAppt[p.appointment_id] = (paidByAppt[p.appointment_id] || 0) + parseFloat(p.amount || 0)
+    })
+
+    const CLOSED = ['cancelled', 'no_show', 'rescheduled', 'completed', 'checked_out']
+    const DEAD = ['cancelled', 'no_show', 'rescheduled']
+    const meta = {}
+    const ensure = function (cid) {
+      if (!meta[cid]) meta[cid] = { overdue: false, hasUpcoming: false, lastVisit: null, balance: 0, vaxAlert: false }
+      return meta[cid]
+    }
+
+    ;(appts || []).forEach(function (a) {
+      if (!a.client_id || !a.appointment_date) return
+      const m = ensure(a.client_id)
+      const d = a.appointment_date
+      const isOpen = a.checked_out_at == null && CLOSED.indexOf(a.status) === -1
+      if (isOpen && d < todayStr) m.overdue = true
+      if (isOpen && d >= todayStr) m.hasUpcoming = true
+      // A real (served) visit: not a dead booking, and either done or past-dated.
+      const served = DEAD.indexOf(a.status) === -1 && (a.checked_out_at != null || a.status === 'completed' || d < todayStr)
+      if (served) {
+        if (!m.lastVisit || d > m.lastVisit) m.lastVisit = d
+        const price = parseFloat(a.final_price != null ? a.final_price : (a.quoted_price || 0))
+        const disc = parseFloat(a.discount_amount || 0)
+        const bal = price - disc - (paidByAppt[a.id] || 0)
+        if (bal > 0.01) m.balance += bal
+      }
+    })
+
+    // Vaccination alert: any active pet whose vax is expired or expiring within 30 days.
+    const in30 = new Date(); in30.setDate(in30.getDate() + 30)
+    ;(petRows || []).forEach(function (p) {
+      if (!p.client_id || p.is_archived === true || !p.vaccination_expiry) return
+      if (new Date(p.vaccination_expiry) <= in30) ensure(p.client_id).vaxAlert = true
+    })
+
+    setClientMeta(meta)
   }
 
   // ===== Mass SMS handlers =====
@@ -228,9 +290,41 @@ export default function Clients() {
     setMassSmsSending(false)
   }
 
+  // ── Filter chip helpers ─────────────────────────────────────────────
+  const NEW_DAYS = 30
+  const LAPSED_DAYS = 60
+  const isNewClient = (c) => {
+    if (!c.created_at) return false
+    return (Date.now() - new Date(c.created_at).getTime()) / 86400000 <= NEW_DAYS
+  }
+  const isLapsed = (c) => {
+    if (c.is_active === false) return false
+    const m = clientMeta[c.id]
+    if (!m || !m.lastVisit) return false
+    return (Date.now() - new Date(m.lastVisit + 'T00:00:00').getTime()) / 86400000 > LAPSED_DAYS
+  }
+  // Does a client pass the currently-selected chip?
+  const passesFilter = (c) => {
+    const m = clientMeta[c.id] || {}
+    switch (activeFilter) {
+      case 'overdue': return !!m.overdue
+      case 'balance': return (m.balance || 0) > 0.01
+      case 'no_upcoming': return c.is_active !== false && !m.hasUpcoming
+      case 'has_upcoming': return !!m.hasUpcoming
+      case 'inactive': return c.is_active === false
+      case 'new': return isNewClient(c)
+      case 'lapsed': return isLapsed(c)
+      case 'vax': return !!m.vaxAlert
+      default: return true
+    }
+  }
+
   const filteredClients = clients.filter((client) => {
-    // Hide inactive clients unless the toggle is on
-    if (!showInactive && client.is_active === false) return false
+    // Hide inactive unless the toggle is on OR the Inactive chip is selected.
+    if (client.is_active === false && !showInactive && activeFilter !== 'inactive') return false
+    // Apply the selected filter chip.
+    if (!passesFilter(client)) return false
+
     const q = search.toLowerCase().trim()
     if (!q) return true
     const fullName = `${client.first_name || ''} ${client.last_name || ''}`.toLowerCase()
@@ -238,16 +332,38 @@ export default function Clients() {
     const email = (client.email || '').toLowerCase()
     const petNames = (client.pets || []).map(p => (p.name || '').toLowerCase()).join(' ')
 
-    // Phone-aware search — if the search term looks like digits (with or
-    // without dashes/spaces/parens), strip everything except digits on both
-    // sides before comparing. So "7130983746", "713-098-3746", and
-    // "(713) 098-3746" all match the same stored number.
+    // Phone-aware search — strip non-digits on both sides so "7130983746",
+    // "713-098-3746", and "(713) 098-3746" all match the same number.
     const qDigits = q.replace(/[^0-9]/g, '')
     const phoneDigits = phone.replace(/[^0-9]/g, '')
     const phoneMatches = qDigits.length >= 3 && phoneDigits.includes(qDigits)
 
     return fullName.includes(q) || phoneMatches || phone.includes(q) || email.includes(q) || petNames.includes(q)
   })
+
+  // Counts for each chip (over all clients, ignoring the active chip so the
+  // numbers stay stable as you click around).
+  const filterCounts = {
+    overdue: clients.filter(c => clientMeta[c.id]?.overdue).length,
+    balance: clients.filter(c => (clientMeta[c.id]?.balance || 0) > 0.01).length,
+    no_upcoming: clients.filter(c => c.is_active !== false && !clientMeta[c.id]?.hasUpcoming).length,
+    has_upcoming: clients.filter(c => clientMeta[c.id]?.hasUpcoming).length,
+    inactive: clients.filter(c => c.is_active === false).length,
+    new: clients.filter(isNewClient).length,
+    lapsed: clients.filter(isLapsed).length,
+    vax: clients.filter(c => clientMeta[c.id]?.vaxAlert).length,
+  }
+  const FILTER_CHIPS = [
+    { key: 'all', label: 'All' },
+    { key: 'overdue', label: '⏰ Overdue' },
+    { key: 'balance', label: '💸 Owes' },
+    { key: 'no_upcoming', label: '📭 No upcoming' },
+    { key: 'has_upcoming', label: '📅 Upcoming' },
+    { key: 'lapsed', label: '🥀 Lapsed' },
+    { key: 'new', label: '✨ New' },
+    { key: 'vax', label: '💉 Vax due' },
+    { key: 'inactive', label: '💤 Inactive' },
+  ]
 
   const activeCount = clients.filter(c => c.is_active !== false).length
   const inactiveCount = clients.filter(c => c.is_active === false).length
@@ -319,6 +435,33 @@ export default function Clients() {
             Show inactive ({inactiveCount})
           </label>
         )}
+      </div>
+
+      {/* Filter chips */}
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px', marginBottom: '6px' }}>
+        {FILTER_CHIPS.map(function (f) {
+          const count = f.key === 'all' ? clients.length : (filterCounts[f.key] || 0)
+          const isActive = activeFilter === f.key
+          return (
+            <button
+              key={f.key}
+              onClick={function () { setActiveFilter(f.key) }}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '999px',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                border: isActive ? '1px solid #7c3aed' : '1px solid #e5e7eb',
+                background: isActive ? '#7c3aed' : '#fff',
+                color: isActive ? '#fff' : '#374151',
+              }}
+            >
+              {f.label}{f.key !== 'all' ? ' (' + count + ')' : ''}
+            </button>
+          )
+        })}
       </div>
 
       {filteredClients.length === 0 ? (
