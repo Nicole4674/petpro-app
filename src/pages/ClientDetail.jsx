@@ -467,10 +467,23 @@ export default function ClientDetail() {
 
     if (!error) {
       const allNotes = data || []
-      // Client-level notes: no pet_id OR note_type = 'client'
+      // Client-level notes stay in the notes table.
       setClientNotes(allNotes.filter(n => n.note_type === 'client' || (!n.pet_id && n.note_type !== 'grooming')))
-      // Grooming notes: linked to a pet
-      setGroomingNotes(allNotes.filter(n => n.note_type === 'grooming' || (n.pet_id && n.note_type !== 'client')))
+
+      // Grooming notes now come from the unified client_notes table (same source
+      // as the dog profile + appointment popup). We also fold in any legacy
+      // grooming notes still in the old notes table, normalizing both to a
+      // `content` field so the render below works unchanged.
+      const legacyGroom = allNotes.filter(n => n.note_type === 'grooming' || (n.pet_id && n.note_type !== 'client'))
+      const { data: cnData } = await supabase
+        .from('client_notes')
+        .select('*')
+        .eq('client_id', id)
+        .eq('note_type', 'grooming')
+        .order('created_at', { ascending: false })
+      const unifiedGroom = (cnData || []).map(n => ({ ...n, content: n.note }))
+      const merged = [...unifiedGroom, ...legacyGroom].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      setGroomingNotes(merged)
     } else {
       setClientNotes([])
       setGroomingNotes([])
@@ -547,9 +560,16 @@ export default function ClientDetail() {
   const saveEditNote = async () => {
     if (!editingNoteId || !editingNoteText.trim()) return
     setSavingEdit(true)
+    // A note may live in either table (client notes in `notes`, grooming notes
+    // in `client_notes`). Update both by id — the table without this id is a
+    // harmless no-op, so we don't need to track which one it came from.
     const { error } = await supabase
       .from('notes')
       .update({ content: editingNoteText.trim(), updated_at: new Date().toISOString() })
+      .eq('id', editingNoteId)
+    await supabase
+      .from('client_notes')
+      .update({ note: editingNoteText.trim() })
       .eq('id', editingNoteId)
     if (error) {
       alert('Error saving edit: ' + error.message)
@@ -2478,6 +2498,21 @@ export default function ClientDetail() {
                           <span className="cp-groom-notes-pet-name">{pet.name}</span>
                           <span className="cp-groom-notes-pet-breed">{pet.breed}</span>
                         </div>
+                        {/* Medical at a glance for this dog */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '4px 0 8px' }}>
+                          <span style={{ ...getVaxStatusStyle(getVaxStatus(pet.vaccination_expiry)), fontSize: '11px', padding: '2px 8px', borderRadius: '999px', fontWeight: 700 }}>
+                            {(function () { var s = getVaxStatus(pet.vaccination_expiry); return s === 'current' ? '✅ Vax Current' : s === 'due_soon' ? '⚠️ Vax Due Soon' : s === 'expired' ? '❌ Vax Expired' : '❓ Vax Unknown' })()}
+                          </span>
+                          {pet.allergies && <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '999px', background: '#fee2e2', color: '#991b1b', fontWeight: 600 }}>🚨 {pet.allergies}</span>}
+                          {pet.medications && <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '999px', background: '#dbeafe', color: '#1e40af', fontWeight: 600 }}>💊 {pet.medications}</span>}
+                          {pet.muzzle_required && <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '999px', background: '#fee2e2', color: '#991b1b', fontWeight: 600 }}>🔴 Muzzle</span>}
+                        </div>
+                        {/* Cut & style preferences for this dog */}
+                        {pet.grooming_notes && (
+                          <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '8px', padding: '8px 10px', marginBottom: '8px', fontSize: '13px', color: '#5b21b6' }}>
+                            <strong>✂️ Cut &amp; style:</strong> <GroomingNotesText text={pet.grooming_notes} />
+                          </div>
+                        )}
                         {petNotes.map(note => (
                           <div key={note.id} className="cp-note-item cp-note-item-groom">
                             <div className="cp-note-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
@@ -2547,17 +2582,8 @@ export default function ClientDetail() {
                 </div>
               )}
 
-              {/* Quick grooming reference from pet records */}
-              {pets.some(p => p.grooming_notes) && (
-                <div className="cp-groom-imported">
-                  <div className="cp-groom-imported-title">📌 From Pet Profiles</div>
-                  {pets.filter(p => p.grooming_notes).map(pet => (
-                    <div key={pet.id} className="cp-groom-imported-item">
-                      <strong>{pet.name}:</strong> <GroomingNotesText text={pet.grooming_notes} />
-                    </div>
-                  ))}
-                </div>
-              )}
+              {/* Cut & style preferences now shown per-dog above, so the old
+                  "From Pet Profiles" summary was removed to avoid duplication. */}
             </div>
           </div>
         )}
