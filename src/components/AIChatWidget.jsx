@@ -1545,7 +1545,7 @@ export default function AIChatWidget() {
           letterSpacing: '0.3px',
           pointerEvents: 'none',
         }}>
-          PetPro AI
+          Suds
         </span>
         {insights.length > 0 && (
           <span style={{
