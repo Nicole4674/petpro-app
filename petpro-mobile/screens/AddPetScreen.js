@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   StyleSheet, Text, View, Pressable, ActivityIndicator, ScrollView, TextInput, Switch,
 } from 'react-native';
@@ -7,7 +7,9 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 
 export default function AddPetScreen({ session, route, navigation }) {
-  const { clientId, clientName } = route.params;
+  const { clientId, clientName, petId } = route.params; // petId present = EDIT mode
+  const editing = !!petId;
+  const [loading, setLoading] = useState(editing);
   const [name, setName] = useState('');
   const [breed, setBreed] = useState('');
   const [weight, setWeight] = useState('');
@@ -22,6 +24,27 @@ export default function AddPetScreen({ session, route, navigation }) {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
 
+  useEffect(() => { if (editing) loadPet(); }, []);
+
+  async function loadPet() {
+    try {
+      const { data } = await supabase.from('pets').select('*').eq('id', petId).maybeSingle();
+      if (data) {
+        setName(data.name || '');
+        setBreed(data.breed || '');
+        setWeight(data.weight != null ? String(data.weight) : '');
+        // Stored as decimal years; show in years (months only matters for new entry)
+        setAge(data.age != null ? String(data.age) : '');
+        setSex(data.sex || 'female');
+        setFixed(!!data.is_spayed_neutered);
+        setCoatType(data.coat_type || '');
+        setAllergies(data.allergies || '');
+        setMedications(data.medications || '');
+        setSpecialHandling(data.behavior_notes || '');
+      }
+    } catch (e) { setErr(e.message || 'Could not load pet.'); } finally { setLoading(false); }
+  }
+
   async function save() {
     setErr('');
     if (!name.trim()) { setErr('Enter a name.'); return; }
@@ -33,11 +56,8 @@ export default function AddPetScreen({ session, route, navigation }) {
     try {
       const ageNum = parseFloat(age);
       const ageYears = ageUnit === 'months' ? ageNum / 12 : ageNum;
-      const { error } = await supabase.from('pets').insert({
-        client_id: clientId,
-        groomer_id: session.user.id,
+      const fields = {
         name: name.trim(),
-        species: 'dog',
         breed: breed.trim() || null,
         weight: Number(weight),
         age: ageYears,
@@ -47,11 +67,17 @@ export default function AddPetScreen({ session, route, navigation }) {
         allergies: allergies.trim() || null,
         medications: medications.trim() || null,
         behavior_notes: specialHandling.trim() || null,
-      });
+      };
+      let error;
+      if (editing) {
+        ({ error } = await supabase.from('pets').update(fields).eq('id', petId));
+      } else {
+        ({ error } = await supabase.from('pets').insert({ ...fields, client_id: clientId, groomer_id: session.user.id, species: 'dog' }));
+      }
       if (error) throw error;
-      navigation.goBack(); // ClientDetail refetches on focus
+      navigation.goBack();
     } catch (e) {
-      setErr(e.message || 'Could not add the pet.');
+      setErr(e.message || 'Could not save the pet.');
     } finally {
       setSaving(false);
     }
@@ -64,10 +90,13 @@ export default function AddPetScreen({ session, route, navigation }) {
           <Ionicons name="chevron-back" size={18} color="#ddd6fe" />
           <Text style={styles.backText}>Back</Text>
         </Pressable>
-        <Text style={styles.title}>Add Pet</Text>
-        {clientName ? <Text style={styles.sub}>for {clientName}</Text> : null}
+        <Text style={styles.title}>{editing ? 'Edit Pet' : 'Add Pet'}</Text>
+        {clientName && !editing ? <Text style={styles.sub}>for {clientName}</Text> : null}
       </View>
 
+      {loading ? (
+        <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /></View>
+      ) : (
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.label}>Name *</Text>
         <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Pet's name" placeholderTextColor={colors.textFaint} autoCapitalize="words" />
@@ -124,9 +153,10 @@ export default function AddPetScreen({ session, route, navigation }) {
         {err ? <Text style={styles.err}>{err}</Text> : null}
 
         <Pressable style={[styles.saveBtn, saving && { opacity: 0.6 }]} onPress={save} disabled={saving}>
-          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Save Pet</Text>}
+          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>{editing ? 'Save Changes' : 'Save Pet'}</Text>}
         </Pressable>
       </ScrollView>
+      )}
     </View>
   );
 }
@@ -136,6 +166,7 @@ const styles = StyleSheet.create({
   header: { backgroundColor: colors.primaryDark, paddingTop: 56, paddingBottom: 20, paddingHorizontal: 20 },
   back: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   backText: { color: '#ddd6fe', fontSize: 15, fontWeight: '600' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   title: { color: '#fff', fontSize: 26, fontWeight: '800' },
   sub: { color: '#ddd6fe', fontSize: 14, marginTop: 2 },
   scroll: { padding: 20, paddingBottom: 60 },

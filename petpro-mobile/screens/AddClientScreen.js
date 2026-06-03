@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   StyleSheet, Text, View, TextInput, Pressable,
   ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 
-export default function AddClientScreen({ session, navigation }) {
+export default function AddClientScreen({ session, route, navigation }) {
+  const clientId = route.params && route.params.clientId; // present = EDIT mode
+  const editing = !!clientId;
+  const [loading, setLoading] = useState(editing);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
@@ -13,6 +16,21 @@ export default function AddClientScreen({ session, navigation }) {
   const [address, setAddress] = useState('');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
+
+  useEffect(() => {
+    if (!editing) return;
+    (async () => {
+      const { data } = await supabase.from('clients').select('*').eq('id', clientId).maybeSingle();
+      if (data) {
+        setFirstName(data.first_name || '');
+        setLastName(data.last_name || '');
+        setPhone(data.phone || '');
+        setEmail(data.email || '');
+        setAddress(data.address || '');
+      }
+      setLoading(false);
+    })();
+  }, []);
 
   async function save() {
     setErr('');
@@ -22,16 +40,21 @@ export default function AddClientScreen({ session, navigation }) {
     }
     setSaving(true);
     try {
-      const { error } = await supabase.from('clients').insert({
-        groomer_id: session.user.id,
+      const fields = {
         first_name: firstName.trim() || null,
         last_name: lastName.trim() || null,
         phone: phone.trim() || null,
         email: email.trim() || null,
         address: address.trim() || null,
-      });
+      };
+      let error;
+      if (editing) {
+        ({ error } = await supabase.from('clients').update(fields).eq('id', clientId));
+      } else {
+        ({ error } = await supabase.from('clients').insert({ ...fields, groomer_id: session.user.id }));
+      }
       if (error) throw error;
-      navigation.goBack(); // list refetches on focus
+      navigation.goBack(); // list/detail refetches on focus
     } catch (e) {
       setErr(e.message || 'Could not save the client.');
     } finally {
@@ -45,9 +68,12 @@ export default function AddClientScreen({ session, navigation }) {
         <Pressable onPress={() => navigation.goBack()} style={styles.back}>
           <Text style={styles.backText}>‹ Clients</Text>
         </Pressable>
-        <Text style={styles.title}>Add Client</Text>
+        <Text style={styles.title}>{editing ? 'Edit Client' : 'Add Client'}</Text>
       </View>
 
+      {loading ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color="#7c3aed" size="large" /></View>
+      ) : (
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <Text style={styles.label}>First name</Text>
@@ -68,10 +94,11 @@ export default function AddClientScreen({ session, navigation }) {
           {err ? <Text style={styles.err}>{err}</Text> : null}
 
           <Pressable style={[styles.saveBtn, saving && { opacity: 0.6 }]} onPress={save} disabled={saving}>
-            {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Save Client</Text>}
+            {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>{editing ? 'Save Changes' : 'Save Client'}</Text>}
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
+      )}
     </View>
   );
 }

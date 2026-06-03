@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, Pressable, ActivityIndicator, ScrollView, RefreshControl } from 'react-native';
 import { supabase } from '../lib/supabase';
-import { statusStyle } from '../lib/apptStatus';
+import { statusStyle, effectiveStatus } from '../lib/apptStatus';
+import { shadow } from '../lib/theme';
 // note: receives `navigation` so appointment cards can open the detail screen
 
 function fmtTime(t) {
@@ -43,7 +44,7 @@ export default function HomeScreen({ session, navigation }) {
 
       const { data: rows, error } = await supabase
         .from('appointments')
-        .select('id, start_time, status, pets:pet_id(name), clients:client_id(first_name, last_name), services:service_id(service_name)')
+        .select('id, start_time, status, checked_in_at, checked_out_at, pets:pet_id(name), clients:client_id(first_name, last_name), services:service_id(service_name)')
         .eq('groomer_id', userId)
         .eq('appointment_date', todayIso())
         .neq('status', 'cancelled')
@@ -108,11 +109,11 @@ export default function HomeScreen({ session, navigation }) {
                   {a.services && a.services.service_name ? (
                     <Text style={styles.svc}>{a.services.service_name}</Text>
                   ) : null}
-                  {a.status ? (
-                    <View style={[styles.statusPill, { backgroundColor: statusStyle(a.status).bg }]}>
-                      <Text style={[styles.statusText, { color: statusStyle(a.status).color }]}>{statusStyle(a.status).label}</Text>
+                  {a.status ? (() => { const es = statusStyle(effectiveStatus(a)); return (
+                    <View style={[styles.statusPill, { backgroundColor: es.bg }]}>
+                      <Text style={[styles.statusText, { color: es.color }]}>{es.label}</Text>
                     </View>
-                  ) : null}
+                  ); })() : null}
                 </View>
                 <Text style={styles.chevron}>›</Text>
               </Pressable>
@@ -161,10 +162,10 @@ const styles = StyleSheet.create({
   shop: { color: '#fff', fontSize: 26, fontWeight: '800', marginTop: 2 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { padding: 20, paddingBottom: 40 },
-  countCard: { backgroundColor: '#fff', borderRadius: 16, paddingVertical: 24, alignItems: 'center', marginBottom: 20, elevation: 2 },
+  countCard: { backgroundColor: '#fff', borderRadius: 16, paddingVertical: 24, alignItems: 'center', marginBottom: 20, ...shadow },
   countNum: { fontSize: 48, fontWeight: '800', color: '#7c3aed' },
   countLabel: { fontSize: 14, color: '#6b7280', marginTop: 2 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 10 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 10, ...shadow },
   time: { fontSize: 14, fontWeight: '800', color: '#7c3aed', width: 78 },
   pet: { fontSize: 15, fontWeight: '700', color: '#1f2937' },
   svc: { fontSize: 13, color: '#6b7280', marginTop: 2 },
@@ -174,7 +175,7 @@ const styles = StyleSheet.create({
   empty: { textAlign: 'center', color: '#6b7280', fontSize: 15, marginTop: 12 },
   err: { color: '#b91c1c', textAlign: 'center', marginBottom: 12 },
   boardingHeading: { fontSize: 14, fontWeight: '800', color: '#5b21b6', marginTop: 12, marginBottom: 10, marginLeft: 4 },
-  boardRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 8 },
+  boardRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fff', borderRadius: 16, padding: 14, marginBottom: 10, ...shadow },
   boardTag: { backgroundColor: '#dcfce7', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
   boardTagText: { color: '#166534', fontSize: 12, fontWeight: '800' },
   boardOut: { backgroundColor: '#fef3c7' },

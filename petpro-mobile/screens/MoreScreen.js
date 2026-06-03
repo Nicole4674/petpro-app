@@ -1,37 +1,40 @@
 import { StyleSheet, Text, View, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { colors } from '../lib/theme';
 
 export default function MoreScreen({ session, onSignOut, navigation }) {
-  // Menu rows — add more here as we build out screens
   const items = [
-    { label: '🛏️  Boarding', screen: 'Boarding', live: true },
-    { label: '🛒  Retail', screen: 'Retail', live: true },
-    { label: '👥  Staff', screen: 'Staff', live: true },
-    { label: '⚙️  Settings', screen: 'Settings', live: true },
+    { label: 'Boarding', icon: 'bed-outline', screen: 'Boarding' },
+    { label: 'Retail', icon: 'cart-outline', screen: 'Retail' },
+    { label: 'Staff', icon: 'people-outline', screen: 'Staff' },
+    { label: 'Chat / Suds Settings', icon: 'sparkles-outline', screen: 'ChatSettings' },
+    { label: 'Settings', icon: 'settings-outline', screen: 'Settings' },
   ];
 
   return (
     <View style={styles.wrap}>
       <View style={styles.header}>
-        <Text style={styles.title}>☰ More</Text>
+        <Text style={styles.title}>More</Text>
       </View>
 
       <View style={styles.body}>
         {items.map((it) => (
           <Pressable
             key={it.label}
-            style={({ pressed }) => [styles.item, pressed && it.live && { opacity: 0.6 }, !it.live && styles.itemDim]}
-            onPress={() => it.live && navigation.navigate(it.screen)}
-            disabled={!it.live}
+            style={({ pressed }) => [styles.item, pressed && { opacity: 0.6 }]}
+            onPress={() => navigation.navigate(it.screen)}
           >
-            <Text style={[styles.itemText, !it.live && styles.itemTextDim]}>{it.label}</Text>
-            {it.live ? <Text style={styles.chevron}>›</Text> : <Text style={styles.soon}>soon</Text>}
+            <View style={styles.iconWrap}><Ionicons name={it.icon} size={20} color={colors.primary} /></View>
+            <Text style={styles.itemText}>{it.label}</Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.textFaint} />
           </Pressable>
         ))}
 
         <View style={styles.account}>
           <Text style={styles.accountLabel}>Signed in as</Text>
           <Text style={styles.accountEmail}>{session?.user?.email}</Text>
-          <Pressable style={styles.signout} onPress={onSignOut}>
+          <Pressable style={({ pressed }) => [styles.signout, pressed && { opacity: 0.7 }]} onPress={onSignOut}>
+            <Ionicons name="log-out-outline" size={18} color="#dc2626" />
             <Text style={styles.signoutText}>Sign out</Text>
           </Pressable>
         </View>
@@ -41,19 +44,16 @@ export default function MoreScreen({ session, onSignOut, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#f5f3ff' },
-  header: { backgroundColor: '#5b21b6', paddingTop: 64, paddingBottom: 20, paddingHorizontal: 24 },
+  wrap: { flex: 1, backgroundColor: colors.bg },
+  header: { backgroundColor: colors.primaryDark, paddingTop: 64, paddingBottom: 20, paddingHorizontal: 24 },
   title: { color: '#fff', fontSize: 26, fontWeight: '800' },
   body: { padding: 20 },
-  item: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', borderRadius: 12, paddingVertical: 16, paddingHorizontal: 16, marginBottom: 10 },
-  itemDim: { opacity: 0.6 },
-  itemText: { fontSize: 16, fontWeight: '700', color: '#1f2937' },
-  itemTextDim: { color: '#6b7280' },
-  chevron: { fontSize: 22, color: '#c4b5fd', fontWeight: '700' },
-  soon: { fontSize: 12, color: '#9ca3af', fontWeight: '700' },
+  item: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: colors.card, borderRadius: 14, paddingVertical: 15, paddingHorizontal: 16, marginBottom: 10, borderWidth: 1, borderColor: colors.border },
+  iconWrap: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
+  itemText: { flex: 1, fontSize: 16, fontWeight: '700', color: colors.text },
   account: { marginTop: 24 },
-  accountLabel: { fontSize: 13, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5 },
-  accountEmail: { fontSize: 16, color: '#1f2937', fontWeight: '700', marginTop: 4 },
-  signout: { marginTop: 20, backgroundColor: '#fff', borderRadius: 12, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: '#e5e7eb' },
+  accountLabel: { fontSize: 13, color: colors.textFaint, textTransform: 'uppercase', letterSpacing: 0.5 },
+  accountEmail: { fontSize: 16, color: colors.text, fontWeight: '700', marginTop: 4 },
+  signout: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 20, backgroundColor: colors.card, borderRadius: 12, paddingVertical: 14, borderWidth: 1, borderColor: colors.border },
   signoutText: { color: '#dc2626', fontWeight: '700', fontSize: 15 },
 });

@@ -15,15 +15,21 @@ import ScheduleScreen from './screens/ScheduleScreen';
 import ClientsScreen from './screens/ClientsScreen';
 import ClientDetailScreen from './screens/ClientDetailScreen';
 import AddClientScreen from './screens/AddClientScreen';
+import MassTextScreen from './screens/MassTextScreen';
+import ClientContactsScreen from './screens/ClientContactsScreen';
+import MergeClientScreen from './screens/MergeClientScreen';
 import PetDetailScreen from './screens/PetDetailScreen';
 import AddPetScreen from './screens/AddPetScreen';
 import AppointmentDetailScreen from './screens/AppointmentDetailScreen';
 import AddAppointmentScreen from './screens/AddAppointmentScreen';
 import MoreScreen from './screens/MoreScreen';
 import BoardingScreen from './screens/BoardingScreen';
+import BoardingDetailScreen from './screens/BoardingDetailScreen';
+import BookBoardingScreen from './screens/BookBoardingScreen';
 import StaffScreen from './screens/StaffScreen';
 import RetailScreen from './screens/RetailScreen';
 import SettingsScreen from './screens/SettingsScreen';
+import ChatSettingsScreen from './screens/ChatSettingsScreen';
 import MessagesScreen from './screens/MessagesScreen';
 import ThreadScreen from './screens/ThreadScreen';
 
@@ -58,6 +64,12 @@ function MoreStack({ session, onSignOut }) {
       <MoreStackNav.Screen name="Boarding">
         {(props) => <BoardingScreen {...props} session={session} />}
       </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="BoardingDetail">
+        {(props) => <BoardingDetailScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="BookBoarding">
+        {(props) => <BookBoardingScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
       <MoreStackNav.Screen name="Staff">
         {(props) => <StaffScreen {...props} session={session} />}
       </MoreStackNav.Screen>
@@ -66,6 +78,9 @@ function MoreStack({ session, onSignOut }) {
       </MoreStackNav.Screen>
       <MoreStackNav.Screen name="Settings">
         {(props) => <SettingsScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="ChatSettings">
+        {(props) => <ChatSettingsScreen {...props} session={session} />}
       </MoreStackNav.Screen>
     </MoreStackNav.Navigator>
   );
@@ -114,6 +129,15 @@ function ClientsStack({ session }) {
       </ClientsStackNav.Screen>
       <ClientsStackNav.Screen name="AddClient">
         {(props) => <AddClientScreen {...props} session={session} />}
+      </ClientsStackNav.Screen>
+      <ClientsStackNav.Screen name="MassText">
+        {(props) => <MassTextScreen {...props} session={session} />}
+      </ClientsStackNav.Screen>
+      <ClientsStackNav.Screen name="ClientContacts">
+        {(props) => <ClientContactsScreen {...props} session={session} />}
+      </ClientsStackNav.Screen>
+      <ClientsStackNav.Screen name="MergeClient">
+        {(props) => <MergeClientScreen {...props} session={session} />}
       </ClientsStackNav.Screen>
       <ClientsStackNav.Screen name="PetDetail">
         {(props) => <PetDetailScreen {...props} session={session} />}

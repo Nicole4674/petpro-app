@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { StyleSheet, Text, View, TextInput, Pressable, ActivityIndicator, FlatList } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
+import { colors } from '../lib/theme';
 
 function money(v) {
   const n = parseFloat(v);
@@ -63,21 +65,28 @@ export default function RetailScreen({ session, navigation }) {
     <View style={styles.wrap}>
       <View style={styles.header}>
         <Pressable onPress={() => navigation.goBack()} style={styles.back}>
-          <Text style={styles.backText}>‹ More</Text>
+          <Ionicons name="chevron-back" size={18} color="#ddd6fe" />
+          <Text style={styles.backText}>More</Text>
         </Pressable>
-        <Text style={styles.title}>🛒 Retail</Text>
-        <TextInput
-          style={styles.search}
-          placeholder="Search products…"
-          placeholderTextColor="#a78bfa"
-          value={search}
-          onChangeText={setSearch}
-          autoCapitalize="none"
-        />
+        <View style={styles.titleWrap}>
+          <Ionicons name="cart" size={22} color="#fff" />
+          <Text style={styles.title}>Retail</Text>
+        </View>
+        <View style={styles.searchWrap}>
+          <Ionicons name="search" size={18} color={colors.textFaint} />
+          <TextInput
+            style={styles.search}
+            placeholder="Search products…"
+            placeholderTextColor={colors.textFaint}
+            value={search}
+            onChangeText={setSearch}
+            autoCapitalize="none"
+          />
+        </View>
       </View>
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color="#7c3aed" size="large" /></View>
+        <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /></View>
       ) : err ? (
         <Text style={styles.err}>{err}</Text>
       ) : (
@@ -97,22 +106,24 @@ export default function RetailScreen({ session, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#f5f3ff' },
-  header: { backgroundColor: '#5b21b6', paddingTop: 56, paddingBottom: 16, paddingHorizontal: 20 },
-  back: { marginBottom: 6 },
+  wrap: { flex: 1, backgroundColor: colors.bg },
+  header: { backgroundColor: colors.primaryDark, paddingTop: 56, paddingBottom: 16, paddingHorizontal: 20 },
+  back: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   backText: { color: '#ddd6fe', fontSize: 15, fontWeight: '600' },
-  title: { color: '#fff', fontSize: 26, fontWeight: '800', marginBottom: 12 },
-  search: { backgroundColor: '#fff', borderRadius: 10, paddingVertical: 11, paddingHorizontal: 14, fontSize: 15, color: '#1f2937' },
+  titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  title: { color: '#fff', fontSize: 26, fontWeight: '800' },
+  searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 14 },
+  search: { flex: 1, paddingVertical: 11, fontSize: 15, color: colors.text },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   list: { padding: 16, paddingBottom: 40 },
-  count: { color: '#6b7280', fontSize: 13, marginBottom: 10, marginLeft: 4 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 8 },
-  name: { fontSize: 15, fontWeight: '700', color: '#1f2937' },
+  count: { color: colors.textMute, fontSize: 13, marginBottom: 10, marginLeft: 4 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
+  name: { fontSize: 15, fontWeight: '700', color: colors.text },
   metaRow: { flexDirection: 'row', gap: 8, marginTop: 3, alignItems: 'center', flexWrap: 'wrap' },
-  cat: { fontSize: 12, color: '#7c3aed', fontWeight: '700', textTransform: 'capitalize' },
-  qty: { fontSize: 12, color: '#6b7280' },
+  cat: { fontSize: 12, color: colors.primary, fontWeight: '700', textTransform: 'capitalize' },
+  qty: { fontSize: 12, color: colors.textMute },
   qtyLow: { color: '#b91c1c', fontWeight: '800' },
-  price: { fontSize: 16, fontWeight: '800', color: '#16a34a' },
-  empty: { textAlign: 'center', color: '#6b7280', fontSize: 15, marginTop: 24 },
+  price: { fontSize: 16, fontWeight: '800', color: colors.green },
+  empty: { textAlign: 'center', color: colors.textMute, fontSize: 15, marginTop: 24 },
   err: { color: '#b91c1c', textAlign: 'center', marginTop: 24 },
 });

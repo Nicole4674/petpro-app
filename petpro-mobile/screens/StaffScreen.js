@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, Pressable, ActivityIndicator, ScrollView, RefreshControl } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
+import { colors } from '../lib/theme';
 
 const STATUS = {
   active: { label: 'Active', color: '#166534', bg: '#dcfce7' },
@@ -43,19 +45,23 @@ export default function StaffScreen({ session, navigation }) {
     <View style={styles.wrap}>
       <View style={styles.header}>
         <Pressable onPress={() => navigation.goBack()} style={styles.back}>
-          <Text style={styles.backText}>‹ More</Text>
+          <Ionicons name="chevron-back" size={18} color="#ddd6fe" />
+          <Text style={styles.backText}>More</Text>
         </Pressable>
-        <Text style={styles.title}>👥 Staff</Text>
+        <View style={styles.titleWrap}>
+          <Ionicons name="people" size={22} color="#fff" />
+          <Text style={styles.title}>Staff</Text>
+        </View>
       </View>
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color="#7c3aed" size="large" /></View>
+        <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /></View>
       ) : err ? (
         <Text style={styles.err}>{err}</Text>
       ) : (
         <ScrollView
           contentContainerStyle={styles.scroll}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor="#7c3aed" colors={['#7c3aed']} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={colors.primary} colors={[colors.primary]} />}
         >
           <Text style={styles.count}>{staff.length} {staff.length === 1 ? 'member' : 'members'}</Text>
           {staff.length === 0 ? (
@@ -84,21 +90,22 @@ export default function StaffScreen({ session, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#f5f3ff' },
-  header: { backgroundColor: '#5b21b6', paddingTop: 56, paddingBottom: 20, paddingHorizontal: 20 },
-  back: { marginBottom: 6 },
+  wrap: { flex: 1, backgroundColor: colors.bg },
+  header: { backgroundColor: colors.primaryDark, paddingTop: 56, paddingBottom: 20, paddingHorizontal: 20 },
+  back: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   backText: { color: '#ddd6fe', fontSize: 15, fontWeight: '600' },
+  titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   title: { color: '#fff', fontSize: 26, fontWeight: '800' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { padding: 20, paddingBottom: 40 },
-  count: { color: '#6b7280', fontSize: 13, marginBottom: 12, marginLeft: 4 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 8 },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#ede9fe', alignItems: 'center', justifyContent: 'center' },
-  avatarText: { color: '#7c3aed', fontWeight: '800', fontSize: 15 },
-  name: { fontSize: 16, fontWeight: '700', color: '#1f2937' },
-  role: { fontSize: 13, color: '#6b7280', marginTop: 2, textTransform: 'capitalize' },
+  count: { color: colors.textMute, fontSize: 13, marginBottom: 12, marginLeft: 4 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
+  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: colors.primary, fontWeight: '800', fontSize: 15 },
+  name: { fontSize: 16, fontWeight: '700', color: colors.text },
+  role: { fontSize: 13, color: colors.textMute, marginTop: 2, textTransform: 'capitalize' },
   badge: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
   badgeText: { fontSize: 12, fontWeight: '800' },
-  empty: { textAlign: 'center', color: '#6b7280', fontSize: 15, marginTop: 12 },
+  empty: { textAlign: 'center', color: colors.textMute, fontSize: 15, marginTop: 12 },
   err: { color: '#b91c1c', textAlign: 'center', marginTop: 24 },
 });

@@ -77,6 +77,33 @@ var toolDefinitions = [
     },
   },
   {
+    name: 'find_clients_by_segment',
+    description: 'Find clients matching a saved segment/filter. Use when the groomer asks things like "who has no upcoming appointment?", "list my lapsed clients", "who owes me money?", "how many new clients this month?", or before sending a group message. Returns the total count, how many are reachable by SMS (have consent + a phone), and a sample list (id, name, phone, sms_consent, last_visit, balance). Segments: no_upcoming (active client with nothing booked ahead), overdue (a past-due appointment that was never completed), lapsed (last visit older than N days and nothing booked — default 30), owes_balance (has an outstanding balance), new (added within N days — default 30), vax_due (a pet with vaccinations expired or expiring within 30 days), has_upcoming (has something booked), inactive (marked inactive). For lapsed/new you may pass a days window.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        segment: { type: 'string', description: 'One of: no_upcoming, overdue, lapsed, owes_balance, new, vax_due, has_upcoming, inactive' },
+        days: { type: 'number', description: 'Optional day window. For lapsed = last visit older than this many days; for new = added within this many days. Defaults to 30.' },
+      },
+      required: ['segment'],
+    },
+  },
+  {
+    name: 'message_client_segment',
+    description: 'Send the SAME message to EVERY client in a segment (a bulk / group send) — e.g. "text all lapsed clients: would you like to rebook?". CRITICAL SAFETY: this messages many people at once. You MUST (1) first call find_clients_by_segment to get the real count, (2) show the groomer the segment, the recipient count, the channel, and the EXACT message text, and (3) get an explicit "yes, send it". Only then call this with confirmed=true. If confirmed is not true (or omitted), this tool SENDS NOTHING and just returns a preview (who would get it). channel="sms" sends a real text via Twilio — only reaches clients with SMS consent + a phone, and uses the groomer\'s monthly SMS credits. channel="in_app" posts an in-app message + push to each client (free, but only reaches clients who use the portal). There is a hard cap of 200 recipients per send.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        segment: { type: 'string', description: 'One of: no_upcoming, overdue, lapsed, owes_balance, new, vax_due, has_upcoming, inactive' },
+        days: { type: 'number', description: 'Optional day window for lapsed/new. Defaults to 30.' },
+        message_text: { type: 'string', description: 'The message every recipient will get. Write it like the groomer would.' },
+        channel: { type: 'string', description: '"sms" for a real text, or "in_app" for an in-app message + push.' },
+        confirmed: { type: 'boolean', description: 'Set true ONLY after the groomer has seen the recipient count + exact message and explicitly approved. If false/omitted, returns a preview and sends nothing.' },
+      },
+      required: ['segment', 'message_text', 'channel'],
+    },
+  },
+  {
     name: 'get_client_details',
     description: 'Get full details about a specific client and all their pets. Use after search_clients to get complete info.',
     input_schema: {
@@ -2835,6 +2862,300 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
           success: true,
           appointment_id: newAppt.id,
           message: 'Groom booked for ' + gPetIds.length + ' pet(s) on ' + resG.end_date + ' at ' + toolInput.start_time + ' (' + gDur + ' min, ends ' + gEndTime + ').',
+        }
+      }
+
+      case 'find_clients_by_segment': {
+        var segName = String(toolInput.segment || '').trim()
+        var validSegs = ['no_upcoming', 'overdue', 'lapsed', 'owes_balance', 'new', 'vax_due', 'has_upcoming', 'inactive']
+        if (validSegs.indexOf(segName) === -1) {
+          return { success: false, error: 'Unknown segment "' + segName + '". Valid options: ' + validSegs.join(', ') }
+        }
+        var segDays = (toolInput.days != null && !isNaN(parseInt(toolInput.days, 10))) ? parseInt(toolInput.days, 10) : 30
+
+        var segNow = new Date(); segNow.setHours(0, 0, 0, 0)
+        var segTodayStr = segNow.getFullYear() + '-' +
+          String(segNow.getMonth() + 1).padStart(2, '0') + '-' +
+          String(segNow.getDate()).padStart(2, '0')
+
+        var { data: segClients } = await supabaseAdmin
+          .from('clients')
+          .select('id, first_name, last_name, phone, sms_consent, is_active, created_at')
+          .eq('groomer_id', groomerId)
+        var { data: segAppts } = await supabaseAdmin
+          .from('appointments')
+          .select('id, client_id, appointment_date, status, checked_out_at, quoted_price, final_price, discount_amount')
+          .eq('groomer_id', groomerId)
+        var { data: segPays } = await supabaseAdmin
+          .from('payments')
+          .select('appointment_id, amount')
+          .eq('groomer_id', groomerId)
+        var { data: segPets } = await supabaseAdmin
+          .from('pets')
+          .select('client_id, vaccination_expiry, is_archived')
+          .eq('groomer_id', groomerId)
+
+        var segPaid = {}
+        ;(segPays || []).forEach(function (p) {
+          segPaid[p.appointment_id] = (segPaid[p.appointment_id] || 0) + parseFloat(p.amount || 0)
+        })
+
+        var SEG_CLOSED = ['cancelled', 'no_show', 'rescheduled', 'completed', 'checked_out']
+        var SEG_DEAD = ['cancelled', 'no_show', 'rescheduled']
+        var segMeta = {}
+        var segEnsure = function (cid) {
+          if (!segMeta[cid]) segMeta[cid] = { overdue: false, hasUpcoming: false, lastVisit: null, balance: 0, vaxAlert: false }
+          return segMeta[cid]
+        }
+        ;(segAppts || []).forEach(function (a) {
+          if (!a.client_id || !a.appointment_date) return
+          var m = segEnsure(a.client_id)
+          var d = a.appointment_date
+          var isOpen = a.checked_out_at == null && SEG_CLOSED.indexOf(a.status) === -1
+          if (isOpen && d < segTodayStr) m.overdue = true
+          if (isOpen && d >= segTodayStr) m.hasUpcoming = true
+          var served = SEG_DEAD.indexOf(a.status) === -1 && (a.checked_out_at != null || a.status === 'completed' || d < segTodayStr)
+          if (served) {
+            if (!m.lastVisit || d > m.lastVisit) m.lastVisit = d
+            var price = parseFloat(a.final_price != null ? a.final_price : (a.quoted_price || 0))
+            var disc = parseFloat(a.discount_amount || 0)
+            var bal = price - disc - (segPaid[a.id] || 0)
+            if (bal > 0.01) m.balance += bal
+          }
+        })
+        var segIn30 = new Date(); segIn30.setDate(segIn30.getDate() + 30)
+        ;(segPets || []).forEach(function (p) {
+          if (!p.client_id || p.is_archived === true || !p.vaccination_expiry) return
+          if (new Date(p.vaccination_expiry) <= segIn30) segEnsure(p.client_id).vaxAlert = true
+        })
+
+        var segNowMs = Date.now()
+        var segMatches = function (c) {
+          var m = segMeta[c.id] || {}
+          if (segName === 'no_upcoming') return c.is_active !== false && !m.hasUpcoming
+          if (segName === 'overdue') return !!m.overdue
+          if (segName === 'owes_balance') return (m.balance || 0) > 0.01
+          if (segName === 'has_upcoming') return !!m.hasUpcoming
+          if (segName === 'inactive') return c.is_active === false
+          if (segName === 'vax_due') return !!m.vaxAlert
+          if (segName === 'new') {
+            if (!c.created_at) return false
+            return (segNowMs - new Date(c.created_at).getTime()) / 86400000 <= segDays
+          }
+          if (segName === 'lapsed') {
+            if (c.is_active === false) return false
+            if (!m.lastVisit) return false
+            return (segNowMs - new Date(m.lastVisit + 'T00:00:00').getTime()) / 86400000 > segDays
+          }
+          return false
+        }
+
+        var segMatched = (segClients || []).filter(segMatches)
+        var segReachable = segMatched.filter(function (c) {
+          return c.sms_consent === true && c.phone && String(c.phone).trim() !== ''
+        }).length
+        var segSample = segMatched.slice(0, 50).map(function (c) {
+          var m = segMeta[c.id] || {}
+          return {
+            id: c.id,
+            name: ((c.first_name || '') + ' ' + (c.last_name || '')).trim(),
+            phone: c.phone || null,
+            sms_consent: c.sms_consent === true,
+            last_visit: m.lastVisit || null,
+            balance: Math.round((m.balance || 0) * 100) / 100,
+          }
+        })
+
+        return {
+          success: true,
+          segment: segName,
+          days_window: (segName === 'lapsed' || segName === 'new') ? segDays : null,
+          total_count: segMatched.length,
+          sms_reachable_count: segReachable,
+          showing: segSample.length,
+          clients: segSample,
+          note: segMatched.length > segSample.length ? ('Showing first ' + segSample.length + ' of ' + segMatched.length + ' clients.') : null,
+        }
+      }
+
+      case 'message_client_segment': {
+        var msgSeg = String(toolInput.segment || '').trim()
+        var msgValid = ['no_upcoming', 'overdue', 'lapsed', 'owes_balance', 'new', 'vax_due', 'has_upcoming', 'inactive']
+        if (msgValid.indexOf(msgSeg) === -1) {
+          return { success: false, error: 'Unknown segment "' + msgSeg + '". Valid options: ' + msgValid.join(', ') }
+        }
+        var msgBody = String(toolInput.message_text || '').trim()
+        if (!msgBody) return { success: false, error: 'message_text is required.' }
+        if (msgBody.length > 1500) return { success: false, error: 'Message is too long (1500 character max).' }
+        var msgChan = String(toolInput.channel || '').trim()
+        if (msgChan !== 'sms' && msgChan !== 'in_app') return { success: false, error: 'channel must be "sms" or "in_app".' }
+        var msgDays = (toolInput.days != null && !isNaN(parseInt(toolInput.days, 10))) ? parseInt(toolInput.days, 10) : 30
+        var MSG_CAP = 200
+
+        // Recompute the segment server-side (don't trust a passed-in list for a mass send).
+        var msgToday = new Date(); msgToday.setHours(0, 0, 0, 0)
+        var msgTodayStr = msgToday.getFullYear() + '-' +
+          String(msgToday.getMonth() + 1).padStart(2, '0') + '-' +
+          String(msgToday.getDate()).padStart(2, '0')
+
+        var { data: msgClients } = await supabaseAdmin
+          .from('clients')
+          .select('id, first_name, last_name, phone, sms_consent, is_active, created_at, user_id')
+          .eq('groomer_id', groomerId)
+        var { data: msgAppts } = await supabaseAdmin
+          .from('appointments')
+          .select('id, client_id, appointment_date, status, checked_out_at, quoted_price, final_price, discount_amount')
+          .eq('groomer_id', groomerId)
+        var { data: msgPays } = await supabaseAdmin
+          .from('payments')
+          .select('appointment_id, amount')
+          .eq('groomer_id', groomerId)
+        var { data: msgPets } = await supabaseAdmin
+          .from('pets')
+          .select('client_id, vaccination_expiry, is_archived')
+          .eq('groomer_id', groomerId)
+
+        var msgPaid = {}
+        ;(msgPays || []).forEach(function (p) {
+          msgPaid[p.appointment_id] = (msgPaid[p.appointment_id] || 0) + parseFloat(p.amount || 0)
+        })
+        var MSG_CLOSED = ['cancelled', 'no_show', 'rescheduled', 'completed', 'checked_out']
+        var MSG_DEAD = ['cancelled', 'no_show', 'rescheduled']
+        var msgMeta = {}
+        var msgEnsure = function (cid) {
+          if (!msgMeta[cid]) msgMeta[cid] = { overdue: false, hasUpcoming: false, lastVisit: null, balance: 0, vaxAlert: false }
+          return msgMeta[cid]
+        }
+        ;(msgAppts || []).forEach(function (a) {
+          if (!a.client_id || !a.appointment_date) return
+          var m = msgEnsure(a.client_id)
+          var d = a.appointment_date
+          var isOpen = a.checked_out_at == null && MSG_CLOSED.indexOf(a.status) === -1
+          if (isOpen && d < msgTodayStr) m.overdue = true
+          if (isOpen && d >= msgTodayStr) m.hasUpcoming = true
+          var served = MSG_DEAD.indexOf(a.status) === -1 && (a.checked_out_at != null || a.status === 'completed' || d < msgTodayStr)
+          if (served) {
+            if (!m.lastVisit || d > m.lastVisit) m.lastVisit = d
+            var price = parseFloat(a.final_price != null ? a.final_price : (a.quoted_price || 0))
+            var disc = parseFloat(a.discount_amount || 0)
+            var bal = price - disc - (msgPaid[a.id] || 0)
+            if (bal > 0.01) m.balance += bal
+          }
+        })
+        var msgIn30 = new Date(); msgIn30.setDate(msgIn30.getDate() + 30)
+        ;(msgPets || []).forEach(function (p) {
+          if (!p.client_id || p.is_archived === true || !p.vaccination_expiry) return
+          if (new Date(p.vaccination_expiry) <= msgIn30) msgEnsure(p.client_id).vaxAlert = true
+        })
+
+        var msgNowMs = Date.now()
+        var msgInSeg = function (c) {
+          var m = msgMeta[c.id] || {}
+          if (msgSeg === 'no_upcoming') return c.is_active !== false && !m.hasUpcoming
+          if (msgSeg === 'overdue') return !!m.overdue
+          if (msgSeg === 'owes_balance') return (m.balance || 0) > 0.01
+          if (msgSeg === 'has_upcoming') return !!m.hasUpcoming
+          if (msgSeg === 'inactive') return c.is_active === false
+          if (msgSeg === 'vax_due') return !!m.vaxAlert
+          if (msgSeg === 'new') {
+            if (!c.created_at) return false
+            return (msgNowMs - new Date(c.created_at).getTime()) / 86400000 <= msgDays
+          }
+          if (msgSeg === 'lapsed') {
+            if (c.is_active === false) return false
+            if (!m.lastVisit) return false
+            return (msgNowMs - new Date(m.lastVisit + 'T00:00:00').getTime()) / 86400000 > msgDays
+          }
+          return false
+        }
+
+        var msgMatched = (msgClients || []).filter(msgInSeg)
+        var msgRecipients
+        if (msgChan === 'sms') {
+          msgRecipients = msgMatched.filter(function (c) { return c.sms_consent === true && c.phone && String(c.phone).trim() !== '' })
+        } else {
+          msgRecipients = msgMatched
+        }
+
+        // PREVIEW unless explicitly confirmed — never sends on the first call.
+        if (toolInput.confirmed !== true) {
+          return {
+            success: true,
+            preview: true,
+            segment: msgSeg,
+            channel: msgChan,
+            message_text: msgBody,
+            total_in_segment: msgMatched.length,
+            will_send_to: msgRecipients.length,
+            skipped_no_sms_consent: (msgChan === 'sms') ? (msgMatched.length - msgRecipients.length) : 0,
+            sample_names: msgRecipients.slice(0, 10).map(function (c) { return ((c.first_name || '') + ' ' + (c.last_name || '')).trim() }),
+            note: 'PREVIEW ONLY — nothing was sent. Show the groomer the count + message, get an explicit yes, then call again with confirmed: true.',
+          }
+        }
+
+        if (msgRecipients.length === 0) {
+          return { success: false, error: 'No reachable recipients in that segment for the "' + msgChan + '" channel.' }
+        }
+        if (msgRecipients.length > MSG_CAP) {
+          return { success: false, error: 'That segment has ' + msgRecipients.length + ' recipients, over the ' + MSG_CAP + '-recipient safety cap for a single send. Narrow the segment (e.g. a tighter day window) and try again.' }
+        }
+
+        var msgUrl = Deno.env.get('SUPABASE_URL') ?? ''
+        var msgKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+        var msgSent = 0
+        var msgFailed = 0
+        var msgErrs = []
+
+        for (var rc of msgRecipients) {
+          try {
+            if (msgChan === 'sms') {
+              var smsRes = await fetch(msgUrl + '/functions/v1/send-sms', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + msgKey, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ to: rc.phone, message: msgBody, groomer_id: groomerId, sms_type: 'manual' }),
+              })
+              var smsJson = await smsRes.json().catch(function () { return null })
+              if (!smsRes.ok || (smsJson && smsJson.success === false)) {
+                msgFailed++
+                if (msgErrs.length < 5) msgErrs.push(((rc.first_name || '') + ' ' + (rc.last_name || '')).trim() + ': ' + ((smsJson && smsJson.error) || ('HTTP ' + smsRes.status)))
+                if (smsJson && smsJson.code === 'OUT_OF_QUOTA') { msgErrs.push('Stopped — out of SMS credits.'); break }
+                continue
+              }
+              msgSent++
+            } else {
+              var { data: thr } = await supabaseAdmin
+                .from('threads').select('id').eq('groomer_id', groomerId).eq('client_id', rc.id).maybeSingle()
+              var tId = thr ? thr.id : null
+              if (!tId) {
+                var { data: nThr } = await supabaseAdmin
+                  .from('threads').insert({ groomer_id: groomerId, client_id: rc.id, last_message_at: new Date().toISOString() }).select('id').single()
+                tId = nThr ? nThr.id : null
+              }
+              if (!tId) { msgFailed++; continue }
+              var { data: nMsg } = await supabaseAdmin
+                .from('messages').insert({ thread_id: tId, groomer_id: groomerId, client_id: rc.id, sender_type: 'groomer', text: msgBody, attachment_url: null, read_by_groomer: true, read_by_client: false }).select().single()
+              if (!nMsg) { msgFailed++; continue }
+              await supabaseAdmin.from('threads').update({ last_message_at: nMsg.created_at }).eq('id', tId)
+              if (rc.user_id) {
+                sendPushToUser(rc.user_id, 'New message', msgBody.length > 100 ? msgBody.slice(0, 100) + '...' : msgBody, '/portal/messages/' + tId, 'thread-' + tId)
+              }
+              msgSent++
+            }
+          } catch (e) {
+            msgFailed++
+            if (msgErrs.length < 5) msgErrs.push(((rc.first_name || '') + '').trim() + ': ' + String(e))
+          }
+        }
+
+        return {
+          success: true,
+          sent: true,
+          channel: msgChan,
+          segment: msgSeg,
+          sent_count: msgSent,
+          failed_count: msgFailed,
+          errors: msgErrs,
+          message: 'Sent to ' + msgSent + ' client' + (msgSent === 1 ? '' : 's') + (msgFailed > 0 ? (', ' + msgFailed + ' failed') : '') + ' via ' + (msgChan === 'sms' ? 'text' : 'in-app message') + '.',
         }
       }
 

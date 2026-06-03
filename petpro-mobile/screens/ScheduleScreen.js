@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, Pressable, ActivityIndicator, ScrollView, RefreshControl, Linking } from 'react-native';
 import { supabase } from '../lib/supabase';
-import { statusStyle } from '../lib/apptStatus';
-import { colors } from '../lib/theme';
+import { statusStyle, effectiveStatus } from '../lib/apptStatus';
+import { colors, shadow } from '../lib/theme';
 
 // ---------- date helpers ----------
 function iso(d) {
@@ -32,7 +32,7 @@ function apptPrice(a) {
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
-export default function ScheduleScreen({ session, navigation }) {
+export default function ScheduleScreen({ session, navigation, route }) {
   const [view, setView] = useState('day');      // 'day' | 'week' | 'month'
   const [anchor, setAnchor] = useState(new Date());   // drives the visible range
   const [selected, setSelected] = useState(new Date()); // which day's list shows
@@ -48,6 +48,16 @@ export default function ScheduleScreen({ session, navigation }) {
     const unsub = navigation.addListener('focus', () => load(true));
     return unsub;
   }, [navigation]);
+  // Jump to a specific date (e.g. tapping a recurring date in an appointment)
+  useEffect(() => {
+    const jd = route && route.params && route.params.jumpDate;
+    if (jd) {
+      const [y, m, d] = jd.split('-').map((n) => parseInt(n, 10));
+      const dt = new Date(y, m - 1, d);
+      setView('day'); setAnchor(dt); setSelected(dt);
+      navigation.setParams({ jumpDate: undefined });
+    }
+  }, [route && route.params && route.params.jumpDate]);
 
   function range() {
     if (view === 'day') return [anchor, anchor];
@@ -64,7 +74,7 @@ export default function ScheduleScreen({ session, navigation }) {
       const [start, end] = range();
       const { data, error } = await supabase
         .from('appointments')
-        .select('id, appointment_date, start_time, end_time, status, quoted_price, final_price, pets:pet_id(name, breed), appointment_pets(pets:pet_id(name, breed)), clients:client_id(first_name, last_name, phone), services:service_id(service_name, price)')
+        .select('id, appointment_date, start_time, end_time, status, checked_in_at, checked_out_at, quoted_price, final_price, pets:pet_id(name, breed), appointment_pets(pets:pet_id(name, breed)), clients:client_id(first_name, last_name, phone), services:service_id(service_name, price)')
         .eq('groomer_id', session.user.id)
         .gte('appointment_date', iso(start))
         .lte('appointment_date', iso(end))
@@ -130,7 +140,7 @@ export default function ScheduleScreen({ session, navigation }) {
   // One appointment card (week/month lists)
   function renderAppt(a) {
     const price = apptPrice(a);
-    const ss = statusStyle(a.status);
+    const ss = statusStyle(effectiveStatus(a));
     const client = a.clients ? `${a.clients.first_name || ''} ${a.clients.last_name || ''}`.trim() : '';
     const petLine = petLineOf(a);
     return (
@@ -212,7 +222,7 @@ export default function ScheduleScreen({ session, navigation }) {
   // One appointment as a height = duration block, positioned in its column.
   function renderApptBlock(it, minMin, HOUR_PX) {
     const { a, start, end, col, cols } = it;
-    const ss = statusStyle(a.status);
+    const ss = statusStyle(effectiveStatus(a));
     const client = a.clients ? `${a.clients.first_name || ''} ${a.clients.last_name || ''}`.trim() : '';
     const petLine = petLineOf(a);
     const top = ((start - minMin) / 60) * HOUR_PX;
@@ -455,7 +465,7 @@ const styles = StyleSheet.create({
   bookBtn: { backgroundColor: '#fff', borderRadius: 20, paddingVertical: 7, paddingHorizontal: 16 },
   bookBtnText: { color: colors.primaryDark, fontWeight: '800', fontSize: 14 },
   // MoeGo-style appointment card
-  card: { backgroundColor: colors.card, borderRadius: 12, overflow: 'hidden', marginBottom: 12, borderWidth: 1, borderColor: '#eee' },
+  card: { backgroundColor: colors.card, borderRadius: 14, overflow: 'hidden', marginBottom: 12, ...shadow },
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 14 },
   cardTime: { fontSize: 13, fontWeight: '800' },
   cardStatus: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
