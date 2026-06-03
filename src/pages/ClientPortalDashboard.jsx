@@ -1344,7 +1344,7 @@ export default function ClientPortalDashboard() {
                             </div>
                             <div style={{ fontSize: '14px', color: '#374151' }}>📞 {formatPhone(c.phone)}</div>
                             {c.email && <div style={{ fontSize: '13px', color: '#6b7280' }}>✉️ {c.email}</div>}
-                            {c.notes && <div style={{ fontSize: '12px', color: '#6b7280', fontStyle: 'italic', marginTop: '4px' }}>{c.notes}</div>}
+                            {/* Contact notes hidden from client view */}
                           </div>
                           <div style={{ display: 'flex', gap: '6px' }}>
                             <button
@@ -1423,13 +1423,7 @@ export default function ClientPortalDashboard() {
                     <option value="Vet" />
                     <option value="Emergency contact" />
                   </datalist>
-                  <textarea
-                    placeholder="Notes — e.g. Only picks up Tuesdays, Call after 5pm"
-                    rows={2}
-                    value={myContactForm.notes}
-                    onChange={function (e) { setMyContactForm({ ...myContactForm, notes: e.target.value }) }}
-                    style={{ ...portalInputStyle, width: '100%', marginBottom: '10px', boxSizing: 'border-box', resize: 'vertical' }}
-                  />
+                  {/* Notes input removed — client portal is note-free */}
                   <div style={{ display: 'flex', gap: '18px', marginBottom: '14px', flexWrap: 'wrap' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
                       <input
@@ -2041,9 +2035,7 @@ export default function ClientPortalDashboard() {
                                 {petNames && <span>🐾 {petNames}</span>}
                                 {res.kennels && res.kennels.name && <span>🏠 Kennel: {res.kennels.name}</span>}
                               </div>
-                              {res.special_instructions && (
-                                <div className="cp-history-notes">📝 {res.special_instructions}</div>
-                              )}
+                              {/* Special instructions hidden from client view */}
 
                               {/* Pay Now — boarding version. Only shows if there's a balance owed. */}
                               {(function () {
@@ -2172,9 +2164,7 @@ export default function ClientPortalDashboard() {
                             }</span>
                             {appt.start_time && <span>🕐 {formatTime(appt.start_time)}</span>}
                           </div>
-                          {appt.service_notes && (
-                            <div className="cp-history-notes">📝 {appt.service_notes}</div>
-                          )}
+                          {/* Internal service notes are private — never shown to clients */}
                           {/* Receipt button — every past grooming gets one */}
                           <div style={{ marginTop: '8px' }}>
                             <button
@@ -2234,9 +2224,7 @@ export default function ClientPortalDashboard() {
                             {petNames && <span>🐾 {petNames}</span>}
                             {res.kennels && res.kennels.name && <span>🏠 {res.kennels.name}</span>}
                           </div>
-                          {res.special_instructions && (
-                            <div className="cp-history-notes">📝 {res.special_instructions}</div>
-                          )}
+                          {/* Special instructions hidden from client view */}
                           {/* Receipt button — works for boarding too thanks to
                               ReceiptModal's auto-detect of end_date. */}
                           <div style={{ marginTop: '8px' }}>
@@ -2471,11 +2459,7 @@ export default function ClientPortalDashboard() {
                                 {serviceName && <span> · ✂️ {serviceName}</span>}
                                 {petName && <span> · 🐾 {petName}</span>}
                               </div>
-                              {p.notes && (
-                                <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px', fontStyle: 'italic' }}>
-                                  📝 {p.notes}
-                                </div>
-                              )}
+                              {/* Payment notes are internal — never shown to clients */}
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ fontSize: '16px', fontWeight: '800', color: '#16a34a' }}>
@@ -2772,31 +2756,7 @@ export default function ClientPortalDashboard() {
                 type="tel"
               />
 
-              {/* ——— Special Notes divider ——— */}
-              <div style={{ marginTop: '8px', marginBottom: '10px', paddingTop: '14px', borderTop: '1px dashed #e5e7eb' }}></div>
-
-              {/* Special Notes (textarea) */}
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Special Notes <span style={{ color: '#9ca3af', fontWeight: '400', textTransform: 'none', letterSpacing: 'normal' }}>(optional)</span>
-                </label>
-                <textarea
-                  value={newPetNotes}
-                  onChange={function (e) { setNewPetNotes(e.target.value) }}
-                  placeholder="Anything else your groomer should know..."
-                  rows={3}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    fontSize: '16px',
-                    boxSizing: 'border-box',
-                    fontFamily: 'inherit',
-                    resize: 'vertical'
-                  }}
-                />
-              </div>
+              {/* Special Notes field removed — client portal is note-free */}
 
               {/* Buttons */}
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '20px' }}>
