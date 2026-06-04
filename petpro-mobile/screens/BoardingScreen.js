@@ -60,10 +60,15 @@ export default function BoardingScreen({ session, navigation }) {
             <Ionicons name="bed" size={22} color="#fff" />
             <Text style={styles.title}>Boarding</Text>
           </View>
-          <Pressable style={({ pressed }) => [styles.bookBtn, pressed && { opacity: 0.8 }]} onPress={() => navigation.navigate('BookBoarding')}>
-            <Ionicons name="add" size={16} color={colors.primaryDark} />
-            <Text style={styles.bookBtnText}>Book stay</Text>
-          </Pressable>
+          <View style={styles.headBtns}>
+            <Pressable style={({ pressed }) => [styles.calBtn, pressed && { opacity: 0.8 }]} onPress={() => navigation.navigate('BoardingCalendar')}>
+              <Ionicons name="grid-outline" size={18} color="#fff" />
+            </Pressable>
+            <Pressable style={({ pressed }) => [styles.bookBtn, pressed && { opacity: 0.8 }]} onPress={() => navigation.navigate('BookBoarding')}>
+              <Ionicons name="add" size={16} color={colors.primaryDark} />
+              <Text style={styles.bookBtnText}>Book</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
 
@@ -117,10 +122,12 @@ const styles = StyleSheet.create({
   back: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   backText: { color: '#ddd6fe', fontSize: 15, fontWeight: '600' },
   titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  title: { color: '#fff', fontSize: 26, fontWeight: '800' },
+  titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
+  title: { color: '#fff', fontSize: 24, fontWeight: '800' },
+  headBtns: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
   bookBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#fff', borderRadius: 20, paddingVertical: 8, paddingHorizontal: 14 },
   bookBtnText: { color: colors.primaryDark, fontWeight: '800', fontSize: 14 },
+  calBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { padding: 20, paddingBottom: 40 },
   count: { color: colors.textMute, fontSize: 13, marginBottom: 12, marginLeft: 4 },

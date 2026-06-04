@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { formatPetAge } from '../lib/petAge';
 import { statusStyle, effectiveStatus } from '../lib/apptStatus';
 import { colors, shadow } from '../lib/theme';
+import GradientHeader from '../components/GradientHeader';
 
 function callNumber(p) { if (p) Linking.openURL(`tel:${p.replace(/[^0-9+]/g, '')}`); }
 function textNumber(p) { if (p) Linking.openURL(`sms:${p.replace(/[^0-9+]/g, '')}`); }
@@ -192,7 +193,7 @@ export default function ClientDetailScreen({ session, route, navigation }) {
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.header}>
+      <GradientHeader style={styles.header}>
         <Pressable onPress={() => navigation.goBack()} style={styles.back}>
           <Ionicons name="chevron-back" size={18} color="#ddd6fe" />
           <Text style={styles.backText}>Clients</Text>
@@ -218,7 +219,7 @@ export default function ClientDetailScreen({ session, route, navigation }) {
             </Pressable>
           ))}
         </ScrollView>
-      </View>
+      </GradientHeader>
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /></View>

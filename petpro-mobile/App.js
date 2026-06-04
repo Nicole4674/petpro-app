@@ -5,6 +5,8 @@ import {
   ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFonts } from '@expo-google-fonts/poppins';
+import { POPPINS_FONTS, applyPoppins } from './lib/applyFont';
 import { Ionicons } from '@expo/vector-icons';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -22,14 +24,23 @@ import PetDetailScreen from './screens/PetDetailScreen';
 import AddPetScreen from './screens/AddPetScreen';
 import AppointmentDetailScreen from './screens/AppointmentDetailScreen';
 import AddAppointmentScreen from './screens/AddAppointmentScreen';
+import ReportCardScreen from './screens/ReportCardScreen';
 import MoreScreen from './screens/MoreScreen';
 import BoardingScreen from './screens/BoardingScreen';
 import BoardingDetailScreen from './screens/BoardingDetailScreen';
+import BoardingCalendarScreen from './screens/BoardingCalendarScreen';
 import BookBoardingScreen from './screens/BookBoardingScreen';
 import StaffScreen from './screens/StaffScreen';
+import StaffScheduleScreen from './screens/StaffScheduleScreen';
 import RetailScreen from './screens/RetailScreen';
+import SellScreen from './screens/SellScreen';
+import AddProductScreen from './screens/AddProductScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import ChatSettingsScreen from './screens/ChatSettingsScreen';
+import SudsScreen from './screens/SudsScreen';
+import BillingScreen from './screens/BillingScreen';
+import AnalyticsScreen from './screens/AnalyticsScreen';
+import PayrollScreen from './screens/PayrollScreen';
 import MessagesScreen from './screens/MessagesScreen';
 import ThreadScreen from './screens/ThreadScreen';
 
@@ -70,17 +81,41 @@ function MoreStack({ session, onSignOut }) {
       <MoreStackNav.Screen name="BookBoarding">
         {(props) => <BookBoardingScreen {...props} session={session} />}
       </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="BoardingCalendar">
+        {(props) => <BoardingCalendarScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
       <MoreStackNav.Screen name="Staff">
         {(props) => <StaffScreen {...props} session={session} />}
       </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="StaffSchedule">
+        {(props) => <StaffScheduleScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
       <MoreStackNav.Screen name="Retail">
         {(props) => <RetailScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="Sell">
+        {(props) => <SellScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="AddProduct">
+        {(props) => <AddProductScreen {...props} session={session} />}
       </MoreStackNav.Screen>
       <MoreStackNav.Screen name="Settings">
         {(props) => <SettingsScreen {...props} session={session} />}
       </MoreStackNav.Screen>
       <MoreStackNav.Screen name="ChatSettings">
         {(props) => <ChatSettingsScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="Suds">
+        {(props) => <SudsScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="Billing">
+        {(props) => <BillingScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="Analytics">
+        {(props) => <AnalyticsScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="Payroll">
+        {(props) => <PayrollScreen {...props} session={session} />}
       </MoreStackNav.Screen>
     </MoreStackNav.Navigator>
   );
@@ -95,6 +130,9 @@ function HomeStack({ session }) {
       </HomeStackNav.Screen>
       <HomeStackNav.Screen name="AppointmentDetail">
         {(props) => <AppointmentDetailScreen {...props} session={session} />}
+      </HomeStackNav.Screen>
+      <HomeStackNav.Screen name="ReportCard">
+        {(props) => <ReportCardScreen {...props} session={session} />}
       </HomeStackNav.Screen>
     </HomeStackNav.Navigator>
   );
@@ -112,6 +150,9 @@ function ScheduleStack({ session }) {
       </ScheduleStackNav.Screen>
       <ScheduleStackNav.Screen name="AddAppointment">
         {(props) => <AddAppointmentScreen {...props} session={session} />}
+      </ScheduleStackNav.Screen>
+      <ScheduleStackNav.Screen name="ReportCard">
+        {(props) => <ReportCardScreen {...props} session={session} />}
       </ScheduleStackNav.Screen>
     </ScheduleStackNav.Navigator>
   );
@@ -150,6 +191,9 @@ function ClientsStack({ session }) {
       </ClientsStackNav.Screen>
       <ClientsStackNav.Screen name="AddAppointment">
         {(props) => <AddAppointmentScreen {...props} session={session} />}
+      </ClientsStackNav.Screen>
+      <ClientsStackNav.Screen name="ReportCard">
+        {(props) => <ReportCardScreen {...props} session={session} />}
       </ClientsStackNav.Screen>
     </ClientsStackNav.Navigator>
   );
@@ -200,6 +244,9 @@ function MainTabs({ session, onSignOut }) {
 }
 
 export default function App() {
+  const [fontsLoaded] = useFonts(POPPINS_FONTS);
+  if (fontsLoaded) applyPoppins(); // patch Text/TextInput once fonts are ready
+
   const [session, setSession] = useState(null);
   const [checking, setChecking] = useState(true);
   const [email, setEmail] = useState('');
@@ -229,7 +276,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      {checking ? (
+      {!fontsLoaded || checking ? (
         <View style={styles.center}><ActivityIndicator color="#fff" size="large" /></View>
       ) : session ? (
         <NavigationContainer>

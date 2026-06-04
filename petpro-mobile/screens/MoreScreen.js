@@ -1,21 +1,26 @@
 import { StyleSheet, Text, View, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../lib/theme';
+import GradientHeader from '../components/GradientHeader';
 
 export default function MoreScreen({ session, onSignOut, navigation }) {
   const items = [
+    { label: 'Ask Suds', icon: 'sparkles-outline', screen: 'Suds' },
+    { label: 'Analytics', icon: 'bar-chart-outline', screen: 'Analytics' },
     { label: 'Boarding', icon: 'bed-outline', screen: 'Boarding' },
     { label: 'Retail', icon: 'cart-outline', screen: 'Retail' },
     { label: 'Staff', icon: 'people-outline', screen: 'Staff' },
+    { label: 'Payroll', icon: 'cash-outline', screen: 'Payroll' },
     { label: 'Chat / Suds Settings', icon: 'sparkles-outline', screen: 'ChatSettings' },
+    { label: 'Billing & Plan', icon: 'card-outline', screen: 'Billing' },
     { label: 'Settings', icon: 'settings-outline', screen: 'Settings' },
   ];
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.header}>
+      <GradientHeader style={styles.header}>
         <Text style={styles.title}>More</Text>
-      </View>
+      </GradientHeader>
 
       <View style={styles.body}>
         {items.map((it) => (

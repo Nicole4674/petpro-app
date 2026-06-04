@@ -407,6 +407,9 @@ export default function Calendar() {
     const [addingGroomingNoteForPetId, setAddingGroomingNoteForPetId] = useState(null)
     const [pendingGroomingNoteText, setPendingGroomingNoteText] = useState('')
     const [savingGroomingNote, setSavingGroomingNote] = useState(false)
+    // Inline edit state — which note is being edited + its draft text
+    const [editingGroomingNoteId, setEditingGroomingNoteId] = useState(null)
+    const [editingGroomingNoteText, setEditingGroomingNoteText] = useState('')
     // Add-on services state — when groomer wants to stack a 2nd/3rd service
     // on a pet (dematting fee, dremel, handling fee, etc.). One pet can have
     // unlimited add-ons stored in appointment_pet_addons.
@@ -1512,6 +1515,69 @@ export default function Calendar() {
             setPendingGroomingNoteText('')
         } catch (err) {
             alert('Could not save note: ' + (err.message || err))
+        } finally {
+            setSavingGroomingNote(false)
+        }
+    }
+
+    // Edit an existing grooming note in place, then refresh the pet's list.
+    const saveGroomingNoteEdit = async (noteId, petId) => {
+        var text = (editingGroomingNoteText || '').trim()
+        if (!text) return
+        setSavingGroomingNote(true)
+        try {
+            const { error } = await supabase
+                .from('client_notes')
+                .update({ note: text })
+                .eq('id', noteId)
+            if (error) throw error
+            const { data: refreshed } = await supabase
+                .from('client_notes')
+                .select('*')
+                .eq('pet_id', petId)
+                .eq('note_type', 'grooming')
+                .order('created_at', { ascending: false })
+            setGroomingNotesByPet(function (prev) {
+                const next = Object.assign({}, prev)
+                next[petId] = refreshed || []
+                return next
+            })
+            setEditingGroomingNoteId(null)
+            setEditingGroomingNoteText('')
+        } catch (err) {
+            alert('Could not save note: ' + (err.message || err))
+        } finally {
+            setSavingGroomingNote(false)
+        }
+    }
+
+    // Delete a grooming note (with confirm), then refresh the pet's list.
+    const deleteGroomingNote = async (noteId, petId) => {
+        if (!window.confirm('Delete this grooming note? This cannot be undone.')) return
+        setSavingGroomingNote(true)
+        try {
+            const { error } = await supabase
+                .from('client_notes')
+                .delete()
+                .eq('id', noteId)
+            if (error) throw error
+            const { data: refreshed } = await supabase
+                .from('client_notes')
+                .select('*')
+                .eq('pet_id', petId)
+                .eq('note_type', 'grooming')
+                .order('created_at', { ascending: false })
+            setGroomingNotesByPet(function (prev) {
+                const next = Object.assign({}, prev)
+                next[petId] = refreshed || []
+                return next
+            })
+            if (editingGroomingNoteId === noteId) {
+                setEditingGroomingNoteId(null)
+                setEditingGroomingNoteText('')
+            }
+        } catch (err) {
+            alert('Could not delete note: ' + (err.message || err))
         } finally {
             setSavingGroomingNote(false)
         }
@@ -5419,12 +5485,49 @@ export default function Calendar() {
 
                                                             {/* Latest note (if any) */}
                                                             {latest ? (
-                                                                <div style={{ fontSize: '13px', color: '#14532d', lineHeight: 1.4, marginBottom: '6px' }}>
-                                                                    <span style={{ fontSize: '11px', color: '#166534', fontWeight: 600, marginRight: '6px' }}>
-                                                                        {new Date(latest.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}:
-                                                                    </span>
-                                                                    {latest.note}
-                                                                </div>
+                                                                editingGroomingNoteId === latest.id ? (
+                                                                    <div style={{ marginBottom: '6px' }}>
+                                                                        <textarea
+                                                                            value={editingGroomingNoteText}
+                                                                            onChange={function (e) { setEditingGroomingNoteText(e.target.value) }}
+                                                                            rows={3}
+                                                                            autoFocus
+                                                                            disabled={savingGroomingNote}
+                                                                            style={{ width: '100%', padding: '8px', fontSize: '13px', border: '1px solid #86efac', borderRadius: '6px', background: '#fff', color: '#111827', resize: 'vertical', boxSizing: 'border-box' }}
+                                                                        />
+                                                                        <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                                                                            <button
+                                                                                onClick={function () { saveGroomingNoteEdit(latest.id, ap.pet_id) }}
+                                                                                disabled={savingGroomingNote || !editingGroomingNoteText.trim()}
+                                                                                style={{ flex: 1, padding: '7px 10px', background: editingGroomingNoteText.trim() && !savingGroomingNote ? '#10b981' : '#d1d5db', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 700, fontSize: '12px', cursor: editingGroomingNoteText.trim() && !savingGroomingNote ? 'pointer' : 'not-allowed' }}
+                                                                            >{savingGroomingNote ? 'Saving…' : '✓ Save'}</button>
+                                                                            <button
+                                                                                onClick={function () { setEditingGroomingNoteId(null); setEditingGroomingNoteText('') }}
+                                                                                disabled={savingGroomingNote}
+                                                                                style={{ flex: 1, padding: '7px 10px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
+                                                                            >Cancel</button>
+                                                                        </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div style={{ marginBottom: '6px' }}>
+                                                                        <div style={{ fontSize: '13px', color: '#14532d', lineHeight: 1.4 }}>
+                                                                            <span style={{ fontSize: '11px', color: '#166534', fontWeight: 600, marginRight: '6px' }}>
+                                                                                {new Date(latest.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}:
+                                                                            </span>
+                                                                            {latest.note}
+                                                                        </div>
+                                                                        <div style={{ display: 'flex', gap: '12px', marginTop: '4px' }}>
+                                                                            <button
+                                                                                onClick={function () { setEditingGroomingNoteId(latest.id); setEditingGroomingNoteText(latest.note || '') }}
+                                                                                style={{ background: 'transparent', border: 'none', color: '#15803d', fontWeight: 600, fontSize: '11px', cursor: 'pointer', padding: 0 }}
+                                                                            >✏️ Edit</button>
+                                                                            <button
+                                                                                onClick={function () { deleteGroomingNote(latest.id, ap.pet_id) }}
+                                                                                style={{ background: 'transparent', border: 'none', color: '#dc2626', fontWeight: 600, fontSize: '11px', cursor: 'pointer', padding: 0 }}
+                                                                            >🗑️ Delete</button>
+                                                                        </div>
+                                                                    </div>
+                                                                )
                                                             ) : (
                                                                 <div style={{ fontSize: '12px', color: '#15803d', fontStyle: 'italic', marginBottom: '6px' }}>
                                                                     No notes yet for {ap.pets?.name || 'this pet'}.

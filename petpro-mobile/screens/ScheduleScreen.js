@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, Pressable, ActivityIndicator, ScrollView, RefreshControl, Linking } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { statusStyle, effectiveStatus } from '../lib/apptStatus';
 import { colors, shadow } from '../lib/theme';
+import GradientHeader from '../components/GradientHeader';
 
 // ---------- date helpers ----------
 function iso(d) {
@@ -74,7 +76,7 @@ export default function ScheduleScreen({ session, navigation, route }) {
       const [start, end] = range();
       const { data, error } = await supabase
         .from('appointments')
-        .select('id, appointment_date, start_time, end_time, status, checked_in_at, checked_out_at, quoted_price, final_price, pets:pet_id(name, breed), appointment_pets(pets:pet_id(name, breed)), clients:client_id(first_name, last_name, phone), services:service_id(service_name, price)')
+        .select('id, appointment_date, start_time, end_time, status, checked_in_at, checked_out_at, booked_via, quoted_price, final_price, pets:pet_id(name, breed), appointment_pets(pets:pet_id(name, breed)), clients:client_id(first_name, last_name, phone), services:service_id(service_name, price)')
         .eq('groomer_id', session.user.id)
         .gte('appointment_date', iso(start))
         .lte('appointment_date', iso(end))
@@ -153,7 +155,10 @@ export default function ScheduleScreen({ session, navigation, route }) {
           <Text style={[styles.cardTime, { color: ss.color }]}>
             {fmtTime(a.start_time)}{a.end_time ? ` – ${fmtTime(a.end_time)}` : ''}
           </Text>
-          <Text style={[styles.cardStatus, { color: ss.color }]}>{(ss.label || '').toUpperCase()}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            {a.booked_via === 'client_ai' ? <MaterialCommunityIcons name="robot-happy" size={14} color={colors.primary} /> : null}
+            <Text style={[styles.cardStatus, { color: ss.color }]}>{(ss.label || '').toUpperCase()}</Text>
+          </View>
         </View>
         <View style={styles.cardBody}>
           {client ? <Text style={styles.cardClient}>{client}</Text> : null}
@@ -225,6 +230,7 @@ export default function ScheduleScreen({ session, navigation, route }) {
     const ss = statusStyle(effectiveStatus(a));
     const client = a.clients ? `${a.clients.first_name || ''} ${a.clients.last_name || ''}`.trim() : '';
     const petLine = petLineOf(a);
+    const price = apptPrice(a);
     const top = ((start - minMin) / 60) * HOUR_PX;
     const height = Math.max(((end - start) / 60) * HOUR_PX, 22); // min tap height
     const widthPct = 100 / cols;
@@ -238,15 +244,88 @@ export default function ScheduleScreen({ session, navigation, route }) {
           pressed && { opacity: 0.7 },
         ]}
       >
-        <Text numberOfLines={1} style={[styles.blockTime, { color: ss.color }]}>
-          {fmtTime(a.start_time)}{a.end_time ? `–${fmtTime(a.end_time)}` : ''}
-        </Text>
+        <View style={styles.blockTopRow}>
+          <Text numberOfLines={1} style={[styles.blockTime, { color: ss.color, flex: 1 }]}>
+            {fmtTime(a.start_time)}{a.end_time ? `–${fmtTime(a.end_time)}` : ''}
+          </Text>
+          {a.booked_via === 'client_ai' ? <MaterialCommunityIcons name="robot-happy" size={13} color={colors.primary} /> : null}
+          {price != null ? <Text style={styles.blockPrice}>${price.toFixed(0)}</Text> : null}
+        </View>
         {client ? <Text numberOfLines={1} style={styles.blockClient}>{client}</Text> : null}
         {height >= 56 && petLine ? <Text numberOfLines={1} style={styles.blockPet}>{petLine}</Text> : null}
         {height >= 78 && a.services && a.services.service_name ? (
           <Text numberOfLines={1} style={styles.blockSvc}>{a.services.service_name}</Text>
         ) : null}
       </Pressable>
+    );
+  }
+
+  // WEEK view = MoeGo-style 7-day time grid. Horizontally scrollable so each
+  // day gets a real column; tap an empty slot to book, tap a block to open it.
+  function renderWeekGrid() {
+    const weekStart = startOfWeek(anchor);
+    const days = Array.from({ length: 7 }).map((_, i) => addDays(weekStart, i));
+    const HOUR_PX = 64;
+    const COL_W = 118;
+    // Find the time window that fits every appointment across the week
+    let minH = 8, maxH = 18;
+    days.forEach((d) => (byDate[iso(d)] || []).forEach((a) => {
+      const s = toMin(a.start_time), e = toMin(a.end_time);
+      if (s != null) minH = Math.min(minH, Math.floor(s / 60));
+      if (e != null) maxH = Math.max(maxH, Math.ceil(e / 60));
+      else if (s != null) maxH = Math.max(maxH, Math.ceil((s + 60) / 60));
+    }));
+    const minMin = minH * 60;
+    const totalHeight = (maxH - minH) * HOUR_PX;
+    const hours = [];
+    for (let h = minH; h <= maxH; h++) hours.push(h);
+
+    return (
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 8 }}>
+        <View>
+          {/* Day-of-week header row */}
+          <View style={styles.wHeadRow}>
+            <View style={{ width: 44 }} />
+            {days.map((d, i) => {
+              const today = isTodayIso(iso(d));
+              return (
+                <Pressable
+                  key={i}
+                  style={[styles.wHead, { width: COL_W }, today && styles.wHeadToday]}
+                  onPress={() => { setView('day'); setAnchor(d); setSelected(d); }}
+                >
+                  <Text style={[styles.wHeadDow, today && styles.wHeadTodayText]}>{d.toLocaleDateString('en-US', { weekday: 'short' })}</Text>
+                  <Text style={[styles.wHeadNum, today && styles.wHeadTodayText]}>{d.getDate()}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {/* Grid body: time gutter + 7 day columns */}
+          <View style={{ flexDirection: 'row', height: totalHeight }}>
+            <View style={{ width: 44 }}>
+              {hours.map((h) => (
+                <Text key={h} style={[styles.wLabel, { top: (h - minH) * HOUR_PX - 7 }]}>{fmtHourLabel(h)}</Text>
+              ))}
+            </View>
+            {days.map((d, i) => {
+              const laid = layoutDay(byDate[iso(d)] || []);
+              return (
+                <View key={i} style={[styles.wCol, { width: COL_W, height: totalHeight }]}>
+                  {hours.slice(0, -1).map((h) => (
+                    <Pressable
+                      key={h}
+                      onPress={() => navigation.navigate('AddAppointment', { prefillDate: iso(d), prefillHour: h })}
+                      style={({ pressed }) => [styles.wLane, { top: (h - minH) * HOUR_PX, height: HOUR_PX }, pressed && { backgroundColor: colors.primaryLight }]}
+                    />
+                  ))}
+                  {laid.map((it) => renderApptBlock(it, minMin, HOUR_PX))}
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      </ScrollView>
     );
   }
 
@@ -292,7 +371,7 @@ export default function ScheduleScreen({ session, navigation, route }) {
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.header}>
+      <GradientHeader style={styles.header}>
         <View style={styles.titleRow}>
           <Text style={styles.title}>📅 Schedule</Text>
           <Pressable
@@ -323,7 +402,7 @@ export default function ScheduleScreen({ session, navigation, route }) {
           </Pressable>
           <Pressable style={styles.arrow} onPress={() => shift(1)}><Text style={styles.arrowText}>›</Text></Pressable>
         </View>
-      </View>
+      </GradientHeader>
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color="#7c3aed" size="large" /></View>
@@ -334,24 +413,6 @@ export default function ScheduleScreen({ session, navigation, route }) {
           contentContainerStyle={styles.scroll}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor="#7c3aed" colors={['#7c3aed']} />}
         >
-          {/* WEEK: 7 tappable day pills */}
-          {view === 'week' && (
-            <View style={styles.weekRow}>
-              {Array.from({ length: 7 }).map((_, i) => {
-                const d = addDays(startOfWeek(anchor), i);
-                const count = (byDate[iso(d)] || []).length;
-                const isSel = sameDay(d, selected);
-                return (
-                  <Pressable key={i} style={[styles.weekPill, isSel && styles.weekPillSel]} onPress={() => setSelected(d)}>
-                    <Text style={[styles.weekDow, isSel && styles.weekTextSel]}>{WEEKDAYS[d.getDay()]}</Text>
-                    <Text style={[styles.weekNum, isSel && styles.weekTextSel]}>{d.getDate()}</Text>
-                    {count > 0 ? <View style={[styles.dot, isSel && { backgroundColor: '#fff' }]} /> : <View style={styles.dotEmpty} />}
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-
           {/* MONTH: calendar grid */}
           {view === 'month' && (
             <View style={styles.monthGrid}>
@@ -380,6 +441,9 @@ export default function ScheduleScreen({ session, navigation, route }) {
           {view === 'day' ? (
             // Full time-grid calendar for the day
             renderDayGrid()
+          ) : view === 'week' ? (
+            // Full 7-day time-grid calendar for the week
+            renderWeekGrid()
           ) : (
             <>
               <Text style={styles.listHeading}>
@@ -450,6 +514,17 @@ const styles = StyleSheet.create({
   monthNum: { fontSize: 14, color: '#1f2937', fontWeight: '600' },
   monthToday: { color: '#7c3aed', fontWeight: '800' },
 
+  // week time-grid
+  wHeadRow: { flexDirection: 'row', marginBottom: 6 },
+  wHead: { alignItems: 'center', paddingVertical: 6, borderRadius: 10, marginHorizontal: 1 },
+  wHeadToday: { backgroundColor: colors.primaryLight },
+  wHeadDow: { fontSize: 11, fontWeight: '700', color: colors.textFaint },
+  wHeadNum: { fontSize: 16, fontWeight: '800', color: colors.text, marginTop: 1 },
+  wHeadTodayText: { color: colors.primaryDark },
+  wLabel: { position: 'absolute', right: 6, width: 38, textAlign: 'right', fontSize: 11, fontWeight: '800', color: colors.textFaint },
+  wCol: { borderLeftWidth: 1, borderLeftColor: colors.border, position: 'relative' },
+  wLane: { position: 'absolute', left: 0, right: 0, borderBottomWidth: 1, borderBottomColor: '#f1eefb' },
+
   listHeading: { fontSize: 14, fontWeight: '800', color: '#5b21b6', marginBottom: 10, marginLeft: 4 },
   // Day time-grid: time labels on the left, a positioned canvas on the right.
   grid: { flexDirection: 'row', paddingTop: 8 },
@@ -457,7 +532,9 @@ const styles = StyleSheet.create({
   canvas: { flex: 1, borderLeftWidth: 2, borderLeftColor: colors.border },
   lane: { position: 'absolute', left: 0, right: 0, borderTopWidth: 1, borderTopColor: colors.border },
   block: { position: 'absolute', borderRadius: 8, borderLeftWidth: 4, paddingVertical: 3, paddingHorizontal: 7, marginLeft: 2, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(0,0,0,0.04)' },
+  blockTopRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   blockTime: { fontSize: 11, fontWeight: '800' },
+  blockPrice: { fontSize: 11, fontWeight: '800', color: colors.green },
   blockClient: { fontSize: 14, fontWeight: '800', color: colors.text },
   blockPet: { fontSize: 12, color: colors.textMute, marginTop: 1 },
   blockSvc: { fontSize: 12, color: '#374151', marginTop: 1, fontWeight: '600' },

@@ -69,17 +69,23 @@ export default function StaffScreen({ session, navigation }) {
           ) : (
             staff.map((m) => {
               const s = STATUS[m.status] || STATUS.inactive;
+              const nm = `${m.first_name || ''} ${m.last_name || ''}`.trim() || 'Staff';
               return (
-                <View key={m.id} style={styles.row}>
+                <Pressable
+                  key={m.id}
+                  style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}
+                  onPress={() => navigation.navigate('StaffSchedule', { staffId: m.id, staffName: nm })}
+                >
                   <View style={styles.avatar}><Text style={styles.avatarText}>{initials(m.first_name, m.last_name)}</Text></View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.name}>{`${m.first_name || ''} ${m.last_name || ''}`.trim() || 'Staff'}</Text>
+                    <Text style={styles.name}>{nm}</Text>
                     {m.role ? <Text style={styles.role}>{m.role}</Text> : null}
                   </View>
                   <View style={[styles.badge, { backgroundColor: s.bg }]}>
                     <Text style={[styles.badgeText, { color: s.color }]}>{s.label}</Text>
                   </View>
-                </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+                </Pressable>
               );
             })
           )}

@@ -1,15 +1,37 @@
-import { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, Pressable, ActivityIndicator, ScrollView, Linking, TextInput } from 'react-native';
+import { useState, useEffect, useRef } from 'react';
+import { StyleSheet, Text, View, Pressable, ActivityIndicator, ScrollView, Linking, TextInput, Animated } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { formatPetAge } from '../lib/petAge';
 import { statusStyle, effectiveStatus } from '../lib/apptStatus';
 import { colors, shadow } from '../lib/theme';
 import { loadAttached, saveAttached, markCompleted } from '../lib/attachedRetail';
+import GradientHeader from '../components/GradientHeader';
 
 // Statuses a groomer can set from the app (mirrors the website dropdown)
 const STATUS_OPTIONS = ['unconfirmed', 'confirmed', 'checked_in', 'in_progress', 'completed', 'no_show', 'cancelled'];
+
+// Pulsing "Booked by Suds" badge — shows on appointments the AI booked
+function SudsBadge() {
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 0.35, duration: 700, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+  return (
+    <Animated.View style={[styles.sudsBadge, { opacity: pulse }]}>
+      <MaterialCommunityIcons name="robot-happy" size={14} color={colors.primary} />
+      <Text style={styles.sudsBadgeText}>Booked by Suds</Text>
+    </Animated.View>
+  );
+}
 
 function hhmm(d) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:00`;
@@ -174,7 +196,7 @@ export default function AppointmentDetailScreen({ navigation, route, session }) 
       const { data, error } = await supabase
         .from('appointments')
         .select(`
-          id, appointment_date, start_time, end_time, status, checked_in_at, checked_out_at, staff_id,
+          id, appointment_date, start_time, end_time, status, checked_in_at, checked_out_at, staff_id, booked_via,
           quoted_price, final_price, service_notes, groomer_id, client_id, pet_id, service_id,
           recurring_series_id, recurring_sequence,
           recurring_series:recurring_series_id(interval_weeks, total_count, start_date, status),
@@ -510,13 +532,13 @@ export default function AppointmentDetailScreen({ navigation, route, session }) 
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.header}>
+      <GradientHeader style={styles.header}>
         <Pressable onPress={() => navigation.goBack()} style={styles.back}>
           <Ionicons name="chevron-back" size={18} color="#ddd6fe" />
           <Text style={styles.backText}>Back</Text>
         </Pressable>
         <Text style={styles.title}>Appointment</Text>
-      </View>
+      </GradientHeader>
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /></View>
@@ -528,6 +550,7 @@ export default function AppointmentDetailScreen({ navigation, route, session }) 
         <ScrollView contentContainerStyle={styles.scroll}>
           {/* Status + when */}
           <View style={styles.card}>
+            {a.booked_via === 'client_ai' ? <SudsBadge /> : null}
             {/* Tappable status pill → opens chooser */}
             {ss ? (
               <Pressable style={[styles.badge, { backgroundColor: ss.bg }]} onPress={() => setPickStatus((v) => !v)}>
@@ -909,6 +932,20 @@ export default function AppointmentDetailScreen({ navigation, route, session }) 
             </Pressable>
           )}
 
+          {/* Report card */}
+          <Pressable
+            style={styles.reportBtn}
+            onPress={() => navigation.navigate('ReportCard', {
+              appointmentId: apptId,
+              clientId: a.client_id,
+              pets: breakdown.filter((p) => p.petId && p.petId !== 'legacy').map((p) => ({ id: p.petId, name: p.petName })),
+              groomer,
+            })}
+          >
+            <Ionicons name="document-text-outline" size={18} color={colors.primaryDark} />
+            <Text style={styles.reportText}>New report card</Text>
+          </Pressable>
+
           {/* Appointment notes (editable) */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Appointment Notes</Text>
@@ -1020,6 +1057,8 @@ const styles = StyleSheet.create({
   payHint: { fontSize: 12, color: colors.textFaint, marginTop: 8, textAlign: 'center' },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, marginBottom: 10 },
   badgeText: { fontSize: 12, fontWeight: '800', letterSpacing: 0.3 },
+  sudsBadge: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 5, backgroundColor: colors.primaryLight, borderRadius: 14, paddingVertical: 5, paddingHorizontal: 10, marginBottom: 10 },
+  sudsBadgeText: { fontSize: 12, fontWeight: '800', color: colors.primaryDark },
   statusGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 },
   statusOpt: { borderRadius: 16, paddingVertical: 7, paddingHorizontal: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: '#fff' },
   statusOptText: { fontSize: 13, fontWeight: '700', color: colors.textMute },
@@ -1059,6 +1098,8 @@ const styles = StyleSheet.create({
   checkInText: { color: '#fff', fontSize: 16, fontWeight: '800' },
   checkedIn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#dcfce7', borderRadius: 12, paddingVertical: 14, marginBottom: 14, borderWidth: 1, borderColor: '#86efac' },
   checkedInText: { color: '#166534', fontSize: 15, fontWeight: '800' },
+  reportBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.primaryLight, borderRadius: 12, paddingVertical: 14, marginBottom: 14 },
+  reportText: { color: colors.primaryDark, fontSize: 15, fontWeight: '800' },
   notesInput: { backgroundColor: '#f9fafb', borderRadius: 12, padding: 12, fontSize: 15, color: colors.text, borderWidth: 1, borderColor: colors.border, minHeight: 64, textAlignVertical: 'top' },
   notesSave: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 10 },
   notesSaveText: { color: '#fff', fontSize: 15, fontWeight: '800' },

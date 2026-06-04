@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, TextInput, ActivityIndicator, FlatList, Pressab
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { colors, shadow } from '../lib/theme';
+import GradientHeader from '../components/GradientHeader';
 
 function initials(first, last) {
   return `${(first || '').charAt(0)}${(last || '').charAt(0)}`.toUpperCase() || '?';
@@ -181,7 +182,7 @@ export default function ClientsScreen({ session, navigation }) {
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.header}>
+      <GradientHeader style={styles.header}>
         <View style={styles.titleRow}>
           <View style={styles.titleWrap}>
             <Ionicons name="paw" size={22} color="#fff" />
@@ -210,7 +211,7 @@ export default function ClientsScreen({ session, navigation }) {
             );
           })}
         </ScrollView>
-      </View>
+      </GradientHeader>
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /></View>

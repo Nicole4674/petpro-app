@@ -34,8 +34,24 @@ export default function BookBoardingScreen({ session, navigation }) {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
+  const [occupied, setOccupied] = useState({}); // kennel_id -> true if booked for chosen dates
 
   useEffect(() => { init(); }, []);
+  // Recompute which kennels are taken whenever the date range changes
+  useEffect(() => { checkAvailability(); }, [start, end, clientId]);
+
+  async function checkAvailability() {
+    if (!clientId) return;
+    const { data } = await supabase.from('boarding_reservations')
+      .select('kennel_id, start_date, end_date')
+      .eq('groomer_id', session.user.id).neq('status', 'cancelled')
+      .lte('start_date', isoDate(end)).gte('end_date', isoDate(start));
+    const taken = {};
+    (data || []).forEach((r) => { if (r.kennel_id) taken[r.kennel_id] = true; });
+    setOccupied(taken);
+    // If the kennel we'd selected is now taken for these dates, clear it
+    if (kennelId && taken[kennelId]) setKennelId(null);
+  }
 
   async function init() {
     setLoading(true);
@@ -156,16 +172,6 @@ export default function BookBoardingScreen({ session, navigation }) {
             ))}
           </View>
 
-          <Text style={styles.label}>Kennel</Text>
-          <View style={styles.chips}>
-            {kennels.length === 0 ? <Text style={styles.muted}>No kennels set up (add them on the website).</Text> : null}
-            {kennels.map((k) => (
-              <Pressable key={k.id} style={[styles.chip, kennelId === k.id && styles.chipSel]} onPress={() => setKennelId(k.id)}>
-                <Text style={[styles.chipText, kennelId === k.id && styles.chipTextSel]}>{k.name || 'Kennel'}</Text>
-              </Pressable>
-            ))}
-          </View>
-
           <Text style={styles.label}>Drop-off</Text>
           <View style={styles.whenRow}>
             <Pressable style={styles.whenBtn} onPress={() => setPicker('sd')}><Text style={styles.whenText}>{prettyDate(start)}</Text></Pressable>
@@ -180,6 +186,30 @@ export default function BookBoardingScreen({ session, navigation }) {
           {picker === 'st' ? <DateTimePicker value={start} mode="time" onChange={onPick} /> : null}
           {picker === 'ed' ? <DateTimePicker value={end} mode="date" onChange={onPick} /> : null}
           {picker === 'et' ? <DateTimePicker value={end} mode="time" onChange={onPick} /> : null}
+
+          {/* Kennel availability for the chosen dates */}
+          <Text style={styles.label}>Kennel — open for these dates</Text>
+          {kennels.length === 0 ? <Text style={styles.muted}>No kennels set up (add them on the website).</Text> : (
+            <View style={styles.kennelGrid}>
+              {kennels.map((k) => {
+                const busy = !!occupied[k.id];
+                const sel = kennelId === k.id;
+                return (
+                  <Pressable
+                    key={k.id}
+                    disabled={busy}
+                    style={[styles.kennelCard, busy && styles.kennelBusy, sel && styles.kennelSel]}
+                    onPress={() => setKennelId(k.id)}
+                  >
+                    <Text style={[styles.kennelName, busy && { color: colors.textFaint }, sel && { color: '#fff' }]}>{k.name || 'Kennel'}</Text>
+                    <View style={[styles.kennelTag, busy ? styles.tagBusy : styles.tagOpen]}>
+                      <Text style={[styles.kennelTagText, { color: busy ? '#b91c1c' : '#166534' }]}>{busy ? 'Booked' : 'Open'}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
 
           <Text style={styles.label}>Total price</Text>
           <TextInput style={styles.input} value={price} onChangeText={setPrice} keyboardType="numeric" placeholder="0.00" placeholderTextColor={colors.textFaint} />
@@ -221,6 +251,15 @@ const styles = StyleSheet.create({
   chipSel: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipText: { color: '#374151', fontWeight: '700' },
   chipTextSel: { color: '#fff' },
+  kennelGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  kennelCard: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.card, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1, borderColor: colors.border },
+  kennelSel: { backgroundColor: colors.primary, borderColor: colors.primary },
+  kennelBusy: { backgroundColor: '#f9fafb', opacity: 0.7 },
+  kennelName: { fontSize: 14, fontWeight: '700', color: colors.text },
+  kennelTag: { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
+  tagOpen: { backgroundColor: '#dcfce7' },
+  tagBusy: { backgroundColor: '#fee2e2' },
+  kennelTagText: { fontSize: 11, fontWeight: '800' },
   whenRow: { flexDirection: 'row', gap: 10 },
   whenBtn: { flex: 1, backgroundColor: colors.card, borderRadius: 12, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
   whenText: { fontSize: 15, fontWeight: '800', color: colors.primaryDark },

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { formatPetAge } from '../lib/petAge';
 import { colors } from '../lib/theme';
+import GradientHeader from '../components/GradientHeader';
 
 function fmtDate(s) {
   if (!s) return '';
@@ -114,7 +115,7 @@ export default function PetDetailScreen({ route, navigation }) {
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.header}>
+      <GradientHeader style={styles.header}>
         <Pressable onPress={() => navigation.goBack()} style={styles.back}>
           <Ionicons name="chevron-back" size={18} color="#ddd6fe" />
           <Text style={styles.backText}>Back</Text>
@@ -134,7 +135,7 @@ export default function PetDetailScreen({ route, navigation }) {
             </Pressable>
           ) : null}
         </View>
-      </View>
+      </GradientHeader>
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /></View>

@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, Pressable, ActivityIndicator, FlatList } from '
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
+import GradientHeader from '../components/GradientHeader';
 
 function clientNameFromSms(m) {
   const c = m.clients;
@@ -138,7 +139,7 @@ export default function MessagesScreen({ session, navigation }) {
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.header}>
+      <GradientHeader style={styles.header}>
         <View style={styles.titleWrap}>
           <Ionicons name="chatbubble-ellipses" size={22} color="#fff" />
           <Text style={styles.title}>Messages</Text>
@@ -152,7 +153,7 @@ export default function MessagesScreen({ session, navigation }) {
             <Text style={tab === 'sms' ? styles.tabActiveText : styles.tabText}>SMS (Text)</Text>
           </Pressable>
         </View>
-      </View>
+      </GradientHeader>
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /></View>

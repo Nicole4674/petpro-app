@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, Pressable, ActivityIndicator, ScrollView, Refre
 import { supabase } from '../lib/supabase';
 import { statusStyle, effectiveStatus } from '../lib/apptStatus';
 import { shadow } from '../lib/theme';
+import GradientHeader from '../components/GradientHeader';
 // note: receives `navigation` so appointment cards can open the detail screen
 
 function fmtTime(t) {
@@ -70,10 +71,10 @@ export default function HomeScreen({ session, navigation }) {
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.header}>
+      <GradientHeader style={styles.header}>
         <Text style={styles.hi}>Welcome back 👋</Text>
         <Text style={styles.shop}>{shopName || 'Your shop'}</Text>
-      </View>
+      </GradientHeader>
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color="#7c3aed" size="large" /></View>

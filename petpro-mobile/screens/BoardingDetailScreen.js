@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { colors, shadow } from '../lib/theme';
 import { loadAttached, saveAttached, markCompleted } from '../lib/attachedRetail';
+import GradientHeader from '../components/GradientHeader';
 
 function isoDate(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function hhmm(d) { return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:00`; }
@@ -413,7 +414,7 @@ export default function BoardingDetailScreen({ session, route, navigation }) {
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.header}>
+      <GradientHeader style={styles.header}>
         <Pressable onPress={() => navigation.goBack()} style={styles.back}>
           <Ionicons name="chevron-back" size={18} color="#ddd6fe" />
           <Text style={styles.backText}>Boarding</Text>
@@ -422,7 +423,7 @@ export default function BoardingDetailScreen({ session, route, navigation }) {
           <Ionicons name="bed" size={22} color="#fff" />
           <Text style={styles.title}>Boarding Stay</Text>
         </View>
-      </View>
+      </GradientHeader>
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /></View>
