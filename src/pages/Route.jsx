@@ -74,9 +74,21 @@ function todayLocalIso() {
   return y + '-' + m + '-' + day
 }
 
+// Shift a YYYY-MM-DD string by N days (local), returning YYYY-MM-DD.
+function shiftDateIso(iso, deltaDays) {
+  var d = new Date(iso + 'T00:00:00')
+  d.setDate(d.getDate() + deltaDays)
+  var y = d.getFullYear()
+  var m = String(d.getMonth() + 1).padStart(2, '0')
+  var day = String(d.getDate()).padStart(2, '0')
+  return y + '-' + m + '-' + day
+}
+
 export default function Route() {
   var navigate = useNavigate()
   var [loading, setLoading] = useState(true)
+  // Which day's route we're viewing (defaults to today; user can navigate).
+  var [selectedDate, setSelectedDate] = useState(todayLocalIso())
   var [stops, setStops] = useState([])
   var [error, setError] = useState('')
   // Optimizer state — when "optimized" is non-null, we render that order
@@ -227,7 +239,7 @@ export default function Route() {
 
   useEffect(function () {
     loadRoute()
-  }, [])
+  }, [selectedDate])
 
   // Phase 6 — Load the late-warnings toggle from shop_settings once.
   // We fetch once on mount; if the user changes it in Settings, they need to
@@ -257,7 +269,7 @@ export default function Route() {
       var { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not signed in')
 
-      var today = todayLocalIso()
+      var today = selectedDate
 
       // 1. Today's grooming appointments — pull cached lat/lng so the map
       //    can render instantly without re-geocoding addresses.
@@ -545,7 +557,10 @@ export default function Route() {
       window.alert(c.name + ' has no SMS consent or phone on file — can\'t text them.')
       return
     }
-    var msg = 'Hi ' + (c.firstName || 'there') + "! I'm grooming in your area today and have an opening — want me to swing by? Reply to grab it! 🐾"
+    var dayWord = (selectedDate === todayLocalIso())
+      ? 'today'
+      : new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+    var msg = 'Hi ' + (c.firstName || 'there') + "! I'm grooming in your area " + dayWord + ' and have an opening — want me to swing by? Reply to grab it! 🐾'
     if (!window.confirm('Text ' + c.name + ' at ' + c.phone + '?\n\n"' + msg + '"')) return
     try {
       var { data: { user } } = await supabase.auth.getUser()
@@ -576,9 +591,18 @@ export default function Route() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
         <div>
-          <h1 style={{ fontSize: '22px', margin: '0 0 4px', color: '#111827' }}>📍 Today's Route</h1>
+          <h1 style={{ fontSize: '22px', margin: '0 0 6px', color: '#111827' }}>📍 Route</h1>
+          {/* Date navigation — view any day's route, not just today */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
+            <button onClick={function () { setSelectedDate(shiftDateIso(selectedDate, -1)) }} style={{ padding: '4px 11px', border: '1px solid #d1d5db', borderRadius: '8px', background: '#fff', cursor: 'pointer', fontWeight: 700 }} title="Previous day">◀</button>
+            <input type="date" value={selectedDate} onChange={function (e) { if (e.target.value) setSelectedDate(e.target.value) }} style={{ padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px' }} />
+            <button onClick={function () { setSelectedDate(shiftDateIso(selectedDate, 1)) }} style={{ padding: '4px 11px', border: '1px solid #d1d5db', borderRadius: '8px', background: '#fff', cursor: 'pointer', fontWeight: 700 }} title="Next day">▶</button>
+            {selectedDate !== todayLocalIso() && (
+              <button onClick={function () { setSelectedDate(todayLocalIso()) }} style={{ padding: '4px 12px', border: '1px solid #7c3aed', borderRadius: '8px', background: '#7c3aed', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: '13px' }}>Today</button>
+            )}
+          </div>
           <div style={{ fontSize: '13px', color: '#6b7280' }}>
-            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+            {new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
             {' · '}
             <strong style={{ color: '#111827' }}>{stops.length} stop{stops.length === 1 ? '' : 's'}</strong>
             {optimizedStops && (
@@ -751,13 +775,15 @@ export default function Route() {
           OR if the groomer is on schedule. When late, shows a yellow banner
           with Email + Call action buttons and exposes lateState so we can
           render per-stop badges below. */}
-      <LateDetector
-        stops={displayStops}
-        enabled={lateWarningsEnabled}
-        onSendHeadsUp={openHeadsUp}
-        onSendHeadsUpSms={openHeadsUpSms}
-        onChange={setLateState}
-      />
+      {selectedDate === todayLocalIso() && (
+        <LateDetector
+          stops={displayStops}
+          enabled={lateWarningsEnabled}
+          onSendHeadsUp={openHeadsUp}
+          onSendHeadsUpSms={openHeadsUpSms}
+          onChange={setLateState}
+        />
+      )}
 
       {/* Optimizer message banner — savings or "couldn't optimize" reason */}
       {optimizeMsg && (
