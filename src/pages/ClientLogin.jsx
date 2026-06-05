@@ -9,6 +9,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import PasswordInput from '../components/PasswordInput'
 
 export default function ClientLogin() {
   var navigate = useNavigate()
@@ -270,21 +271,31 @@ function LoginField({ label, value, onChange, placeholder, type }) {
       <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#374151', marginBottom: '4px' }}>
         {label}
       </label>
-      <input
-        type={type || 'text'}
-        value={value}
-        onChange={function (e) { onChange(e.target.value) }}
-        placeholder={placeholder}
-        required
-        style={{
-          width: '100%',
-          padding: '11px 12px',
-          border: '1px solid #d1d5db',
-          borderRadius: '8px',
-          fontSize: '16px',
-          boxSizing: 'border-box'
-        }}
-      />
+      {type === 'password' ? (
+        <PasswordInput
+          value={value}
+          onChange={function (e) { onChange(e.target.value) }}
+          placeholder={placeholder}
+          required
+          style={{ padding: '11px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '16px' }}
+        />
+      ) : (
+        <input
+          type={type || 'text'}
+          value={value}
+          onChange={function (e) { onChange(e.target.value) }}
+          placeholder={placeholder}
+          required
+          style={{
+            width: '100%',
+            padding: '11px 12px',
+            border: '1px solid #d1d5db',
+            borderRadius: '8px',
+            fontSize: '16px',
+            boxSizing: 'border-box'
+          }}
+        />
+      )}
     </div>
   )
 }

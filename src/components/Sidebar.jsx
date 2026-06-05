@@ -245,6 +245,15 @@ export default function Sidebar({ onToggle }) {
                 📍 Route
               </div>
               )}
+              {/* Zones — mobile "Area Days". Only for mobile shops. */}
+              {isMobile && canAccessAny(['calendar.view_own', 'calendar.view_all']) && (
+              <div
+                className={'sidebar-subitem' + (isActive('/zones') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/zones') }}
+              >
+                🗺️ Zones
+              </div>
+              )}
               {canAccess('clients.view_list') && (
               <div
                 className={'sidebar-subitem' + (isActive('/clients') ? ' sidebar-subitem-active' : '')}

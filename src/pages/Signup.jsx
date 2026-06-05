@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { Link, useSearchParams, Navigate } from 'react-router-dom'
+import PasswordInput from '../components/PasswordInput'
 
 // Stripe Payment Links (LIVE). Kept in sync with Plans.jsx.
 // Replaced sandbox `test_` URLs on launch.
@@ -209,8 +210,7 @@ export default function Signup() {
             onChange={(e) => setEmail(e.target.value)}
             required
           />
-          <input
-            type="password"
+          <PasswordInput
             placeholder="Password (min 6 characters)"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
