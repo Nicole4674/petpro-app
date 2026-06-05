@@ -946,11 +946,19 @@ export default function Calendar() {
         if (!window.confirm('Remove this blocked time?')) return
         try {
             setSavingBlock(true)
-            const { error } = await supabase
+            const { data: deleted, error } = await supabase
                 .from('blocked_times')
                 .delete()
                 .eq('id', blockModal.block.id)
+                .select()
             if (error) throw error
+            // A delete that removes 0 rows returns NO error in Supabase (e.g. an
+            // RLS policy silently blocks it). Verify a row actually left, so a
+            // block can never look "deleted" while still sitting in the table and
+            // blocking bookings — assigned OR unassigned.
+            if (!deleted || deleted.length === 0) {
+                throw new Error('That block could not be removed — nothing was deleted. It may still be on the calendar (possible permissions issue). Tell your developer if this keeps happening.')
+            }
             setBlockModal(null)
             await fetchData()
         } catch (err) {
@@ -7788,6 +7796,11 @@ function TimeGridView({ view, currentDate, appointments, blockedTimes, staff, on
                                     if (b.block_date !== dateStr) return false
                                     const startH = parseInt(b.start_time.split(':')[0])
                                     if (startH !== hour) return false
+                                    // Shop-wide blocks (no staff_id) block EVERY groomer's bookings,
+                                    // so they must show in every staff column — not only the
+                                    // "Unassigned" lane (which is often toggled off). Otherwise the
+                                    // block is invisible yet still rejects bookings. (The bug Nicole hit.)
+                                    if (b.staff_id == null) return true
                                     return (b.staff_id || null) === (col.id || null)
                                 })
                                 return (
