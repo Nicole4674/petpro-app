@@ -53,6 +53,7 @@ import Kiosk from './pages/Kiosk'
 import StaffLogin from './pages/StaffLogin'
 import StaffMe from './pages/StaffMe'
 import Route2 from './pages/Route'  // imported as Route2 to avoid clash with react-router-dom Route
+import Zones from './pages/Zones'
 import PetProAI from './pages/PetProAI'
 import Expenses from './pages/Expenses'
 import Onboarding from './pages/Onboarding'
@@ -222,6 +223,8 @@ function App() {
                     <Route path="/calendar" element={gate(session, <Calendar />)} />
                     {/* Today's Route — mobile groomer feature (Phase 2) */}
                     <Route path="/route" element={gate(session, <Route2 />)} />
+                    {/* Service Zones — mobile "Area Days" (Phase 2) */}
+                    <Route path="/zones" element={gate(session, <Zones />)} />
                     {/* PetPro AI — full conversational chat with lifted guardrails */}
                     <Route path="/petpro-ai" element={gate(session, <PetProAI />)} />
                     {/* Expenses — track tax-deductible business expenses */}
