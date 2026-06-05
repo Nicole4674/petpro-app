@@ -8915,13 +8915,25 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                     ? (conflict.staff_members.first_name + (conflict.staff_members.last_name ? ' ' + conflict.staff_members.last_name : ''))
                     : 'this time'
                 var noteBit = conflict.note ? ' (' + conflict.note + ')' : ''
-                setError(
-                    "🚫 That time isn't available — " + who + ' has it blocked off' + noteBit +
+                // Groomer override: a human booking can go over a block (e.g. a
+                // stale/leftover block, or "I'll squeeze this one in"). Suds books
+                // through the server-side path and is NOT affected — it still
+                // refuses to book over blocks.
+                var bookAnyway = window.confirm(
+                    "⚠️ That time is blocked — " + who + ' has it blocked off' + noteBit +
                     ' from ' + formatTime(conflict.start_time) + ' to ' + formatTime(conflict.end_time) +
-                    '. Please pick a different time.'
+                    '.\n\nBook here anyway?\n\n(OK = book over the block · Cancel = pick another time. If this is an old block you no longer need, you can delete it from the calendar afterward.)'
                 )
-                setSaving(false)
-                return
+                if (!bookAnyway) {
+                    setError(
+                        "Booking stopped — " + who + ' has this time blocked off' + noteBit +
+                        ' from ' + formatTime(conflict.start_time) + ' to ' + formatTime(conflict.end_time) +
+                        '. Pick another time, or save again and choose "OK" to book over it.'
+                    )
+                    setSaving(false)
+                    return
+                }
+                // else: groomer chose to override — fall through and book.
             }
         } catch (err) {
             setError(err.message || 'Could not verify availability — please try again.')
