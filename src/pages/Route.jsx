@@ -452,6 +452,116 @@ export default function Route() {
     setOptimizeMsg('Optimized! Saves ~' + formatDriveTime(result.savedSeconds) + ' of drive time.')
   }
 
+  // ─── Phase 3: Fill My Route ──────────────────────────────────────────────
+  // Find active clients with NO upcoming appointment who live within ~5 miles
+  // of any of today's stops, so the groomer can offer them a slot while already
+  // in the area. Free — straight-line distance on cached lat/lng (no Maps API).
+  var [fillCandidates, setFillCandidates] = useState(null)
+  var [fillLoading, setFillLoading] = useState(false)
+  var [fillSent, setFillSent] = useState({})
+  var FILL_RADIUS_MI = 5
+
+  function milesBetween(lat1, lng1, lat2, lng2) {
+    if (lat1 == null || lng1 == null || lat2 == null || lng2 == null) return null
+    var toRad = function (x) { return x * Math.PI / 180 }
+    var R = 3958.8
+    var dLat = toRad(lat2 - lat1)
+    var dLng = toRad(lng2 - lng1)
+    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2)
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  }
+
+  async function findFillCandidates() {
+    setFillLoading(true)
+    try {
+      var { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      var routePts = (displayStops || []).filter(function (s) { return s.lat != null && s.lng != null })
+      if (routePts.length === 0) { setFillCandidates([]); return }
+      var onRoute = {}
+      routePts.forEach(function (s) { if (s.clientId) onRoute[s.clientId] = true })
+
+      var today = todayLocalIso()
+      var { data: clients } = await supabase
+        .from('clients')
+        .select('id, first_name, last_name, phone, sms_consent, latitude, longitude, is_active')
+        .eq('groomer_id', user.id)
+      var { data: appts } = await supabase
+        .from('appointments')
+        .select('client_id, appointment_date, status, checked_out_at')
+        .eq('groomer_id', user.id)
+
+      var CLOSED = ['cancelled', 'no_show', 'rescheduled', 'completed', 'checked_out']
+      var DEAD = ['cancelled', 'no_show', 'rescheduled']
+      var meta = {}
+      ;(appts || []).forEach(function (a) {
+        if (!a.client_id || !a.appointment_date) return
+        if (!meta[a.client_id]) meta[a.client_id] = { hasUpcoming: false, lastVisit: null }
+        var m = meta[a.client_id]
+        var open = a.checked_out_at == null && CLOSED.indexOf(a.status) === -1
+        if (open && a.appointment_date >= today) m.hasUpcoming = true
+        var served = DEAD.indexOf(a.status) === -1 && (a.checked_out_at != null || a.status === 'completed' || a.appointment_date < today)
+        if (served && (!m.lastVisit || a.appointment_date > m.lastVisit)) m.lastVisit = a.appointment_date
+      })
+
+      var results = []
+      ;(clients || []).forEach(function (c) {
+        if (c.is_active === false) return
+        if (onRoute[c.id]) return
+        var m = meta[c.id] || {}
+        if (m.hasUpcoming) return
+        var lat = c.latitude != null ? parseFloat(c.latitude) : null
+        var lng = c.longitude != null ? parseFloat(c.longitude) : null
+        if (lat == null || lng == null) return
+        var best = Infinity
+        routePts.forEach(function (s) {
+          var mi = milesBetween(lat, lng, s.lat, s.lng)
+          if (mi != null && mi < best) best = mi
+        })
+        if (best <= FILL_RADIUS_MI) {
+          results.push({
+            id: c.id,
+            name: [c.first_name, c.last_name].filter(Boolean).join(' '),
+            firstName: c.first_name || '',
+            phone: c.phone || null,
+            sms_consent: c.sms_consent === true,
+            lastVisit: m.lastVisit || null,
+            miles: best,
+          })
+        }
+      })
+      results.sort(function (a, b) { return a.miles - b.miles })
+      setFillCandidates(results)
+    } catch (err) {
+      console.error('[Route] findFillCandidates error', err)
+      setFillCandidates([])
+    } finally {
+      setFillLoading(false)
+    }
+  }
+
+  async function sendFillInvite(c) {
+    if (!c.phone || !c.sms_consent) {
+      window.alert(c.name + ' has no SMS consent or phone on file — can\'t text them.')
+      return
+    }
+    var msg = 'Hi ' + (c.firstName || 'there') + "! I'm grooming in your area today and have an opening — want me to swing by? Reply to grab it! 🐾"
+    if (!window.confirm('Text ' + c.name + ' at ' + c.phone + '?\n\n"' + msg + '"')) return
+    try {
+      var { data: { user } } = await supabase.auth.getUser()
+      var { data: res, error } = await supabase.functions.invoke('send-sms', {
+        body: { to: c.phone, message: msg, groomer_id: user.id, sms_type: 'manual' },
+      })
+      if (error || (res && res.success === false)) {
+        window.alert('Could not text ' + c.name + ': ' + ((res && res.error) || (error && error.message) || 'SMS failed'))
+        return
+      }
+      setFillSent(function (prev) { var n = Object.assign({}, prev); n[c.id] = true; return n })
+    } catch (err) {
+      window.alert('Could not text: ' + (err.message || err))
+    }
+  }
+
   if (loading) {
     return (
       <div style={{ padding: '24px', maxWidth: '1100px', margin: '0 auto' }}>
@@ -557,8 +667,85 @@ export default function Route() {
               🚗 Start Route — {displayStops.length} stop{displayStops.length === 1 ? '' : 's'}
             </button>
           )}
+
+          {/* Phase 3 — Fill My Route: find nearby clients with nothing booked */}
+          {displayStops.length > 0 && (
+            <button
+              onClick={findFillCandidates}
+              disabled={fillLoading}
+              style={{
+                padding: '12px 16px',
+                background: '#fff',
+                color: '#7c3aed',
+                border: '1px solid #7c3aed',
+                borderRadius: '10px',
+                fontWeight: 700,
+                fontSize: '14px',
+                cursor: fillLoading ? 'wait' : 'pointer',
+                opacity: fillLoading ? 0.6 : 1,
+              }}
+              title="Find nearby clients who have nothing booked"
+            >
+              {fillLoading ? '🔍 Finding…' : '🧲 Fill My Route'}
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Phase 3 — Fill My Route results: nearby no-upcoming clients + text invite */}
+      {fillCandidates !== null && (
+        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '14px', marginBottom: '12px' }}>
+          <div style={{ fontWeight: 700, color: '#111827', marginBottom: '8px' }}>
+            🧲 Nearby clients to fill your route
+            {fillCandidates.length > 0 ? ' — ' + fillCandidates.length + ' within ' + FILL_RADIUS_MI + ' mi' : ''}
+          </div>
+          {fillCandidates.length === 0 ? (
+            <div style={{ color: '#6b7280', fontSize: '13px' }}>
+              No clients without an upcoming appointment within {FILL_RADIUS_MI} miles of today's stops.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {fillCandidates.map(function (c) {
+                var canText = !!(c.phone && c.sms_consent)
+                return (
+                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', border: '1px solid #f1f5f9', borderRadius: '8px' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, color: '#111827' }}>{c.name}</div>
+                      <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                        {c.miles.toFixed(1)} mi away
+                        {c.lastVisit ? ' · last visit ' + c.lastVisit : ' · no prior visit'}
+                        {!c.sms_consent ? ' · no SMS consent' : ''}
+                      </div>
+                    </div>
+                    {fillSent[c.id] ? (
+                      <span style={{ color: '#16a34a', fontWeight: 700, fontSize: '13px' }}>✓ Texted</span>
+                    ) : (
+                      <button
+                        onClick={function () { sendFillInvite(c) }}
+                        disabled={!canText}
+                        style={{
+                          padding: '7px 12px',
+                          background: canText ? '#10b981' : '#e5e7eb',
+                          color: canText ? '#fff' : '#9ca3af',
+                          border: 'none',
+                          borderRadius: '8px',
+                          fontWeight: 700,
+                          fontSize: '13px',
+                          cursor: canText ? 'pointer' : 'not-allowed',
+                          whiteSpace: 'nowrap',
+                        }}
+                        title={canText ? 'Text an invite' : 'No SMS consent or phone on file'}
+                      >
+                        📱 Text invite
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Phase 6 — Running Late banner. Renders nothing if toggle is off
           OR if the groomer is on schedule. When late, shows a yellow banner
