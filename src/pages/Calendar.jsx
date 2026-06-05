@@ -626,7 +626,7 @@ export default function Calendar() {
                 .gte('appointment_date', startDate)
                 .lte('appointment_date', endDate)
                 .order('start_time'),
-            supabase.from('clients').select('id, first_name, last_name, phone, default_mobile_visit, default_mobile_pickup').eq('groomer_id', user.id).order('last_name'),
+            supabase.from('clients').select('id, first_name, last_name, phone, address, default_mobile_visit, default_mobile_pickup').eq('groomer_id', user.id).order('last_name'),
             supabase.from('pets').select('id, name, breed, client_id').eq('groomer_id', user.id).or('is_archived.is.null,is_archived.eq.false').order('name'),
             supabase.from('services').select('id, service_name, price, time_block_minutes').eq('groomer_id', user.id).eq('is_active', true),
             supabase.from('staff_members').select('id, first_name, last_name, color_code').eq('groomer_id', user.id).eq('status', 'active').order('first_name'),
@@ -8590,6 +8590,18 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
     // Client search (replaces the old dropdown)
     const [clientSearch, setClientSearch] = useState('')
     const [showClientResults, setShowClientResults] = useState(false)
+    // Zones (mobile "Area Days") — drives the per-client zone badge below.
+    const [zones, setZones] = useState([])
+    useEffect(() => {
+        let cancelled = false
+        ;(async () => {
+            const { data: { user } } = await supabase.auth.getUser()
+            if (!user || cancelled) return
+            const { data } = await supabase.from('zones').select('name, color, days_of_week, zips').eq('groomer_id', user.id)
+            if (!cancelled) setZones(data || [])
+        })()
+        return () => { cancelled = true }
+    }, [])
     // Task #19 — Recurring series state
     const [isRecurring, setIsRecurring] = useState(false)
     const [intervalWeeks, setIntervalWeeks] = useState(6)
@@ -9785,6 +9797,30 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                                             ? '✓ Shows on the Route page for the day.'
                                             : 'Storefront appointments stay on the Calendar only.'}
                                 </div>
+                            </div>
+                        )
+                    })()}
+
+                    {/* Zone (Area Day) badge — shows the selected client's service
+                        zone, matched by the ZIP in their address. Only appears when
+                        zones exist (mobile shops); storefront shops see nothing. */}
+                    {(function () {
+                        if (!zones || zones.length === 0 || !form.client_id) return null
+                        var zc = clients.find(function (x) { return x.id === form.client_id })
+                        var addr = (zc && zc.address) ? String(zc.address) : ''
+                        var zipM = addr.match(/\b(\d{5})\b/)
+                        var zip = zipM ? zipM[1] : null
+                        if (!zip) return null
+                        var zone = zones.find(function (z) { return Array.isArray(z.zips) && z.zips.indexOf(zip) !== -1 })
+                        if (!zone) return null
+                        var DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+                        var daysTxt = (zone.days_of_week && zone.days_of_week.length)
+                            ? zone.days_of_week.map(function (d) { return DOW[d] }).join('/')
+                            : ''
+                        var col = zone.color || '#7c3aed'
+                        return (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '5px 12px', borderRadius: '999px', background: col + '1A', color: col, border: '1px solid ' + col, fontSize: '12px', fontWeight: 700, margin: '4px 0 8px' }}>
+                                📍 {zone.name}{daysTxt ? ' · ' + daysTxt : ''}
                             </div>
                         )
                     })()}
