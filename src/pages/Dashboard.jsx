@@ -595,7 +595,10 @@ export default function Dashboard() {
   }
 
   // Stats calculations
-  var todayStr = formatDateISO(new Date())
+  // In Day view the cards reflect the SELECTED day (so navigating to tomorrow
+  // shows tomorrow's numbers, not zeros). Week/Month keep "today" as the real
+  // calendar date since those views show a range with their own range-revenue.
+  var todayStr = view === 'day' ? formatDateISO(currentDate) : formatDateISO(new Date())
   var todayAppts = appointments.filter(function(a) { return a.appointment_date === todayStr })
   // "Appointments Today" stat card uses an active-only count: cancelled and
   // no-show rows still need to render in the Grooming Overview list below
@@ -672,11 +675,19 @@ export default function Dashboard() {
   var revenueLabel = (function () {
     if (view === 'week') return 'Revenue This Week'
     if (view === 'month') return 'Revenue This Month'
-    // Day view — if the selected date is today, say "Today"; otherwise show the date
+    // Day view — if the selected date is the REAL today, say "Today"; otherwise show the date
     var selectedStr = formatDateISO(currentDate)
-    if (selectedStr === todayStr) return 'Revenue Today'
+    if (selectedStr === formatDateISO(new Date())) return 'Revenue Today'
     var d = new Date(currentDate)
     return 'Revenue ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  })()
+
+  // Matching label for the Appointments card so it doesn't say "Today" on another day.
+  var apptsLabel = (function () {
+    if (view === 'week') return 'Appointments This Week'
+    if (view === 'month') return 'Appointments This Month'
+    if (formatDateISO(currentDate) === formatDateISO(new Date())) return 'Appointments Today'
+    return 'Appointments ' + new Date(currentDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   })()
 
   // Quick add — active pets only (memorial + archived pets filtered out of dropdowns)
@@ -926,7 +937,7 @@ export default function Dashboard() {
           <div className="db-stat-icon">✂️</div>
           <div className="db-stat-info">
             <div className="db-stat-number">{todayApptsActive.length}</div>
-            <div className="db-stat-label">Appointments Today</div>
+            <div className="db-stat-label">{apptsLabel}</div>
           </div>
         </div>
         <div className="db-stat-card db-stat-green" onClick={function() { navigate('/boarding/calendar') }} style={{ cursor: 'pointer' }}>

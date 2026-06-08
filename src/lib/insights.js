@@ -37,6 +37,23 @@ function dateOffset(days) {
   return d.toISOString().slice(0, 10)
 }
 
+// True if the shop is open on the given YYYY-MM-DD, per its per-day business_hours.
+// Mirrors how Suds + Smart Book read business_hours so nudges respect the days the
+// groomer actually works. Defaults to OPEN if no per-day hours are configured.
+async function shopOpenOn(groomerId, dateStr) {
+  const { data: s } = await supabase
+    .from('shop_settings')
+    .select('business_hours')
+    .eq('groomer_id', groomerId)
+    .maybeSingle()
+  const bh = s && s.business_hours
+  if (!bh || typeof bh !== 'object') return true
+  const FULL = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+  const cfg = bh[FULL[new Date(dateStr + 'T12:00:00').getDay()]]
+  if (!cfg) return false
+  return cfg.is_open !== false
+}
+
 // True if rule_key fired within the last 24h for this groomer (any status)
 async function ruleRecentlyFired(groomerId, ruleKey) {
   const since = new Date(Date.now() - THROTTLE_MS).toISOString()
@@ -56,6 +73,10 @@ async function ruleRecentlyFired(groomerId, ruleKey) {
 // (so we don't bug brand-new groomers with empty calendars).
 // ---------------------------------------------------------------------------
 async function ruleLightSchedule(groomerId) {
+  // Don't warn that "tomorrow looks light" when the shop is CLOSED tomorrow —
+  // an empty day off isn't something to nag about. Respects the groomer's days.
+  if (!(await shopOpenOn(groomerId, dateOffset(1)))) return null
+
   // Count tomorrow's appointments
   const { data: appts } = await supabase
     .from('appointments')
@@ -251,8 +272,10 @@ async function ruleNewUnwelcomedClient(groomerId) {
 // Fire when today has 0 appointments AND it's a weekday (Mon-Fri).
 // ---------------------------------------------------------------------------
 async function ruleQuietDay(groomerId) {
-  const dow = new Date().getDay()
-  if (dow === 0 || dow === 6) return null // skip weekends — they may be intentionally closed
+  // Only nudge about a quiet day if the shop is actually OPEN today — skip the
+  // groomer's real days off (read from business_hours, not a hardcoded Mon-Fri,
+  // so a working Saturday counts and a closed Sunday doesn't).
+  if (!(await shopOpenOn(groomerId, todayStr()))) return null
 
   const { data: appts } = await supabase
     .from('appointments')
@@ -343,11 +366,16 @@ export async function runInsights(groomerId) {
 export async function fetchUnreadInsights(groomerId) {
   if (!groomerId) return []
   const nowIso = new Date().toISOString()
+  // Freshness window: only surface nudges from the last 24h. Time-sensitive ones
+  // ("tomorrow looks light", "quiet day today") go stale after a day — this stops
+  // Suds from holding onto old/late nudges. Persistent conditions just re-fire.
+  const freshSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
   const { data } = await supabase
     .from('ai_insights')
     .select('*')
     .eq('groomer_id', groomerId)
     .eq('status', 'unread')
+    .gte('created_at', freshSince)
     .or('snoozed_until.is.null,snoozed_until.lte.' + nowIso)
     .order('created_at', { ascending: false })
   return data || []

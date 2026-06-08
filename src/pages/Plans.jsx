@@ -277,8 +277,8 @@ export default function Plans() {
         fontSize: '15px',
         fontWeight: '600',
       }}>
-        🚀 <strong>FOUNDER DEAL — First 100 signups get full access to every feature on every plan.</strong>{' '}
-        Locked in forever — limited time.
+        🎉 <strong>First-time users get 30% off for 3 months</strong> with promo code{' '}
+        <strong>SUDS30</strong> at checkout.
       </div>
 
       {/* ─── "Trouble signing up?" — prominent fallback for stuck users ─── */}
