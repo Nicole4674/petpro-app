@@ -128,6 +128,13 @@ export default function SMSInboxView() {
 
   async function markThreadRead(groomerId, clientId) {
     if (!clientId) return
+    // Clear this conversation's unread marker in the list RIGHT NOW (optimistic)
+    // so you can see at a glance which ones you've opened — no refresh needed.
+    setConversations(function (prev) {
+      return prev.map(function (c) {
+        return (c.client_id === clientId) ? Object.assign({}, c, { unread_count: 0 }) : c
+      })
+    })
     await supabase
       .from('sms_messages')
       .update({ is_read: true })
