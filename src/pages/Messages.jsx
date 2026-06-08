@@ -166,6 +166,9 @@ export default function Messages() {
       .eq('thread_id', threadId)
       .eq('sender_type', 'client')
       .eq('read_by_groomer', false)
+    // Tell the sidebar badge to refresh right now — no waiting on realtime or a
+    // page refresh. So the red alert clears the instant you open the thread.
+    try { window.dispatchEvent(new Event('messages-updated')) } catch (e) {}
     setThreads(function (prev) {
       return prev.map(function (t) {
         return t.id === threadId ? Object.assign({}, t, { unread_count: 0 }) : t

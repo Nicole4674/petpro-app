@@ -27,16 +27,20 @@ export default function Sidebar({ onToggle }) {
     settings: true,
   })
 
-  // Track unread messages count (live)
+  // Track unread messages count (live). Multiple triggers so a client message
+  // is never missed: realtime events, an in-app "messages-updated" event (fired
+  // when a thread is opened/read), tab focus, and a 30s safety poll.
   useEffect(function() {
     var userId = null
     var channel = null
+    var intervalId = null
 
-    async function load() {
-      var { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      userId = user.id
-
+    async function refreshCount() {
+      if (!userId) {
+        var { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+        userId = user.id
+      }
       var { count } = await supabase
         .from('messages')
         .select('id', { count: 'exact', head: true })
@@ -44,6 +48,13 @@ export default function Sidebar({ onToggle }) {
         .eq('sender_type', 'client')
         .eq('read_by_groomer', false)
       setUnreadMessages(count || 0)
+    }
+
+    async function init() {
+      var { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      userId = user.id
+      await refreshCount()
 
       channel = supabase
         .channel('sidebar-messages-' + userId)
@@ -52,21 +63,20 @@ export default function Sidebar({ onToggle }) {
           schema: 'public',
           table: 'messages',
           filter: 'groomer_id=eq.' + userId,
-        }, async function() {
-          var { count: c2 } = await supabase
-            .from('messages')
-            .select('id', { count: 'exact', head: true })
-            .eq('groomer_id', userId)
-            .eq('sender_type', 'client')
-            .eq('read_by_groomer', false)
-          setUnreadMessages(c2 || 0)
-        })
+        }, refreshCount)
         .subscribe()
     }
-    load()
+    init()
+
+    window.addEventListener('focus', refreshCount)
+    window.addEventListener('messages-updated', refreshCount)
+    intervalId = setInterval(refreshCount, 30000)
 
     return function() {
       if (channel) supabase.removeChannel(channel)
+      window.removeEventListener('focus', refreshCount)
+      window.removeEventListener('messages-updated', refreshCount)
+      if (intervalId) clearInterval(intervalId)
     }
   }, [])
 
