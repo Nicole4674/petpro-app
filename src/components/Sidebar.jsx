@@ -35,19 +35,32 @@ export default function Sidebar({ onToggle }) {
     var channel = null
     var intervalId = null
 
+    var smsChannel = null
+
     async function refreshCount() {
       if (!userId) {
         var { data: { user } } = await supabase.auth.getUser()
         if (!user) return
         userId = user.id
       }
-      var { count } = await supabase
+      // Count BOTH unread in-app messages AND unread inbound SMS (they live in
+      // separate tables but both show in the Messages tab).
+      var inappQ = supabase
         .from('messages')
         .select('id', { count: 'exact', head: true })
         .eq('groomer_id', userId)
         .eq('sender_type', 'client')
         .eq('read_by_groomer', false)
-      setUnreadMessages(count || 0)
+      var smsQ = supabase
+        .from('sms_messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('groomer_id', userId)
+        .eq('direction', 'inbound')
+        .eq('is_read', false)
+      var res = await Promise.all([inappQ, smsQ])
+      var inapp = (res[0] && res[0].count) || 0
+      var sms = (res[1] && res[1].count) || 0
+      setUnreadMessages(inapp + sms)
     }
 
     async function init() {
@@ -65,6 +78,16 @@ export default function Sidebar({ onToggle }) {
           filter: 'groomer_id=eq.' + userId,
         }, refreshCount)
         .subscribe()
+
+      smsChannel = supabase
+        .channel('sidebar-sms-' + userId)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'sms_messages',
+          filter: 'groomer_id=eq.' + userId,
+        }, refreshCount)
+        .subscribe()
     }
     init()
 
@@ -74,6 +97,7 @@ export default function Sidebar({ onToggle }) {
 
     return function() {
       if (channel) supabase.removeChannel(channel)
+      if (smsChannel) supabase.removeChannel(smsChannel)
       window.removeEventListener('focus', refreshCount)
       window.removeEventListener('messages-updated', refreshCount)
       if (intervalId) clearInterval(intervalId)

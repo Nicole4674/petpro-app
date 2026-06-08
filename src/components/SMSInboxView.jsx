@@ -135,6 +135,9 @@ export default function SMSInboxView() {
       .eq('client_id', clientId)
       .eq('direction', 'inbound')
       .eq('is_read', false)
+    // Ping the sidebar badge so the red SMS count clears the instant you open
+    // the conversation (no wait for realtime or a refresh).
+    try { window.dispatchEvent(new Event('messages-updated')) } catch (e) {}
   }
 
   // ─── Delete a single message from the inbox (hard delete) ───
