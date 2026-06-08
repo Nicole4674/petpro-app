@@ -1203,7 +1203,7 @@ export default function Dashboard() {
                   : 'Unknown'
                 var petsBreed = displayPets.length === 1 ? (displayPets[0].breed || '') : ''
                 return (
-                  <div key={a.id} className="db-appt-row" onClick={function() { navigate('/calendar') }}>
+                  <div key={a.id} className="db-appt-row" onClick={function() { navigate('/calendar?viewAppt=' + a.id) }}>
                     <div className="db-appt-time">{formatTime(a.start_time)}</div>
                     <div className="db-appt-status-dot" style={{ backgroundColor: STATUS_COLORS[a.status] || '#7c3aed' }}></div>
                     <div className="db-appt-info">
