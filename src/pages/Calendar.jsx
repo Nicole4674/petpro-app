@@ -918,17 +918,22 @@ export default function Calendar() {
                     .eq('id', blockModal.block.id)
                 if (error) throw error
             } else {
-                // INSERT new block
-                const { error } = await supabase
-                    .from('blocked_times')
-                    .insert({
+                // INSERT new block(s). For a recurring block, payload.block_dates
+                // holds every weekly date (e.g. 12 Saturdays); otherwise just one.
+                var dates = (payload.block_dates && payload.block_dates.length) ? payload.block_dates : [payload.block_date]
+                var rows = dates.map(function (d) {
+                    return {
                         groomer_id: user.id,
                         staff_id: payload.staff_id || null,
-                        block_date: payload.block_date,
+                        block_date: d,
                         start_time: payload.start_time,
                         end_time: payload.end_time,
                         note: payload.note || null,
-                    })
+                    }
+                })
+                const { error } = await supabase
+                    .from('blocked_times')
+                    .insert(rows)
                 if (error) throw error
             }
             setBlockModal(null)
@@ -8582,6 +8587,9 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
     //                       quoted_price, time_block_minutes }] }
     // Addons = extra services stacked on a single pet (dematting, dremel, handling, etc.)
     const [petsInBooking, setPetsInBooking] = useState([])
+    // Each booked pet's most recent service + price — shown as a "last time"
+    // reference so the groomer doesn't have to look up what they had before.
+    const [lastApptByPet, setLastApptByPet] = useState({})
     const [showAddPetModal, setShowAddPetModal] = useState(false)
     // Inline "add another service" state — which pet we're adding to + the picked service
     const [addingAddonForPetIdx, setAddingAddonForPetIdx] = useState(null)
@@ -8766,6 +8774,39 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
             })
         }
     }, [petsInBooking, form.start_time])
+
+    // Fetch each booked pet's most recent service + price (their "last time") so
+    // the groomer can rebook without looking it up. Only refetches when the set
+    // of pets changes (not on every price edit).
+    useEffect(function () {
+        var ids = (petsInBooking || []).map(function (p) { return p.pet_id }).filter(Boolean)
+        if (ids.length === 0) { setLastApptByPet({}); return }
+        var cancelled = false
+        ;(async function () {
+            var now = new Date()
+            var todayIso = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0')
+            var { data } = await supabase
+                .from('appointments')
+                .select('pet_id, appointment_date, final_price, quoted_price, services:service_id(service_name)')
+                .in('pet_id', ids)
+                .lte('appointment_date', todayIso)
+                .not('status', 'in', '(cancelled,no_show,rescheduled)')
+                .order('appointment_date', { ascending: false })
+            if (cancelled) return
+            var map = {}
+            ;(data || []).forEach(function (a) {
+                if (a.pet_id && !map[a.pet_id]) {
+                    map[a.pet_id] = {
+                        service_name: a.services ? a.services.service_name : null,
+                        price: (a.final_price != null ? a.final_price : a.quoted_price),
+                        date: a.appointment_date,
+                    }
+                }
+            })
+            setLastApptByPet(map)
+        })()
+        return function () { cancelled = true }
+    }, [petsInBooking.map(function (p) { return p.pet_id }).join(',')])
 
     // Total price = sum of all pets' primary prices + all addons across all pets
     var totalPrice = petsInBooking.reduce(function (sum, p) {
@@ -9568,6 +9609,15 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                                                     title="Remove pet"
                                                 >×</button>
                                             </div>
+
+                                            {/* Last time reference — what this pet had + paid most recently */}
+                                            {lastApptByPet[p.pet_id] && (
+                                                <div style={{ fontSize: '12px', color: '#5b21b6', background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '6px', padding: '4px 8px', marginBottom: '6px' }}>
+                                                    🔁 Last time: {lastApptByPet[p.pet_id].service_name || 'service'}
+                                                    {lastApptByPet[p.pet_id].price != null ? ' — $' + parseFloat(lastApptByPet[p.pet_id].price).toFixed(2) : ''}
+                                                    {lastApptByPet[p.pet_id].date ? ' (' + new Date(lastApptByPet[p.pet_id].date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ')' : ''}
+                                                </div>
+                                            )}
 
                                             {/* Primary service */}
                                             <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>
@@ -11189,18 +11239,43 @@ function BlockTimeModal({ modal, staff, saving, onSave, onDelete, onClose }) {
     var [endTime, setEndTime] = useState(initEnd)
     var [note, setNote] = useState(initNote)
     var [err, setErr] = useState('')
+    // All-day = block the whole day in one click. Recurring = repeat weekly
+    // (e.g. every Saturday) so you don't have to add them one at a time.
+    var [allDay, setAllDay] = useState(isEdit && existing.start_time.slice(0, 5) === '00:00' && existing.end_time.slice(0, 5) >= '23:59')
+    var [repeatWeekly, setRepeatWeekly] = useState(false)
+    var [repeatWeeks, setRepeatWeeks] = useState(8)
+
+    var DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    var weekdayName = blockDate ? DAY_NAMES[new Date(blockDate + 'T12:00:00').getDay()] : ''
 
     var handleSubmit = function (e) {
         e.preventDefault()
         setErr('')
         if (!blockDate) { setErr('Pick a date'); return }
-        if (!startTime || !endTime) { setErr('Set a start and end time'); return }
-        if (endTime <= startTime) { setErr('End time must be after start time'); return }
+        var s = allDay ? '00:00' : startTime
+        var en = allDay ? '23:59' : endTime
+        if (!s || !en) { setErr('Set a start and end time'); return }
+        if (en <= s) { setErr('End time must be after start time'); return }
+
+        // Recurring (create only): build every weekly date from the chosen day.
+        var dates = [blockDate]
+        if (!isEdit && repeatWeekly) {
+            var n = Math.max(1, Math.min(parseInt(repeatWeeks, 10) || 1, 52))
+            dates = []
+            var base = new Date(blockDate + 'T00:00:00')
+            for (var i = 0; i < n; i++) {
+                var d = new Date(base.getTime())
+                d.setDate(d.getDate() + i * 7)
+                dates.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'))
+            }
+        }
+
         onSave({
             staff_id: staffId || null,
             block_date: blockDate,
-            start_time: startTime,
-            end_time: endTime,
+            block_dates: dates,
+            start_time: s,
+            end_time: en,
             note: note.trim(),
         })
     }
@@ -11281,26 +11356,63 @@ function BlockTimeModal({ modal, staff, saving, onSave, onDelete, onClose }) {
                         onChange={function (e) { setBlockDate(e.target.value) }}
                     />
 
-                    <div style={{ display: 'flex', gap: '12px' }}>
-                        <div style={{ flex: 1 }}>
-                            <label style={label}>Start</label>
-                            <input
-                                type="time"
-                                style={input}
-                                value={startTime}
-                                onChange={function (e) { setStartTime(e.target.value) }}
-                            />
+                    {/* All-day toggle — block the whole day in one click */}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '14px', fontSize: '14px', fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={allDay} onChange={function (e) { setAllDay(e.target.checked) }} />
+                        🕒 All day (block the whole day)
+                    </label>
+
+                    {!allDay && (
+                        <div style={{ display: 'flex', gap: '12px' }}>
+                            <div style={{ flex: 1 }}>
+                                <label style={label}>Start</label>
+                                <input
+                                    type="time"
+                                    style={input}
+                                    value={startTime}
+                                    onChange={function (e) { setStartTime(e.target.value) }}
+                                />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <label style={label}>End</label>
+                                <input
+                                    type="time"
+                                    style={input}
+                                    value={endTime}
+                                    onChange={function (e) { setEndTime(e.target.value) }}
+                                />
+                            </div>
                         </div>
-                        <div style={{ flex: 1 }}>
-                            <label style={label}>End</label>
-                            <input
-                                type="time"
-                                style={input}
-                                value={endTime}
-                                onChange={function (e) { setEndTime(e.target.value) }}
-                            />
+                    )}
+
+                    {/* Recurring — repeat this block weekly (e.g. every Saturday). Create only. */}
+                    {!isEdit && (
+                        <div style={{ marginTop: '16px', padding: '12px 14px', background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '8px' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                                <input type="checkbox" checked={repeatWeekly} onChange={function (e) { setRepeatWeekly(e.target.checked) }} />
+                                🔁 Repeat weekly{weekdayName ? ' (every ' + weekdayName + ')' : ''}
+                            </label>
+                            {repeatWeekly && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px', fontSize: '13px', color: '#374151', flexWrap: 'wrap' }}>
+                                    <span>for</span>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max="52"
+                                        value={repeatWeeks}
+                                        onChange={function (e) { setRepeatWeeks(e.target.value) }}
+                                        style={{ width: '72px', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }}
+                                    />
+                                    <span>weeks</span>
+                                </div>
+                            )}
+                            {repeatWeekly && (
+                                <div style={{ marginTop: '8px', fontSize: '12px', color: '#7c3aed' }}>
+                                    Creates {Math.max(1, Math.min(parseInt(repeatWeeks, 10) || 1, 52))} blocked {weekdayName || 'day'}s starting on the date above. Re-run later to extend further.
+                                </div>
+                            )}
                         </div>
-                    </div>
+                    )}
 
                     <label style={label}>Note (optional)</label>
                     <input

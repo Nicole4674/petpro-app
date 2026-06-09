@@ -31,6 +31,7 @@ export default function SMSInboxView() {
   var [sending, setSending] = useState(false)
   var [sendError, setSendError] = useState(null)
   var threadEndRef = useRef(null)
+  var threadBoxRef = useRef(null) // the scrollable messages container
 
   // ─── Initial load + realtime subscription ───
   useEffect(function () {
@@ -71,9 +72,10 @@ export default function SMSInboxView() {
 
   // Auto-scroll to bottom of thread on new messages
   useEffect(function () {
-    if (threadEndRef.current) {
-      threadEndRef.current.scrollIntoView({ behavior: 'smooth' })
-    }
+    // Scroll ONLY the messages container to the bottom — never the page. The old
+    // scrollIntoView scrolled the whole inbox, stranding the client list at top.
+    var box = threadBoxRef.current
+    if (box) box.scrollTop = box.scrollHeight
   }, [thread])
 
   async function loadConversations(groomerId) {
@@ -334,7 +336,7 @@ export default function SMSInboxView() {
             </div>
 
             {/* Messages */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+            <div ref={threadBoxRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px' }}>
               {thread.map(function (msg) {
                 var isOut = msg.direction === 'outbound'
                 return (
