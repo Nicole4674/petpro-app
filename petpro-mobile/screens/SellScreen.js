@@ -21,6 +21,7 @@ export default function SellScreen({ session, navigation }) {
   const [discount, setDiscount] = useState('');
   const [note, setNote] = useState('');
   const [charging, setCharging] = useState(false);
+  const [lastSaleId, setLastSaleId] = useState(null);
   const [err, setErr] = useState('');
 
   useEffect(() => { load(); }, []);
@@ -81,11 +82,12 @@ export default function SellScreen({ session, navigation }) {
           groomer_id: session.user.id, product_id: l.product.id, qty_change: -l.qty, reason: 'sale', reference_id: sale.id,
         });
       }
+      setLastSaleId(sale.id);
       setView('done');
     } catch (e) { setErr(e.message || 'Could not complete the sale.'); } finally { setCharging(false); }
   }
 
-  function reset() { setCart([]); setDiscount(''); setNote(''); setView('shop'); load(); }
+  function reset() { setCart([]); setDiscount(''); setNote(''); setLastSaleId(null); setView('shop'); load(); }
 
   const filtered = products.filter((p) => {
     const q = search.trim().toLowerCase();
@@ -110,6 +112,12 @@ export default function SellScreen({ session, navigation }) {
           <Ionicons name="checkmark-circle" size={64} color={colors.green} />
           <Text style={styles.doneBig}>Sale complete</Text>
           <Text style={styles.doneSub}>{money(total)} · {method}</Text>
+          {lastSaleId ? (
+            <Pressable style={styles.receiptBtn} onPress={() => navigation.navigate('Receipt', { kind: 'sale', id: lastSaleId })}>
+              <Ionicons name="receipt-outline" size={18} color={colors.primaryDark} />
+              <Text style={styles.receiptText}>Receipt</Text>
+            </Pressable>
+          ) : null}
           <Pressable style={styles.newSaleBtn} onPress={reset}><Text style={styles.newSaleText}>New sale</Text></Pressable>
         </View>
       ) : view === 'checkout' ? (
@@ -240,7 +248,9 @@ const styles = StyleSheet.create({
   backToShopText: { color: colors.primary, fontWeight: '700', fontSize: 14 },
   doneBig: { fontSize: 22, fontWeight: '800', color: colors.text, marginTop: 12 },
   doneSub: { fontSize: 15, color: colors.textMute, marginTop: 4 },
-  newSaleBtn: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 40, marginTop: 24 },
+  newSaleBtn: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 40, marginTop: 16 },
   newSaleText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  receiptBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.primaryLight, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 40, marginTop: 24 },
+  receiptText: { color: colors.primaryDark, fontWeight: '800', fontSize: 16 },
   err: { color: '#b91c1c', textAlign: 'center', marginBottom: 12 },
 });

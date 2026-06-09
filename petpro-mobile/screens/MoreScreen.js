@@ -11,6 +11,7 @@ export default function MoreScreen({ session, onSignOut, navigation }) {
     { label: 'Retail', icon: 'cart-outline', screen: 'Retail' },
     { label: 'Staff', icon: 'people-outline', screen: 'Staff' },
     { label: 'Payroll', icon: 'cash-outline', screen: 'Payroll' },
+    { label: 'Agreements', icon: 'document-text-outline', screen: 'Agreements' },
     { label: 'Chat / Suds Settings', icon: 'sparkles-outline', screen: 'ChatSettings' },
     { label: 'Billing & Plan', icon: 'card-outline', screen: 'Billing' },
     { label: 'Settings', icon: 'settings-outline', screen: 'Settings' },

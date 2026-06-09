@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, Pressable, ActivityIndicator, ScrollView, Linking, TextInput, Animated } from 'react-native';
+import { StyleSheet, Text, View, Pressable, ActivityIndicator, ScrollView, Linking, TextInput, Animated, Alert } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
@@ -89,6 +89,10 @@ function fmtDate(iso) {
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 }
 function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
+function fmtNoteDate(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
 
 // Build a per-pet breakdown from appointment_pets (falls back to the legacy single pet/service)
 function buildBreakdown(a) {
@@ -160,6 +164,17 @@ export default function AppointmentDetailScreen({ navigation, route, session }) 
   const [showPay, setShowPay] = useState(false);
   const [noteEdits, setNoteEdits] = useState({}); // petId -> draft text
   const [savingNoteFor, setSavingNoteFor] = useState(null);
+  const [groomNotesByPet, setGroomNotesByPet] = useState({}); // petId -> client_notes[] (note_type 'grooming')
+  const [clientNotes, setClientNotes] = useState([]);          // client_notes[] (note_type 'client')
+  const [addGroomFor, setAddGroomFor] = useState(null);        // petId currently adding a grooming note
+  const [groomNoteText, setGroomNoteText] = useState('');
+  const [savingGroomNote, setSavingGroomNote] = useState(false);
+  const [addClientNote, setAddClientNote] = useState(false);
+  const [clientNoteText, setClientNoteText] = useState('');
+  const [savingClientNote, setSavingClientNote] = useState(false);
+  const [editNoteId, setEditNoteId] = useState(null);   // client_notes id being edited
+  const [editNoteText, setEditNoteText] = useState('');
+  const [savingEditNote, setSavingEditNote] = useState(false);
   const [products, setProducts] = useState([]);
   const [retailSale, setRetailSale] = useState(null); // parked sale id
   const [retailItems, setRetailItems] = useState([]);
@@ -230,6 +245,7 @@ export default function AppointmentDetailScreen({ navigation, route, session }) 
 
       setA(data);
       loadLists(data.client_id);
+      loadNotes(data);
       // seed the reschedule picker from the saved date/time
       if (data && data.appointment_date) {
         const [y, m, d] = data.appointment_date.split('-').map((n) => parseInt(n, 10));
@@ -321,6 +337,113 @@ export default function AppointmentDetailScreen({ navigation, route, session }) 
       if (error) throw error;
       await load();
     } catch (e) { setErr(e.message || 'Could not save note.'); } finally { setSavingNoteFor(null); }
+  }
+
+  // Load the grooming-note timeline (per pet) + client notes from client_notes,
+  // matching the website's appointment popup. Notes added here sync with the site.
+  async function loadNotes(appt) {
+    try {
+      const petIds = [];
+      if (appt.pet_id) petIds.push(appt.pet_id);
+      (appt.appointment_pets || []).forEach((ap) => { if (ap.pet_id && petIds.indexOf(ap.pet_id) === -1) petIds.push(ap.pet_id); });
+      if (petIds.length) {
+        const { data: gn } = await supabase.from('client_notes').select('*')
+          .in('pet_id', petIds).eq('note_type', 'grooming').order('created_at', { ascending: false });
+        const map = {};
+        (gn || []).forEach((n) => { (map[n.pet_id] = map[n.pet_id] || []).push(n); });
+        setGroomNotesByPet(map);
+      } else { setGroomNotesByPet({}); }
+      if (appt.client_id) {
+        const { data: cn } = await supabase.from('client_notes').select('*')
+          .eq('client_id', appt.client_id).eq('note_type', 'client').order('created_at', { ascending: false }).limit(5);
+        setClientNotes(cn || []);
+      } else { setClientNotes([]); }
+    } catch (e) { /* notes are non-critical; ignore */ }
+  }
+
+  async function addGroomingNote(petId) {
+    const text = groomNoteText.trim();
+    if (!petId || !text) return;
+    setSavingGroomNote(true); setErr('');
+    try {
+      const { error } = await supabase.from('client_notes').insert({ pet_id: petId, client_id: a.client_id, note_type: 'grooming', note: text });
+      if (error) throw error;
+      setGroomNoteText(''); setAddGroomFor(null);
+      if (a) await loadNotes(a);
+    } catch (e) { setErr(e.message || 'Could not save grooming note.'); } finally { setSavingGroomNote(false); }
+  }
+
+  async function addClientNoteSave() {
+    const text = clientNoteText.trim();
+    if (!text || !a || !a.client_id) return;
+    setSavingClientNote(true); setErr('');
+    try {
+      const { error } = await supabase.from('client_notes').insert({ client_id: a.client_id, note_type: 'client', note: text });
+      if (error) throw error;
+      setClientNoteText(''); setAddClientNote(false);
+      await loadNotes(a);
+    } catch (e) { setErr(e.message || 'Could not save client note.'); } finally { setSavingClientNote(false); }
+  }
+
+  // Edit/delete works for both grooming + client notes (same client_notes table).
+  async function saveNoteEdit(noteId) {
+    const text = editNoteText.trim();
+    if (!text || !noteId) return;
+    setSavingEditNote(true); setErr('');
+    try {
+      const { error } = await supabase.from('client_notes').update({ note: text }).eq('id', noteId);
+      if (error) throw error;
+      setEditNoteId(null); setEditNoteText('');
+      if (a) await loadNotes(a);
+    } catch (e) { setErr(e.message || 'Could not save note.'); } finally { setSavingEditNote(false); }
+  }
+
+  function deleteNote(noteId) {
+    if (!noteId) return;
+    Alert.alert('Delete this note?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        setErr('');
+        try {
+          const { error } = await supabase.from('client_notes').delete().eq('id', noteId);
+          if (error) throw error;
+          if (editNoteId === noteId) { setEditNoteId(null); setEditNoteText(''); }
+          if (a) await loadNotes(a);
+        } catch (e) { setErr(e.message || 'Could not delete note.'); }
+      } },
+    ]);
+  }
+
+  function renderNote(n) {
+    const editing = editNoteId === n.id;
+    return (
+      <View key={n.id} style={styles.groomNoteItem}>
+        {editing ? (
+          <>
+            <TextInput style={styles.petNoteInput} value={editNoteText} onChangeText={setEditNoteText} multiline autoFocus />
+            <View style={styles.noteEditRow}>
+              <Pressable style={[styles.noteSave, { flex: 1, marginTop: 0 }, savingEditNote && { opacity: 0.6 }]} onPress={() => saveNoteEdit(n.id)} disabled={savingEditNote}>
+                {savingEditNote ? <ActivityIndicator color="#fff" /> : <Text style={styles.noteSaveText}>Save</Text>}
+              </Pressable>
+              <Pressable style={styles.noteCancel} onPress={() => { setEditNoteId(null); setEditNoteText(''); }}>
+                <Text style={styles.noteCancelText}>Cancel</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : (
+          <>
+            <Text style={styles.groomNoteText}>{n.note}</Text>
+            <View style={styles.noteMetaRow}>
+              <Text style={styles.groomNoteDate}>{fmtNoteDate(n.created_at)}</Text>
+              <View style={styles.noteActions}>
+                <Pressable onPress={() => { setEditNoteId(n.id); setEditNoteText(n.note || ''); }} hitSlop={6}><Text style={styles.noteEditLink}>Edit</Text></Pressable>
+                <Pressable onPress={() => deleteNote(n.id)} hitSlop={6}><Text style={styles.noteDelLink}>Delete</Text></Pressable>
+              </View>
+            </View>
+          </>
+        )}
+      </View>
+    );
   }
 
   async function saveNotes() {
@@ -547,7 +670,7 @@ export default function AppointmentDetailScreen({ navigation, route, session }) 
       ) : !a ? (
         <Text style={styles.err}>Appointment not found.</Text>
       ) : (
-        <ScrollView contentContainerStyle={styles.scroll}>
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           {/* Status + when */}
           <View style={styles.card}>
             {a.booked_via === 'client_ai' ? <SudsBadge /> : null}
@@ -673,6 +796,37 @@ export default function AppointmentDetailScreen({ navigation, route, session }) 
                   </Pressable>
                 </View>
               ) : null}
+
+              {/* Client notes (client_notes, note_type 'client') — syncs with website */}
+              <View style={styles.clientNotesWrap}>
+                <View style={styles.groomNoteHead}>
+                  <Text style={styles.groomNoteTitle}>🗒️ CLIENT NOTES</Text>
+                  <Pressable onPress={() => { setAddClientNote((v) => !v); setClientNoteText(''); }}>
+                    <Text style={styles.groomNoteAdd}>{addClientNote ? 'Cancel' : '+ Add note'}</Text>
+                  </Pressable>
+                </View>
+                {addClientNote ? (
+                  <View style={{ marginBottom: 8 }}>
+                    <TextInput
+                      style={styles.petNoteInput}
+                      value={clientNoteText}
+                      onChangeText={setClientNoteText}
+                      placeholder="New note about this client…"
+                      placeholderTextColor={colors.textFaint}
+                      multiline
+                      autoFocus
+                    />
+                    <Pressable style={[styles.noteSave, savingClientNote && { opacity: 0.6 }]} onPress={addClientNoteSave} disabled={savingClientNote}>
+                      {savingClientNote ? <ActivityIndicator color="#fff" /> : <Text style={styles.noteSaveText}>Save client note</Text>}
+                    </Pressable>
+                  </View>
+                ) : null}
+                {clientNotes.length === 0 ? (
+                  <Text style={styles.groomNoteEmpty}>No client notes yet.</Text>
+                ) : (
+                  clientNotes.map(renderNote)
+                )}
+              </View>
             </View>
           ) : null}
 
@@ -759,15 +913,15 @@ export default function AppointmentDetailScreen({ navigation, route, session }) 
                   </View>
                 ) : null}
 
-                {/* Grooming notes for this pet */}
+                {/* Pinned pet-profile note (pets.grooming_notes) */}
                 {p.petId ? (
                   <View style={styles.noteBox}>
-                    <Text style={styles.noteLabel}>Grooming notes</Text>
+                    <Text style={styles.noteLabel}>📌 Pet profile note</Text>
                     <TextInput
                       style={styles.petNoteInput}
                       value={noteEdits[p.petId] ?? p.groomingNotes}
                       onChangeText={(t) => setNoteEdits((m) => ({ ...m, [p.petId]: t }))}
-                      placeholder={`Notes for ${p.petName}…`}
+                      placeholder={`Standing note for ${p.petName}…`}
                       placeholderTextColor={colors.textFaint}
                       multiline
                     />
@@ -776,6 +930,39 @@ export default function AppointmentDetailScreen({ navigation, route, session }) 
                         {savingNoteFor === p.petId ? <ActivityIndicator color="#fff" /> : <Text style={styles.noteSaveText}>Save note</Text>}
                       </Pressable>
                     ) : null}
+                  </View>
+                ) : null}
+
+                {/* Grooming notes timeline (client_notes) — syncs with the website */}
+                {p.petId ? (
+                  <View style={styles.groomNoteBox}>
+                    <View style={styles.groomNoteHead}>
+                      <Text style={styles.groomNoteTitle}>📝 GROOMING NOTES</Text>
+                      <Pressable onPress={() => { setAddGroomFor(addGroomFor === p.petId ? null : p.petId); setGroomNoteText(''); }}>
+                        <Text style={styles.groomNoteAdd}>{addGroomFor === p.petId ? 'Cancel' : '+ Add note'}</Text>
+                      </Pressable>
+                    </View>
+                    {addGroomFor === p.petId ? (
+                      <View style={{ marginBottom: 8 }}>
+                        <TextInput
+                          style={styles.petNoteInput}
+                          value={groomNoteText}
+                          onChangeText={setGroomNoteText}
+                          placeholder={`New grooming note for ${p.petName}…`}
+                          placeholderTextColor={colors.textFaint}
+                          multiline
+                          autoFocus
+                        />
+                        <Pressable style={[styles.noteSave, savingGroomNote && { opacity: 0.6 }]} onPress={() => addGroomingNote(p.petId)} disabled={savingGroomNote}>
+                          {savingGroomNote ? <ActivityIndicator color="#fff" /> : <Text style={styles.noteSaveText}>Save grooming note</Text>}
+                        </Pressable>
+                      </View>
+                    ) : null}
+                    {(groomNotesByPet[p.petId] || []).length === 0 ? (
+                      <Text style={styles.groomNoteEmpty}>No grooming notes yet for {p.petName}.</Text>
+                    ) : (
+                      (groomNotesByPet[p.petId] || []).slice(0, 5).map(renderNote)
+                    )}
                   </View>
                 ) : null}
               </View>
@@ -946,6 +1133,15 @@ export default function AppointmentDetailScreen({ navigation, route, session }) 
             <Text style={styles.reportText}>New report card</Text>
           </Pressable>
 
+          {/* Receipt */}
+          <Pressable
+            style={styles.reportBtn}
+            onPress={() => navigation.navigate('Receipt', { kind: 'appointment', id: apptId })}
+          >
+            <Ionicons name="receipt-outline" size={18} color={colors.primaryDark} />
+            <Text style={styles.reportText}>Receipt</Text>
+          </Pressable>
+
           {/* Appointment notes (editable) */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Appointment Notes</Text>
@@ -1039,6 +1235,22 @@ const styles = StyleSheet.create({
   petNoteInput: { backgroundColor: '#f9fafb', borderRadius: 10, padding: 10, fontSize: 14, color: colors.text, borderWidth: 1, borderColor: colors.border, minHeight: 44, textAlignVertical: 'top' },
   noteSave: { backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 9, alignItems: 'center', marginTop: 8 },
   noteSaveText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  groomNoteBox: { marginLeft: 38, marginTop: 10, backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#bbf7d0', borderRadius: 10, padding: 10 },
+  groomNoteHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  groomNoteTitle: { fontSize: 11, fontWeight: '800', color: '#166534', letterSpacing: 0.3 },
+  groomNoteAdd: { fontSize: 12, fontWeight: '800', color: '#15803d' },
+  groomNoteEmpty: { fontSize: 13, color: colors.textFaint, fontStyle: 'italic' },
+  groomNoteItem: { borderTopWidth: 1, borderTopColor: '#dcfce7', paddingTop: 6, marginTop: 6 },
+  groomNoteText: { fontSize: 14, color: colors.text, lineHeight: 19 },
+  groomNoteDate: { fontSize: 11, color: colors.textFaint },
+  noteMetaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
+  noteActions: { flexDirection: 'row', gap: 14 },
+  noteEditLink: { fontSize: 12, fontWeight: '800', color: colors.primaryDark },
+  noteDelLink: { fontSize: 12, fontWeight: '800', color: '#dc2626' },
+  noteEditRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 },
+  noteCancel: { paddingVertical: 9, paddingHorizontal: 14 },
+  noteCancelText: { fontSize: 14, fontWeight: '800', color: colors.textMute },
+  clientNotesWrap: { marginTop: 12, backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#bbf7d0', borderRadius: 10, padding: 10 },
   payNone: { fontSize: 14, color: colors.textMute },
   retailRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
   retailName: { fontSize: 14, color: colors.text, fontWeight: '600', flex: 1 },

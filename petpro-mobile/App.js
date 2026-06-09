@@ -41,6 +41,8 @@ import SudsScreen from './screens/SudsScreen';
 import BillingScreen from './screens/BillingScreen';
 import AnalyticsScreen from './screens/AnalyticsScreen';
 import PayrollScreen from './screens/PayrollScreen';
+import AgreementsScreen from './screens/AgreementsScreen';
+import ReceiptScreen from './screens/ReceiptScreen';
 import MessagesScreen from './screens/MessagesScreen';
 import ThreadScreen from './screens/ThreadScreen';
 
@@ -117,6 +119,12 @@ function MoreStack({ session, onSignOut }) {
       <MoreStackNav.Screen name="Payroll">
         {(props) => <PayrollScreen {...props} session={session} />}
       </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="Agreements">
+        {(props) => <AgreementsScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="Receipt">
+        {(props) => <ReceiptScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
     </MoreStackNav.Navigator>
   );
 }
@@ -133,6 +141,9 @@ function HomeStack({ session }) {
       </HomeStackNav.Screen>
       <HomeStackNav.Screen name="ReportCard">
         {(props) => <ReportCardScreen {...props} session={session} />}
+      </HomeStackNav.Screen>
+      <HomeStackNav.Screen name="Receipt">
+        {(props) => <ReceiptScreen {...props} session={session} />}
       </HomeStackNav.Screen>
     </HomeStackNav.Navigator>
   );
@@ -153,6 +164,9 @@ function ScheduleStack({ session }) {
       </ScheduleStackNav.Screen>
       <ScheduleStackNav.Screen name="ReportCard">
         {(props) => <ReportCardScreen {...props} session={session} />}
+      </ScheduleStackNav.Screen>
+      <ScheduleStackNav.Screen name="Receipt">
+        {(props) => <ReceiptScreen {...props} session={session} />}
       </ScheduleStackNav.Screen>
     </ScheduleStackNav.Navigator>
   );
@@ -194,6 +208,9 @@ function ClientsStack({ session }) {
       </ClientsStackNav.Screen>
       <ClientsStackNav.Screen name="ReportCard">
         {(props) => <ReportCardScreen {...props} session={session} />}
+      </ClientsStackNav.Screen>
+      <ClientsStackNav.Screen name="Receipt">
+        {(props) => <ReceiptScreen {...props} session={session} />}
       </ClientsStackNav.Screen>
     </ClientsStackNav.Navigator>
   );

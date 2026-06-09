@@ -84,6 +84,18 @@ const BOOKING_BRAIN = `# PETPRO BRAIN — BOOKING DECISIONS
 - If a slot lets you stay near other appointments, prefer it
 `
 
+// ─── Utility: straight-line distance in miles (haversine) ────────────────────
+// A free (no Google Maps API) proximity signal for mobile route batching.
+function haversineMiles(lat1: number | null, lng1: number | null, lat2: number | null, lng2: number | null): number | null {
+  if (lat1 == null || lng1 == null || lat2 == null || lng2 == null) return null
+  const toRad = (x: number) => x * Math.PI / 180
+  const R = 3958.8 // earth radius in miles
+  const dLat = toRad(lat2 - lat1)
+  const dLng = toRad(lng2 - lng1)
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
 // ─── Utility: compute free slots for a single day ─────────────────────────────
 // Returns array of { start, end, durationMinutes } for any free time block
 // >= the requested service duration.
@@ -215,7 +227,7 @@ serve(async (req) => {
     // ─── 2. Client info (name, address) ──────────────────────────────────────
     const { data: client } = await adminClient
       .from("clients")
-      .select("id, first_name, last_name, address")
+      .select("id, first_name, last_name, address, latitude, longitude")
       .eq("id", client_id)
       .maybeSingle()
 
@@ -242,7 +254,7 @@ serve(async (req) => {
     // ─── 5. Shop settings (business hours, is_mobile) ────────────────────────
     const { data: shopSettings } = await adminClient
       .from("shop_settings")
-      .select("business_hours_start, business_hours_end, is_mobile, slot_duration_minutes")
+      .select("business_hours, business_hours_start, business_hours_end, is_mobile, slot_duration_minutes")
       .eq("groomer_id", groomerId)
       .maybeSingle()
 
@@ -259,7 +271,7 @@ serve(async (req) => {
 
     let apptQuery = adminClient
       .from("appointments")
-      .select("appointment_date, start_time, end_time, staff_id, status")
+      .select("appointment_date, start_time, end_time, staff_id, status, clients:client_id(latitude, longitude)")
       .eq("groomer_id", groomerId)
       .gte("appointment_date", startDate)
       .lte("appointment_date", endDate)
@@ -294,6 +306,21 @@ serve(async (req) => {
       d.setDate(d.getDate() + i)
       const dateStr = isoDate(d)
 
+      // Respect the shop's per-day hours (business_hours JSONB — the same source
+      // of truth Suds uses). If the shop is closed that weekday (or has no entry
+      // for it), suggest NO slots so Smart Book never recommends a day you don't
+      // work. Falls back to the single open/close time for legacy shops.
+      let dayOpen = workStart
+      let dayClose = workEnd
+      const bh = (shopSettings as any)?.business_hours
+      if (bh && typeof bh === "object") {
+        const FULL_DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+        const cfg = bh[FULL_DAYS[new Date(dateStr + "T12:00:00").getDay()]]
+        if (!cfg || cfg.is_open === false) continue
+        if (cfg.open) dayOpen = cfg.open
+        if (cfg.close) dayClose = cfg.close
+      }
+
       // Collect busy ranges for this day
       const busy: Array<{ start: string; end: string }> = []
       ;(existingAppts || []).forEach((a: any) => {
@@ -310,8 +337,8 @@ serve(async (req) => {
       const daySuggestions = computeFreeSlotsForDay(
         dateStr,
         busy,
-        workStart,
-        workEnd,
+        dayOpen,
+        dayClose,
         serviceDurationMinutes
       )
 
@@ -347,11 +374,96 @@ serve(async (req) => {
       return `   ${idx + 1}. ${a.appointment_date} (${dow}) at ${a.start_time} — ${svc}`
     }).join("\n") || "   (no previous visits — first-time client for this pet)"
 
-    // Cap candidates we send to Claude. Use first ~50 to stay efficient.
-    const candidatesToShow = allFreeSlots.slice(0, 50)
-    const candidatesText = candidatesToShow.map((s) =>
-      `   - ${s.date} (${s.dayLabel}) ${s.start}-${s.end}`
-    ).join("\n")
+    // ─── Mobile route awareness ──────────────────────────────────────────────
+    // For mobile groomers, annotate each candidate slot with how far this client
+    // is (straight-line) from the groomer's nearest existing stop that day, so
+    // Claude can prefer days that keep the route tight. Uses cached lat/lng — no
+    // Google Maps API call, so it's free.
+    const isMobileShop = shopSettings?.is_mobile === true
+    const clientLat = client && (client as any).latitude != null ? parseFloat((client as any).latitude) : null
+    const clientLng = client && (client as any).longitude != null ? parseFloat((client as any).longitude) : null
+    const routeAware = isMobileShop && clientLat != null && clientLng != null
+    const stopsByDate: Record<string, Array<{ lat: number; lng: number }>> = {}
+    if (routeAware) {
+      ;(existingAppts || []).forEach((a: any) => {
+        const c = a.clients
+        if (!c || c.latitude == null || c.longitude == null) return
+        if (!stopsByDate[a.appointment_date]) stopsByDate[a.appointment_date] = []
+        stopsByDate[a.appointment_date].push({ lat: parseFloat(c.latitude), lng: parseFloat(c.longitude) })
+      })
+    }
+
+    // ─── Zone / Area Day matching ────────────────────────────────────────────
+    // Match this client to a service zone by the ZIP in their address, so the AI
+    // can strongly prefer the days the groomer already runs that area.
+    let clientZone: any = null
+    if (isMobileShop) {
+      const { data: zoneRows } = await adminClient
+        .from("zones")
+        .select("name, days_of_week, zips")
+        .eq("groomer_id", groomerId)
+      const addrStr = (client && (client as any).address) ? String((client as any).address) : ""
+      // Take the LAST 5-digit group in the address, not the first — a street
+      // number like "12345 Main St" would otherwise be mistaken for the ZIP.
+      // ZIPs come at the end of US addresses ("... Houston, TX 77001").
+      const zipMatches = addrStr.match(/\b(\d{5})(?:-\d{4})?\b/g)
+      const clientZip = zipMatches && zipMatches.length > 0
+        ? zipMatches[zipMatches.length - 1].slice(0, 5)
+        : null
+      if (clientZip && zoneRows) {
+        clientZone = zoneRows.find((z: any) => Array.isArray(z.zips) && z.zips.indexOf(clientZip) !== -1) || null
+      }
+    }
+    const DOW_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    const zoneDaysText = (clientZone && Array.isArray(clientZone.days_of_week))
+      ? clientZone.days_of_week.map((d: number) => DOW_NAMES[d]).filter(Boolean).join(", ")
+      : ""
+
+    // Cap candidates we send to Claude (~50 to stay efficient).
+    // Two upgrades over a plain chronological slice:
+    //   1. SPREAD ACROSS DAYS — cap slots per day so 50 candidates covers
+    //      8+ different days instead of every half-hour of the first ~3 days.
+    //   2. ZONE DAYS GUARANTEED — if this client has a service zone, that
+    //      zone's days are placed in the list FIRST. Otherwise the "STRONGLY
+    //      prefer zone days" instruction below could have nothing to pick
+    //      (e.g. zone day is Thursday but the first 50 slots end Wednesday).
+    const MAX_SLOTS_PER_DAY = 6
+    const perDayCount: Record<string, number> = {}
+    const spreadSlots = allFreeSlots.filter((s) => {
+      perDayCount[s.date] = (perDayCount[s.date] || 0) + 1
+      return perDayCount[s.date] <= MAX_SLOTS_PER_DAY
+    })
+    let candidatesToShow = spreadSlots.slice(0, 50)
+    if (clientZone && Array.isArray(clientZone.days_of_week) && clientZone.days_of_week.length > 0) {
+      const zoneDayNums: number[] = clientZone.days_of_week
+      const isZoneDay = (s: { date: string }) =>
+        zoneDayNums.indexOf(new Date(s.date + "T12:00:00").getDay()) !== -1
+      const zoneSlots = spreadSlots.filter(isZoneDay)
+      const otherSlots = spreadSlots.filter((s) => !isZoneDay(s))
+      // Up to 35 zone-day slots + 15 others, re-sorted chronologically so the
+      // list still reads naturally to the AI.
+      candidatesToShow = zoneSlots.slice(0, 35).concat(otherSlots.slice(0, 15))
+      candidatesToShow.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start))
+    }
+    const candidatesText = candidatesToShow.map((s) => {
+      let line = `   - ${s.date} (${s.dayLabel}) ${s.start}-${s.end}`
+      if (routeAware) {
+        const dayStops = stopsByDate[s.date] || []
+        if (dayStops.length === 0) {
+          line += ` — open day (no stops yet)`
+        } else {
+          let minMi = Infinity
+          for (const st of dayStops) {
+            const mi = haversineMiles(clientLat, clientLng, st.lat, st.lng)
+            if (mi != null && mi < minMi) minMi = mi
+          }
+          if (minMi !== Infinity) {
+            line += ` — ${minMi.toFixed(1)} mi from nearest stop that day (${dayStops.length} stop${dayStops.length === 1 ? "" : "s"})`
+          }
+        }
+      }
+      return line
+    }).join("\n")
 
     const userPrompt = `Pick the TOP 3 best appointment slots for this booking.
 
@@ -377,6 +489,12 @@ serve(async (req) => {
 # RECENT VISIT HISTORY (most recent first)
 ${lastVisitsSummary}
 
+${(clientZone && zoneDaysText) ? `# AREA DAY (this client's zone)
+This client is in the "${clientZone.name}" zone, which the groomer runs on: ${zoneDaysText}. STRONGLY prefer slots on those days — that's when the groomer is already working this area. Only choose another day if there are no workable ${zoneDaysText} options.
+` : ""}
+${routeAware ? `# MOBILE ROUTE (IMPORTANT — this is a mobile groomer)
+Each slot below shows how far this client is from the groomer's nearest existing stop that day. To keep the route tight and cut drive time, STRONGLY prefer days where this client is close (a few miles) to existing stops. An "open day (no stops yet)" is fine too — it cleanly starts a fresh area. Avoid slots that are far (10+ mi) from that day's other stops unless nothing better fits. When distance drove your pick, say so in the reasoning (e.g. "keeps you 2 mi from your 10am stop").
+` : ""}
 # AVAILABLE SLOTS (already filtered for conflicts + business hours)
 ${candidatesText}
 

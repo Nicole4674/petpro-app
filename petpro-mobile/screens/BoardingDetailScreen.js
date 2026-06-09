@@ -755,6 +755,15 @@ export default function BoardingDetailScreen({ session, route, navigation }) {
             ) : null}
           </View>
 
+          {/* Receipt */}
+          <Pressable
+            style={styles.receiptBtn}
+            onPress={() => navigation.navigate('Receipt', { kind: 'boarding', id: reservationId })}
+          >
+            <Ionicons name="receipt-outline" size={18} color={colors.primaryDark} />
+            <Text style={styles.receiptText}>Receipt</Text>
+          </Pressable>
+
           {/* Care & intake */}
           {intake.length > 0 ? (
             <View style={styles.card}>
@@ -875,6 +884,8 @@ const styles = StyleSheet.create({
   cardTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   changeBtn: { backgroundColor: colors.primaryLight, borderRadius: 10, paddingVertical: 5, paddingHorizontal: 12, marginBottom: 8 },
   changeText: { color: colors.primaryDark, fontWeight: '800', fontSize: 13 },
+  receiptBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.primaryLight, borderRadius: 12, paddingVertical: 14, marginBottom: 14 },
+  receiptText: { color: colors.primaryDark, fontWeight: '800', fontSize: 15 },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, marginBottom: 10 },
   badgeText: { fontSize: 12, fontWeight: '800', letterSpacing: 0.3 },
   statusGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },

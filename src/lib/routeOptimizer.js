@@ -139,9 +139,12 @@ export async function optimizeRoute(stops, apiKey) {
     return { ok: false, stops: stops, reason: 'Need at least 3 stops with coordinates to optimize.' }
   }
 
-  // We optimize ONLY the eligible stops. Any stop missing coords stays
-  // at its original position (rare in production with our cache, common
-  // for orphan addresses we couldn't geocode).
+  // We optimize ONLY the eligible stops. Any stop missing coords is kept
+  // and appended to the END of the optimized list (see below) so no stop
+  // ever disappears from the route just because we couldn't geocode it.
+  const missingCoords = (stops || []).filter(function (s) {
+    return s.lat == null || s.lng == null
+  })
   const coords = eligible.map(function (s) { return { lat: s.lat, lng: s.lng } })
   const matrix = await fetchDriveMatrix(coords, apiKey)
   if (!matrix) {
@@ -169,8 +172,10 @@ export async function optimizeRoute(stops, apiKey) {
     }
   }
 
-  // Build the reordered stops list
+  // Build the reordered stops list. Stops we couldn't geocode go at the end
+  // (still visible, still actionable) instead of being silently dropped.
   const reorderedEligible = optimizedOrder.map(function (i) { return eligible[i] })
+    .concat(missingCoords)
 
   return {
     ok: true,
