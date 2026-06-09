@@ -290,7 +290,7 @@ export default function SMSInboxView() {
       </div>
 
       {/* ─── RIGHT: selected thread + reply ─── */}
-      <div style={{ display: 'flex', flexDirection: 'column', background: '#fff' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', background: '#fff', minHeight: 0, overflow: 'hidden' }}>
         {!selectedClientId ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: '14px' }}>
             Pick a conversation on the left to view it.

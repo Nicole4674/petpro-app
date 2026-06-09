@@ -4546,6 +4546,14 @@ export default function Calendar() {
                                                             🗺️ Re-open GPS to {clientFirst}
                                                         </a>
                                                     )}
+                                                    {/* Fallback — advance WITHOUT texting. Without this, a
+                                                        client with no phone / no SMS consent / out-of-quota
+                                                        leaves the groomer permanently stuck on "en route". */}
+                                                    <button
+                                                        onClick={function () { advancePickupStep('pickup_arrived') }}
+                                                        disabled={mobileActionBusy}
+                                                        style={btn({ background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', fontWeight: 500, fontSize: '12px' })}
+                                                    >Mark arrived without texting</button>
                                                 </>
                                             )}
 
@@ -4610,6 +4618,13 @@ export default function Calendar() {
                                                             🗺️ Re-open GPS to {clientFirst}
                                                         </a>
                                                     )}
+                                                    {/* Fallback — advance WITHOUT texting (same reason as
+                                                        the pickup-side fallback above). */}
+                                                    <button
+                                                        onClick={function () { advancePickupStep('dropoff_arrived') }}
+                                                        disabled={mobileActionBusy}
+                                                        style={btn({ background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', fontWeight: 500, fontSize: '12px' })}
+                                                    >Mark arrived without texting</button>
                                                 </>
                                             )}
 
@@ -10125,6 +10140,7 @@ function AddPetToBookingModal({ filteredPets, services, petsAlreadyAdded, onClos
     const [serviceId, setServiceId] = useState('')
     const [price, setPrice] = useState('')
     const [error, setError] = useState(null)
+    const [lastAppt, setLastAppt] = useState(null) // selected pet's most recent service + price
 
     // Pets that haven't been added yet
     var availablePets = filteredPets.filter(function (p) {
@@ -10140,6 +10156,27 @@ function AddPetToBookingModal({ filteredPets, services, petsAlreadyAdded, onClos
             }
         }
     }, [serviceId])
+
+    // When a pet is picked, look up their most recent service + price (their "last time").
+    useEffect(function () {
+        if (!petId) { setLastAppt(null); return }
+        var cancelled = false
+        ;(async function () {
+            var now = new Date()
+            var todayIso = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0')
+            var { data } = await supabase
+                .from('appointments')
+                .select('appointment_date, final_price, quoted_price, service_id, services:service_id(service_name)')
+                .eq('pet_id', petId)
+                .lte('appointment_date', todayIso)
+                .not('status', 'in', '(cancelled,no_show,rescheduled)')
+                .order('appointment_date', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+            if (!cancelled) setLastAppt(data || null)
+        })()
+        return function () { cancelled = true }
+    }, [petId])
 
     var handleAdd = function () {
         if (!petId) {
@@ -10181,6 +10218,23 @@ function AddPetToBookingModal({ filteredPets, services, petsAlreadyAdded, onClos
                             })}
                         </select>
                     </div>
+
+                    {lastAppt && (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', fontSize: '13px', color: '#5b21b6', background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '8px', padding: '8px 10px', marginBottom: '12px' }}>
+                            <span>
+                                🔁 Last time: {lastAppt.services ? lastAppt.services.service_name : 'service'}
+                                {(lastAppt.final_price != null ? lastAppt.final_price : lastAppt.quoted_price) != null ? ' — $' + parseFloat(lastAppt.final_price != null ? lastAppt.final_price : lastAppt.quoted_price).toFixed(2) : ''}
+                                {lastAppt.appointment_date ? ' (' + new Date(lastAppt.appointment_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ')' : ''}
+                            </span>
+                            {lastAppt.service_id && (
+                                <button
+                                    type="button"
+                                    onClick={function () { setServiceId(lastAppt.service_id) }}
+                                    style={{ background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                >Use this</button>
+                            )}
+                        </div>
+                    )}
 
                     <div className="form-group">
                         <label>Service</label>
