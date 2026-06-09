@@ -921,6 +921,9 @@ export default function Calendar() {
                 // INSERT new block(s). For a recurring block, payload.block_dates
                 // holds every weekly date (e.g. 12 Saturdays); otherwise just one.
                 var dates = (payload.block_dates && payload.block_dates.length) ? payload.block_dates : [payload.block_date]
+                // Tag a recurring set with one shared id so the whole series can be
+                // deleted in one go later (single blocks get no group id).
+                var groupId = (dates.length > 1 && typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : null
                 var rows = dates.map(function (d) {
                     return {
                         groomer_id: user.id,
@@ -929,6 +932,7 @@ export default function Calendar() {
                         start_time: payload.start_time,
                         end_time: payload.end_time,
                         note: payload.note || null,
+                        recurring_group_id: groupId,
                     }
                 })
                 const { error } = await supabase
@@ -948,14 +952,24 @@ export default function Calendar() {
 
     const handleDeleteBlock = async () => {
         if (!blockModal || !blockModal.block) return
-        if (!window.confirm('Remove this blocked time?')) return
+        var blk = blockModal.block
+        var groupId = blk.recurring_group_id
+
+        // If this block is part of a repeating series, offer to delete the whole
+        // series at once (so the groomer doesn't have to remove them one by one).
+        var deleteSeries = false
+        if (groupId) {
+            deleteSeries = window.confirm('This is a repeating block (set to repeat weekly).\n\nOK = delete EVERY repeat in this series\nCancel = delete just this one')
+            if (!deleteSeries && !window.confirm('Delete just this one blocked time?')) return
+        } else {
+            if (!window.confirm('Remove this blocked time?')) return
+        }
+
         try {
             setSavingBlock(true)
-            const { data: deleted, error } = await supabase
-                .from('blocked_times')
-                .delete()
-                .eq('id', blockModal.block.id)
-                .select()
+            var delQuery = supabase.from('blocked_times').delete()
+            delQuery = deleteSeries ? delQuery.eq('recurring_group_id', groupId) : delQuery.eq('id', blk.id)
+            const { data: deleted, error } = await delQuery.select()
             if (error) throw error
             // A delete that removes 0 rows returns NO error in Supabase (e.g. an
             // RLS policy silently blocks it). Verify a row actually left, so a
@@ -3553,6 +3567,11 @@ export default function Calendar() {
                             pet_id: picked.pet_id,
                             service_id: picked.service_id,
                             staff_id: picked.staff_id,
+                            // Visit type chosen in Smart Book — pre-checks the
+                            // radio in AddAppointmentModal so the saved appt
+                            // carries the mobile flags → shows on Route page.
+                            is_mobile_visit: picked.is_mobile_visit === true,
+                            is_mobile_pickup: picked.is_mobile_pickup === true,
                         })
                         setShowAddForm(true)
                     }}
@@ -3572,6 +3591,8 @@ export default function Calendar() {
                     preFillPetId={preFillBooking?.pet_id}
                     preFillServiceId={preFillBooking?.service_id}
                     preFillStaffId={preFillBooking?.staff_id}
+                    preFillIsMobileVisit={preFillBooking?.is_mobile_visit}
+                    preFillIsMobilePickup={preFillBooking?.is_mobile_pickup}
                     onClose={() => {
                         setShowAddForm(false)
                         setPreFillBooking(null)
@@ -8586,7 +8607,7 @@ function MiniCalendar({ currentDate, appointments, onDayClick }) {
     )
 }
 
-function AddAppointmentModal({ date, time, clients, pets, services, staffMembers, onClose, onSaved, preFillClientId, preFillPetId, preFillServiceId, preFillStaffId }) {
+function AddAppointmentModal({ date, time, clients, pets, services, staffMembers, onClose, onSaved, preFillClientId, preFillPetId, preFillServiceId, preFillStaffId, preFillIsMobileVisit, preFillIsMobilePickup }) {
     // Multi-pet booking: pets are now stored in a list, each with their own service + price
     const [form, setForm] = useState({
         client_id: preFillClientId || '',
@@ -8645,11 +8666,13 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
     // Hybrid shops use this to mark THIS visit as pickup/drop-off vs storefront.
     // Stored as is_mobile_visit on the appointments row. Route page filters
     // to is_mobile_visit=true so storefront appts stay off the route.
-    const [isMobileVisit, setIsMobileVisit] = useState(false)
+    // Pre-fill from Smart Book's visit-type picker when provided, so the
+    // radio arrives already set to what the groomer chose there.
+    const [isMobileVisit, setIsMobileVisit] = useState(preFillIsMobileVisit === true)
     // Third visit type — Mobile Pick Up. Groomer drives to client, picks pet
     // up, brings to shop to groom, drives them home after. Mutually exclusive
     // with isMobileVisit (radio in UI enforces).
-    const [isMobilePickup, setIsMobilePickup] = useState(false)
+    const [isMobilePickup, setIsMobilePickup] = useState(preFillIsMobilePickup === true)
     const [isMobileShop, setIsMobileShop] = useState(false)
 
     // Load shop_settings.is_mobile so we know whether to show the checkbox.
