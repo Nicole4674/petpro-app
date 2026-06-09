@@ -203,7 +203,7 @@ serve(async (req) => {
 
     // Parse request
     const body = await req.json()
-    const { client_id, pet_id, service_id, days_ahead, time_of_day_preference, preferred_staff_id } = body
+    const { client_id, pet_id, service_id, days_ahead, time_of_day_preference, preferred_staff_id, is_mobile_visit, is_mobile_pickup } = body
     if (!client_id || !pet_id || !service_id) {
       return jsonResponse({ error: "client_id, pet_id, and service_id are required" }, 400)
     }
@@ -379,7 +379,11 @@ serve(async (req) => {
     // is (straight-line) from the groomer's nearest existing stop that day, so
     // Claude can prefer days that keep the route tight. Uses cached lat/lng — no
     // Google Maps API call, so it's free.
-    const isMobileShop = shopSettings?.is_mobile === true
+    // Route/zone logic applies when the shop is mobile OR this specific
+    // booking was flagged mobile in Smart Book (hybrid shops book both kinds —
+    // a storefront groom shouldn't be steered by zones, a mobile one should).
+    const bookingIsMobile = is_mobile_visit === true || is_mobile_pickup === true
+    const isMobileShop = shopSettings?.is_mobile === true || bookingIsMobile
     const clientLat = client && (client as any).latitude != null ? parseFloat((client as any).latitude) : null
     const clientLng = client && (client as any).longitude != null ? parseFloat((client as any).longitude) : null
     const routeAware = isMobileShop && clientLat != null && clientLng != null
@@ -493,7 +497,7 @@ ${(clientZone && zoneDaysText) ? `# AREA DAY (this client's zone)
 This client is in the "${clientZone.name}" zone, which the groomer runs on: ${zoneDaysText}. STRONGLY prefer slots on those days — that's when the groomer is already working this area. Only choose another day if there are no workable ${zoneDaysText} options.
 ` : ""}
 ${routeAware ? `# MOBILE ROUTE (IMPORTANT — this is a mobile groomer)
-Each slot below shows how far this client is from the groomer's nearest existing stop that day. To keep the route tight and cut drive time, STRONGLY prefer days where this client is close (a few miles) to existing stops. An "open day (no stops yet)" is fine too — it cleanly starts a fresh area. Avoid slots that are far (10+ mi) from that day's other stops unless nothing better fits. When distance drove your pick, say so in the reasoning (e.g. "keeps you 2 mi from your 10am stop").
+${is_mobile_pickup === true ? "This is a PICK UP & DROP OFF booking — the groomer drives to this client TWICE (pick up the pet, then return them after grooming). Distance matters double here.\n" : ""}Each slot below shows how far this client is from the groomer's nearest existing stop that day. To keep the route tight and cut drive time, STRONGLY prefer days where this client is close (a few miles) to existing stops. An "open day (no stops yet)" is fine too — it cleanly starts a fresh area. Avoid slots that are far (10+ mi) from that day's other stops unless nothing better fits. When distance drove your pick, say so in the reasoning (e.g. "keeps you 2 mi from your 10am stop").
 ` : ""}
 # AVAILABLE SLOTS (already filtered for conflicts + business hours)
 ${candidatesText}

@@ -45,6 +45,33 @@ export default function SmartBookModal({ clients, pets, services, staffMembers, 
   const [timePreference, setTimePreference] = useState('any')
   const [clientSearch, setClientSearch] = useState('')
 
+  // ─── Visit type (mobile shops) ─────────────────────────────────────────
+  // 'storefront' | 'mobile_visit' (groom at client's home) | 'mobile_pickup'
+  // (drive there, pick up, groom at shop, drop off). Only shown when the shop
+  // has mobile mode on. Telling the AI BEFORE it picks slots means the
+  // distance + zone-day logic kicks in for this booking, and the visit type
+  // carries through to the appointment so it shows on the Route page.
+  const [visitType, setVisitType] = useState('storefront')
+  const [isMobileShop, setIsMobileShop] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user || cancelled) return
+        const { data: shop } = await supabase
+          .from('shop_settings')
+          .select('is_mobile')
+          .eq('groomer_id', user.id)
+          .maybeSingle()
+        if (!cancelled) setIsMobileShop(!!(shop && shop.is_mobile))
+      } catch (err) {
+        console.warn('[SmartBookModal] Could not load shop is_mobile:', err)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
   // ─── Result state ──────────────────────────────────────────────────────
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -99,6 +126,10 @@ export default function SmartBookModal({ clients, pets, services, staffMembers, 
         service_id: serviceId,
         days_ahead: daysAhead,
         time_of_day_preference: timePreference,
+        // Visit type — lets the AI apply distance + zone-day logic to THIS
+        // booking even for hybrid (storefront + mobile) shops.
+        is_mobile_visit: visitType === 'mobile_visit',
+        is_mobile_pickup: visitType === 'mobile_pickup',
       }
       if (staffId) body.preferred_staff_id = staffId
 
@@ -129,6 +160,10 @@ export default function SmartBookModal({ clients, pets, services, staffMembers, 
       staff_id: staffId || null,
       date: slot.appointment_date,
       start_time: slot.start_time,
+      // Carry the visit type into the booking modal so the saved appointment
+      // gets the mobile flags and shows up on the Route page that day.
+      is_mobile_visit: visitType === 'mobile_visit',
+      is_mobile_pickup: visitType === 'mobile_pickup',
     })
   }
 
@@ -327,6 +362,42 @@ export default function SmartBookModal({ clients, pets, services, staffMembers, 
                 </div>
               </div>
             </div>
+
+            {/* Visit type — mobile shops only. Telling the AI up front means it
+                weighs drive distance + zone days when picking slots, and the
+                appointment lands on the Route page automatically. */}
+            {isMobileShop && (
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px' }}>
+                  Visit type
+                </label>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {[
+                    { value: 'storefront', label: '🏪 Storefront' },
+                    { value: 'mobile_visit', label: '🚐 Mobile visit' },
+                    { value: 'mobile_pickup', label: '🚐 Pick up & drop off' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setVisitType(opt.value)}
+                      style={{
+                        padding: '9px 13px', borderRadius: '999px', fontSize: '13px', fontWeight: 600,
+                        cursor: 'pointer',
+                        border: visitType === opt.value ? '1px solid #7c3aed' : '1px solid #e5e7eb',
+                        background: visitType === opt.value ? '#7c3aed' : '#fff',
+                        color: visitType === opt.value ? '#fff' : '#374151',
+                      }}
+                    >{opt.label}</button>
+                  ))}
+                </div>
+                {visitType !== 'storefront' && (
+                  <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '6px', lineHeight: 1.4 }}>
+                    PetPro AI will favor days when you're already near this client (zone days + distance from that day's other stops), and the booking will show on your Route page.
+                  </div>
+                )}
+              </div>
+            )}
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '18px' }}>
               <div>
