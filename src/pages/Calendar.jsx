@@ -9142,7 +9142,6 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
                         recurring_sequence: g.sequence,
                         recurring_conflict: conflict,
                         is_mobile_visit: isMobileVisit,
-                is_mobile_pickup: isMobilePickup,
                         is_mobile_pickup: isMobilePickup,
                         // Source tracking — calendar shows no badge for groomer-created appts
                         booked_via: 'recurring',
@@ -11295,7 +11294,7 @@ function BlockTimeModal({ modal, staff, saving, onSave, onDelete, onClose }) {
     var [err, setErr] = useState('')
     // All-day = block the whole day in one click. Recurring = repeat weekly
     // (e.g. every Saturday) so you don't have to add them one at a time.
-    var [allDay, setAllDay] = useState(isEdit && existing.start_time.slice(0, 5) === '00:00' && existing.end_time.slice(0, 5) >= '23:59')
+    var [allDay, setAllDay] = useState(isEdit && existing.start_time.slice(0, 5) <= '07:00' && existing.end_time.slice(0, 5) >= '18:00')
     var [repeatWeekly, setRepeatWeekly] = useState(false)
     var [repeatWeeks, setRepeatWeeks] = useState(8)
 
@@ -11306,8 +11305,10 @@ function BlockTimeModal({ modal, staff, saving, onSave, onDelete, onClose }) {
         e.preventDefault()
         setErr('')
         if (!blockDate) { setErr('Pick a date'); return }
-        var s = allDay ? '00:00' : startTime
-        var en = allDay ? '23:59' : endTime
+        // "All day" spans the visible calendar grid (7 AM–7 PM) so it actually
+        // renders on the day column. Midnight (00:00) would draw off-screen.
+        var s = allDay ? '07:00' : startTime
+        var en = allDay ? '19:00' : endTime
         if (!s || !en) { setErr('Set a start and end time'); return }
         if (en <= s) { setErr('End time must be after start time'); return }
 
