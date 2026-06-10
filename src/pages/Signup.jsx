@@ -43,32 +43,50 @@ export default function Signup() {
   // Cloudflare Turnstile state — token gets set by Cloudflare's widget
   // when the visitor passes the bot check. Without a token, signup is blocked.
   const [turnstileToken, setTurnstileToken] = useState('')
+  // 'loading' → waiting for Cloudflare · 'ready' → token in hand ·
+  // 'failed' → script blocked (Brave/VPN/ad-blocker) or challenge errored.
+  // 'failed' switches the UI from a silent dead button to a clear
+  // explanation + retry — the #1 ad-money killer was users clicking a
+  // disabled button, seeing nothing, and leaving.
+  const [turnstileStatus, setTurnstileStatus] = useState('loading')
+  const [turnstileRetry, setTurnstileRetry] = useState(0)
   const turnstileWidgetRef = useRef(null)
 
   // Render the Turnstile widget once the script has loaded. We poll briefly
   // because the script tag in index.html is `async defer` — it may not be
   // ready when this component mounts. Once the widget's invisible check
   // passes, the callback fires with a token we attach to the signup payload.
+  // Re-runs when turnstileRetry changes (the "Try again" button).
   useEffect(() => {
     let widgetId = null
+    setTurnstileStatus('loading')
+    setTurnstileToken('')
     const interval = setInterval(() => {
       if (window.turnstile && turnstileWidgetRef.current && !widgetId) {
         try {
           widgetId = window.turnstile.render(turnstileWidgetRef.current, {
             sitekey: TURNSTILE_SITE_KEY,
-            callback: (token) => setTurnstileToken(token),
-            'error-callback': () => setTurnstileToken(''),
+            callback: (token) => { setTurnstileToken(token); setTurnstileStatus('ready') },
+            'error-callback': () => { setTurnstileToken(''); setTurnstileStatus('failed') },
             'expired-callback': () => setTurnstileToken(''),
           })
           clearInterval(interval)
         } catch (err) {
           console.warn('[Turnstile] render failed:', err)
           clearInterval(interval)
+          setTurnstileStatus('failed')
         }
       }
     }, 200)
-    // Stop polling after 10 seconds if script never loaded
-    const timeout = setTimeout(() => clearInterval(interval), 10000)
+    // After 10s: if Cloudflare's script never even loaded (Brave shields,
+    // VPN, ad-blocker eat it), flip to 'failed' so the user gets an
+    // explanation instead of an eternally disabled button. If the widget
+    // DID render, we leave it alone — an interactive challenge may simply
+    // be waiting for the user, and error-callback covers real failures.
+    const timeout = setTimeout(() => {
+      clearInterval(interval)
+      if (!widgetId) setTurnstileStatus('failed')
+    }, 10000)
     return () => {
       clearInterval(interval)
       clearTimeout(timeout)
@@ -76,7 +94,7 @@ export default function Signup() {
         try { window.turnstile.remove(widgetId) } catch (e) { /* noop */ }
       }
     }
-  }, [])
+  }, [turnstileRetry])
 
   const handleSignup = async (e) => {
     e.preventDefault()
@@ -252,17 +270,60 @@ export default function Signup() {
               display: 'flex',
               justifyContent: 'center',
               margin: '12px 0',
-              minHeight: '65px',  // reserves space so the form doesn't jump
+              minHeight: turnstileStatus === 'failed' ? '0px' : '65px',  // reserves space so the form doesn't jump
             }}
           ></div>
+
+          {/* LOUD failure state — replaces the silent forever-disabled button.
+              Tells the user WHY nothing is happening + gives them a retry. */}
+          {turnstileStatus === 'failed' && (
+            <div style={{
+              background: '#fef2f2',
+              border: '1px solid #fecaca',
+              borderRadius: '10px',
+              padding: '12px 14px',
+              margin: '0 0 12px',
+              fontSize: '13px',
+              color: '#991b1b',
+              textAlign: 'left',
+              lineHeight: 1.55,
+            }}>
+              <strong>⚠️ Our security check couldn't load.</strong> This usually means
+              Brave, a VPN, an ad-blocker, or private/incognito mode is blocking it.
+              <br />
+              <strong>Fix:</strong> pause your VPN or Brave shields for this page, or open
+              this link in <strong>Chrome or Edge</strong> — then try again.
+              <button
+                type="button"
+                onClick={() => setTurnstileRetry((n) => n + 1)}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  marginTop: '10px',
+                  padding: '9px 12px',
+                  background: '#fff',
+                  color: '#991b1b',
+                  border: '1px solid #fca5a5',
+                  borderRadius: '8px',
+                  fontWeight: 700,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                🔄 Try the security check again
+              </button>
+            </div>
+          )}
 
           {error && <p className="error">{error}</p>}
           <button type="submit" disabled={loading || !turnstileToken}>
             {loading
               ? 'Creating Account...'
-              : !turnstileToken
-                ? 'Loading security check…'
-                : 'Create Account'}
+              : turnstileStatus === 'failed'
+                ? 'Security check blocked — see above ↑'
+                : !turnstileToken
+                  ? 'Loading security check…'
+                  : 'Create Account'}
           </button>
         </form>
         <p className="switch-auth">
