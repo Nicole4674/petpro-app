@@ -15,6 +15,13 @@ import PasswordInput from '../components/PasswordInput'
 export default function ClientSignup() {
   var [searchParams] = useSearchParams()
   var groomerId = searchParams.get('g')
+  // 🎁 Promo / referral params (optional). promo = the share code,
+  // ref = the existing client who shared the link. Stored on the new
+  // client row so Suds can auto-apply the reward at their first booking.
+  var promoCode = (searchParams.get('promo') || '').toUpperCase().replace(/[^A-Z0-9]/g, '') || null
+  var refClientId = searchParams.get('ref') || null
+  // Promo details loaded for the gift banner (validated server-side at booking)
+  var [promoInfo, setPromoInfo] = useState(null)
 
   var [loading, setLoading] = useState(true)
   var [submitting, setSubmitting] = useState(false)
@@ -58,6 +65,21 @@ export default function ClientSignup() {
       } else {
         // No shop_settings yet — use neutral fallback
         setShopSettings({ shop_name: 'Your Groomer', primary_color: '#7c3aed' })
+      }
+
+      // 🎁 Load promo details for the gift banner. Best-effort — if RLS
+      // blocks anonymous reads, the banner shows a generic gift message and
+      // the real reward still gets validated + applied at booking.
+      if (promoCode) {
+        try {
+          var { data: promoRow } = await supabase
+            .from('promos')
+            .select('name, new_client_reward, is_active, expires_at')
+            .eq('groomer_id', groomerId)
+            .eq('code', promoCode)
+            .maybeSingle()
+          if (promoRow && promoRow.is_active !== false) setPromoInfo(promoRow)
+        } catch (e) { /* generic banner fallback */ }
       }
     } catch (err) {
       console.error('Error loading shop:', err)
@@ -116,24 +138,31 @@ export default function ClientSignup() {
             role: 'client',
             sms_consent: smsConsent,
             sms_consent_at: smsConsentTimestamp,
+            // 🎁 Promo / referral attribution (null when not from a share link)
+            promo_code: promoCode,
+            referred_by_client_id: refClientId,
           },
         },
       })
 
-      // Best-effort: stamp the consent on the clients row that the trigger
-      // just created. If RLS blocks this (user not yet verified), the metadata
-      // above still has it for retroactive updates. Either way, no error shown.
-      if (!signUpError && smsConsent) {
+      // Best-effort: stamp consent + promo/referral on the clients row that
+      // the trigger just created. If RLS blocks this (user not yet verified),
+      // the metadata above still has it for retroactive updates. No error shown.
+      if (!signUpError && (smsConsent || promoCode || refClientId)) {
         try {
+          var clientPatch = {}
+          if (smsConsent) {
+            clientPatch.sms_consent = true
+            clientPatch.sms_consent_at = smsConsentTimestamp
+          }
+          if (promoCode) clientPatch.promo_code = promoCode
+          if (refClientId) clientPatch.referred_by_client_id = refClientId
           await supabase
             .from('clients')
-            .update({
-              sms_consent: true,
-              sms_consent_at: smsConsentTimestamp,
-            })
+            .update(clientPatch)
             .eq('email', email.trim().toLowerCase())
         } catch (e) {
-          // Silent — consent is in auth metadata as a fallback
+          // Silent — everything is in auth metadata as a fallback
         }
       }
 
@@ -281,6 +310,27 @@ export default function ClientSignup() {
 
         {/* Form */}
         <form onSubmit={handleSubmit} style={{ padding: '28px 24px' }}>
+          {/* 🎁 Promo gift banner — shows when arriving via a share link.
+              Real reward is validated + applied server-side at booking. */}
+          {promoCode && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '12px 14px',
+              background: '#f0fdf4',
+              border: '1px solid #86efac',
+              borderRadius: '10px',
+              marginBottom: '16px',
+            }}>
+              <span style={{ fontSize: '24px' }}>🎁</span>
+              <span style={{ fontSize: '13px', color: '#166534', lineHeight: 1.45 }}>
+                {promoInfo
+                  ? <>A friend sent you a welcome gift: <strong>{promoInfo.new_client_reward}</strong> It'll be applied when you book!</>
+                  : <>A friend sent you a welcome gift — it'll be applied automatically when you book your first appointment!</>}
+              </span>
+            </div>
+          )}
           {error && (
             <div style={{
               padding: '12px 14px',

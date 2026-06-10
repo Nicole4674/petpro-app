@@ -1191,6 +1191,63 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         }
         if (toolInput.service_id) apptPayload.service_id = toolInput.service_id
 
+        // ─── 🎁 Promo / referral reward auto-apply ──────────────────────
+        // If this client signed up through a share link and hasn't redeemed
+        // yet, validate the promo and bake the reward into THIS booking:
+        //   • $ / % promo → real discount_amount on the appointment
+        //   • freebie promo → loud note so the groomer honors it
+        // Redemption is stamped AFTER the insert succeeds (never burn the
+        // once-ever redemption on a failed booking).
+        var promoApplied: any = null
+        var promoClientRow: any = null
+        try {
+          var { data: meForPromo } = await supabaseAdmin
+            .from('clients')
+            .select('promo_code, promo_redeemed_at, referred_by_client_id, first_name, last_name')
+            .eq('id', clientId)
+            .maybeSingle()
+          if (meForPromo && meForPromo.promo_code && !meForPromo.promo_redeemed_at) {
+            var { data: promoRow } = await supabaseAdmin
+              .from('promos')
+              .select('*')
+              .eq('groomer_id', groomerId)
+              .eq('code', meForPromo.promo_code)
+              .maybeSingle()
+            var promoOk = !!(promoRow && promoRow.is_active === true)
+            if (promoOk && promoRow.expires_at && promoRow.expires_at < new Date().toISOString().slice(0, 10)) promoOk = false
+            if (promoOk && promoRow.max_uses != null && promoRow.use_count >= promoRow.max_uses) promoOk = false
+            if (promoOk && promoRow.new_clients_only === true) {
+              // "New client" = no prior non-cancelled appointment with this shop
+              var { data: priorAppts } = await supabaseAdmin
+                .from('appointments')
+                .select('id')
+                .eq('client_id', clientId)
+                .eq('groomer_id', groomerId)
+                .neq('status', 'cancelled')
+                .limit(1)
+              if (priorAppts && priorAppts.length > 0) promoOk = false
+            }
+            if (promoOk) {
+              var promoDiscount = 0
+              if (promoRow.discount_type === 'amount') {
+                promoDiscount = parseFloat(String(promoRow.discount_value)) || 0
+              } else if (promoRow.discount_type === 'percent' && bookingServicePrice > 0) {
+                promoDiscount = Math.round(bookingServicePrice * (parseFloat(String(promoRow.discount_value)) || 0)) / 100
+              }
+              if (promoDiscount > 0) {
+                apptPayload.discount_amount = promoDiscount
+                apptPayload.discount_reason = 'Promo: ' + promoRow.name + ' (' + promoRow.code + ')'
+              }
+              apptPayload.service_notes = (apptPayload.service_notes ? apptPayload.service_notes + ' ' : '') +
+                '[🎁 PROMO ' + promoRow.code + ': ' + promoRow.new_client_reward + ']'
+              promoApplied = promoRow
+              promoClientRow = meForPromo
+            }
+          }
+        } catch (promoErr) {
+          console.warn('[BOOK] promo check failed (non-fatal):', promoErr)
+        }
+
         console.log('[BOOK] inserting appointment:', JSON.stringify(apptPayload))
         var { data: newAppt, error: createErr } = await supabaseAdmin
           .from('appointments')
@@ -1200,6 +1257,34 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         if (createErr) {
           console.error('[BOOK] insert error:', createErr.message, 'details:', JSON.stringify(createErr))
           return { success: false, error: createErr.message }
+        }
+
+        // 🎁 Finalize promo redemption (booking succeeded): stamp once-ever,
+        // bump use_count, and credit the referrer via a note on their profile
+        // so the groomer sees it and honors their reward.
+        if (promoApplied) {
+          try {
+            await supabaseAdmin
+              .from('clients')
+              .update({ promo_redeemed_at: new Date().toISOString() })
+              .eq('id', clientId)
+            await supabaseAdmin
+              .from('promos')
+              .update({ use_count: (promoApplied.use_count || 0) + 1 })
+              .eq('id', promoApplied.id)
+            if (promoApplied.reward_referrer && promoApplied.referrer_reward && promoClientRow && promoClientRow.referred_by_client_id) {
+              var newClientName = (((promoClientRow.first_name || '') + ' ' + (promoClientRow.last_name || '')).trim()) || 'A friend'
+              await supabaseAdmin.from('client_notes').insert({
+                client_id: promoClientRow.referred_by_client_id,
+                note: '🎁 REFERRAL REWARD EARNED: ' + promoApplied.referrer_reward + ' — ' + newClientName +
+                  ' signed up with their share link (promo ' + promoApplied.code + ') and just booked. Apply it at their next visit!',
+                note_type: 'client',
+                created_by: groomerId,
+              })
+            }
+          } catch (redeemErr) {
+            console.warn('[BOOK] promo redemption stamp failed (non-fatal):', redeemErr)
+          }
         }
 
         // Multi-pet junction rows — ONE per pet (primary + any siblings).
@@ -1297,6 +1382,9 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           rule_triggered: ruleCheck.action === 'needs_approval',
           rule_hold_message: ruleCheck.action === 'needs_approval' ? ruleCheck.message : '',
           rule_flags: ruleCheck.flags || [],
+          // 🎁 When set, TELL THE CLIENT their reward was applied — e.g.
+          // "And your welcome gift is locked in: Free nail filing!"
+          promo_applied: promoApplied ? promoApplied.new_client_reward : null,
         }
       }
 

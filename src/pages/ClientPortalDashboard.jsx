@@ -142,6 +142,10 @@ export default function ClientPortalDashboard() {
   // Upcoming appointments + boarding state
   var [upcomingAppts, setUpcomingAppts] = useState([])
   var [upcomingBoarding, setUpcomingBoarding] = useState([])
+  // 🎁 Active promos from the groomer — each renders as a personal share
+  // link ("send this to a friend"). ref=this client for referral credit.
+  var [portalPromos, setPortalPromos] = useState([])
+  var [copiedPromoId, setCopiedPromoId] = useState(null)
 
   // Which appointment IDs already have a pending waitlist entry (so we show
   // "On waitlist" instead of the Notify button)
@@ -251,6 +255,25 @@ export default function ClientPortalDashboard() {
         .select('*')
         .eq('groomer_id', clientData.groomer_id)
         .maybeSingle()
+
+      // 4a. 🎁 Load the groomer's active promos for the refer-a-friend card.
+      // Best-effort — if the promos table doesn't exist yet the card hides.
+      try {
+        var todayIso = new Date().toISOString().slice(0, 10)
+        var { data: promoRows } = await supabase
+          .from('promos')
+          .select('id, name, code, new_client_reward, reward_referrer, referrer_reward, expires_at, max_uses, use_count')
+          .eq('groomer_id', clientData.groomer_id)
+          .eq('is_active', true)
+        var usablePromos = (promoRows || []).filter(function (p) {
+          if (p.expires_at && p.expires_at < todayIso) return false
+          if (p.max_uses != null && p.use_count >= p.max_uses) return false
+          return true
+        })
+        setPortalPromos(usablePromos)
+      } catch (promoErr) {
+        console.warn('[ClientPortal] promos load skipped:', promoErr)
+      }
 
       if (shopData) setShopSettings(shopData)
 
@@ -1461,6 +1484,65 @@ export default function ClientPortalDashboard() {
                 </div>
               )}
             </div>
+
+            {/* 🎁 Refer a friend — one personal share link per active promo.
+                ref=<this client> rides along so the groomer can credit them. */}
+            {portalPromos.length > 0 && (
+              <div className="cp-card">
+                <div className="cp-card-title-row">
+                  <h3 className="cp-card-title">🎁 Share with a friend</h3>
+                </div>
+                {portalPromos.map(function (p) {
+                  var shareUrl = window.location.origin + '/portal/signup?g=' + client.groomer_id +
+                    '&promo=' + encodeURIComponent(p.code) + '&ref=' + client.id
+                  return (
+                    <div key={p.id} style={{ padding: '12px', border: '1px solid #f1f5f9', borderRadius: '10px', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: '#111827' }}>
+                        {p.new_client_reward}
+                      </div>
+                      {p.reward_referrer && p.referrer_reward && (
+                        <div style={{ fontSize: '12.5px', color: '#16a34a', fontWeight: 600, marginTop: '2px' }}>
+                          🤝 And you get {p.referrer_reward} when they book!
+                        </div>
+                      )}
+                      <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+                        Send this link to a friend — they sign up, book, and the reward applies automatically.
+                      </div>
+                      <button
+                        onClick={function () {
+                          var doneCopy = function () {
+                            setCopiedPromoId(p.id)
+                            setTimeout(function () { setCopiedPromoId(null) }, 2500)
+                          }
+                          if (navigator.share) {
+                            // Native share sheet on phones — text, WhatsApp, etc.
+                            navigator.share({ title: 'A gift from my groomer!', text: p.new_client_reward, url: shareUrl }).then(doneCopy).catch(function () { /* user cancelled */ })
+                          } else {
+                            navigator.clipboard.writeText(shareUrl).then(doneCopy).catch(function () {
+                              window.prompt('Copy this link:', shareUrl)
+                            })
+                          }
+                        }}
+                        style={{
+                          marginTop: '8px',
+                          width: '100%',
+                          padding: '10px 14px',
+                          background: copiedPromoId === p.id ? '#dcfce7' : brandColor,
+                          color: copiedPromoId === p.id ? '#166534' : '#fff',
+                          border: 'none',
+                          borderRadius: '8px',
+                          fontWeight: 700,
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {copiedPromoId === p.id ? '✓ Ready to send!' : (navigator.share ? '📤 Share with a friend' : '🔗 Copy my share link')}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
 
             {/* Pets */}
             <div className="cp-card">

@@ -304,6 +304,15 @@ export default function Sidebar({ onToggle }) {
                 Balances
               </div>
               )}
+              {/* Promos & referral links — clients share, friends sign up */}
+              {canAccess('clients.view_list') && (
+              <div
+                className={'sidebar-subitem' + (isActive('/promos') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/promos') }}
+              >
+                🎁 Promos
+              </div>
+              )}
               {canAccess('pricing.view') && (
               <div
                 className={'sidebar-subitem' + (isActive('/pricing') ? ' sidebar-subitem-active' : '')}
