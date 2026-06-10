@@ -26,6 +26,9 @@ export default function Clients() {
   // massSmsSegment = active chip key (highlight only); zonesList feeds zone chips.
   const [massSmsSegment, setMassSmsSegment] = useState(null)
   const [zonesList, setZonesList] = useState([])
+  // 📈 Blast history — last few blasts + how many recipients booked within
+  // 7 days (and est. revenue). Loaded when the modal opens.
+  const [massSmsHistory, setMassSmsHistory] = useState(null) // null = loading/none
   const [massSmsSending, setMassSmsSending] = useState(false)
   const [massSmsResults, setMassSmsResults] = useState(null) // { sent, failed, errors }
   const [massSmsQuota, setMassSmsQuota] = useState({ remaining: null, total: null, founder: false, loaded: false })
@@ -179,6 +182,48 @@ export default function Clients() {
         setZonesList(z || [])
       } catch (e) { /* zone chips just won't show */ }
     })()
+    // 📈 Load recent blasts + booked-within-7-days stats. Fire-and-forget —
+    // history is a nice-to-have, never blocks composing a new blast.
+    ;(async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+        const { data: blasts } = await supabase
+          .from('sms_blasts')
+          .select('id, sent_at, message, segment_key, recipient_ids, recipient_count')
+          .eq('groomer_id', user.id)
+          .order('sent_at', { ascending: false })
+          .limit(4)
+        if (!blasts || blasts.length === 0) { setMassSmsHistory([]); return }
+        // For each blast: appointments CREATED by those clients in the 7 days
+        // after the blast = bookings the text likely drove.
+        const enriched = await Promise.all(blasts.map(async (b) => {
+          try {
+            const windowEnd = new Date(new Date(b.sent_at).getTime() + 7 * 86400000).toISOString()
+            const { data: booked } = await supabase
+              .from('appointments')
+              .select('id, client_id, quoted_price, final_price')
+              .eq('groomer_id', user.id)
+              .in('client_id', (b.recipient_ids || []).slice(0, 200))
+              .gte('created_at', b.sent_at)
+              .lte('created_at', windowEnd)
+              .neq('status', 'cancelled')
+            const uniqueClients = {}
+            let revenue = 0
+            ;(booked || []).forEach((a) => {
+              uniqueClients[a.client_id] = true
+              revenue += parseFloat(a.final_price != null ? a.final_price : (a.quoted_price || 0)) || 0
+            })
+            return { ...b, bookedClients: Object.keys(uniqueClients).length, bookedAppts: (booked || []).length, revenue }
+          } catch (e) {
+            return { ...b, bookedClients: null, bookedAppts: null, revenue: null }
+          }
+        }))
+        setMassSmsHistory(enriched)
+      } catch (e) {
+        setMassSmsHistory([])  // table may not exist yet — section just hides
+      }
+    })()
     // Belt-and-suspenders — reset spinner in case a previous send threw
     // before reaching the final setMassSmsSending(false). Without this,
     // the Send button stays permanently greyed.
@@ -290,6 +335,7 @@ export default function Clients() {
     const { data: { user } } = await supabase.auth.getUser()
     const results = { sent: 0, failed: 0, errors: [] }
     const msgText = massSmsMessage.trim()
+    const sentIds = []  // 📈 successful recipients — logged to sms_blasts after the loop
 
     for (const r of recipients) {
       try {
@@ -309,6 +355,7 @@ export default function Clients() {
           continue
         }
         results.sent++
+        sentIds.push(r.id)
         // Best-effort: mirror into in-app threads tagged [SMS] so the
         // conversation history stays unified. Non-fatal if it fails.
         try {
@@ -347,6 +394,22 @@ export default function Clients() {
         results.failed++
         const rName = (r.first_name || '') + ' ' + (r.last_name || '')
         results.errors.push(rName.trim() + ': ' + (err.message || 'Unknown error'))
+      }
+    }
+
+    // 📈 Log the blast so "did it work?" stats can be shown later.
+    // Best-effort — a logging failure never affects the send results.
+    if (sentIds.length > 0) {
+      try {
+        await supabase.from('sms_blasts').insert({
+          groomer_id: user.id,
+          message: msgText,
+          segment_key: massSmsSegment || null,
+          recipient_ids: sentIds,
+          recipient_count: sentIds.length,
+        })
+      } catch (e) {
+        console.warn('[mass-sms] blast log failed (non-fatal):', e)
       }
     }
 
@@ -910,6 +973,47 @@ export default function Clients() {
                         {massSmsSending ? 'Sending…' : '📱 Send to ' + selectedSmsCount}
                       </button>
                     </div>
+
+                    {/* 📈 Recent blasts — proof the texts make money. For each
+                        past blast: recipients texted, how many of them booked
+                        within 7 days, and est. revenue from those bookings. */}
+                    {massSmsHistory && massSmsHistory.length > 0 && (
+                      <div style={{ marginTop: '18px', paddingTop: '14px', borderTop: '1px solid #e5e7eb' }}>
+                        <div style={{ marginBottom: '8px', fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                          📈 Recent blasts — did they work?
+                        </div>
+                        {massSmsHistory.map(function (b) {
+                          const when = new Date(b.sent_at)
+                          const whenLabel = when.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+                            ' ' + when.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+                          const isFresh = (Date.now() - when.getTime()) < 7 * 86400000
+                          return (
+                            <div key={b.id} style={{ padding: '8px 10px', border: '1px solid #f1f5f9', borderRadius: '8px', marginBottom: '6px', fontSize: '12px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                                <span style={{ color: '#6b7280' }}>
+                                  {whenLabel} · {b.recipient_count} texted
+                                </span>
+                                {b.bookedClients != null && (
+                                  <span style={{ fontWeight: 700, color: b.bookedClients > 0 ? '#16a34a' : '#9ca3af' }}>
+                                    {b.bookedClients > 0
+                                      ? '✓ ' + b.bookedClients + ' booked' +
+                                        (b.revenue > 0 ? ' · ~$' + Math.round(b.revenue) : '')
+                                      : isFresh ? 'no bookings yet' : 'no bookings'}
+                                    {isFresh && b.bookedClients > 0 ? ' (so far)' : ''}
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ color: '#9ca3af', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                "{b.message}"
+                              </div>
+                            </div>
+                          )
+                        })}
+                        <div style={{ fontSize: '10.5px', color: '#9ca3af' }}>
+                          Counts bookings made within 7 days of each blast by the clients who got it.
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
               </>
