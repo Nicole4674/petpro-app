@@ -170,6 +170,12 @@ export default function ShopSettings() {
   // Sales tax % saves to shop_settings so it persists across devices.
   var [receiptFooterText, setReceiptFooterText] = useState('')
   var [salesTaxRate, setSalesTaxRate] = useState('')
+  // ─── Review Booster ───
+  // Auto-texts (or emails) a Google review request once per client, right
+  // after checkout. The send logic + once-ever guard live in the
+  // send-review-request edge function — these are just the toggle + link.
+  var [reviewBoosterEnabled, setReviewBoosterEnabled] = useState(false)
+  var [googleReviewUrl, setGoogleReviewUrl] = useState('')
   // ─── Low-stock email alerts (Phase 6b) ──
   var [lowStockAlertsEnabled, setLowStockAlertsEnabled] = useState(false)
   var [testingLowStock, setTestingLowStock] = useState(false)
@@ -368,6 +374,9 @@ export default function ShopSettings() {
         setReceiptFooterText(data.receipt_footer_text || '')
         setSalesTaxRate(data.sales_tax_rate != null ? String(data.sales_tax_rate) : '')
         setLowStockAlertsEnabled(data.low_stock_alerts_enabled === true)
+        // Review Booster
+        setReviewBoosterEnabled(data.review_booster_enabled === true)
+        setGoogleReviewUrl(data.google_review_url || '')
         // AI toggles — default to ON if the column is missing or null (existing behavior)
         setGroomerAiEnabled(data.groomer_ai_enabled !== false)
         setClientAiBookingEnabled(data.client_ai_booking_enabled !== false)
@@ -525,6 +534,9 @@ export default function ShopSettings() {
         receipt_footer_text: receiptFooterText.trim() || null,
         sales_tax_rate: salesTaxRate === '' ? null : parseFloat(salesTaxRate),
         low_stock_alerts_enabled: lowStockAlertsEnabled,
+        // Review Booster
+        review_booster_enabled: reviewBoosterEnabled,
+        google_review_url: googleReviewUrl.trim() || null,
         // Payment policy toggles (Phase 5)
         require_prepay_to_book: requirePrepay,
         no_show_fee_amount: parseFloat(noShowFeeAmount) || 0,
@@ -1957,6 +1969,44 @@ export default function ShopSettings() {
                   {lowStockResult.text}
                 </div>
               )}
+            </div>
+          )}
+        </div>
+
+        {/* ─── Review Booster ─── */}
+        <div style={{ marginTop: '20px', padding: '14px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '10px' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={reviewBoosterEnabled}
+              onChange={function (e) { setReviewBoosterEnabled(e.target.checked) }}
+              style={{ marginTop: '3px' }}
+            />
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#166534' }}>⭐ Review Booster</div>
+              <div style={{ fontSize: '12px', color: '#15803d', marginTop: '2px' }}>
+                Automatically asks each client for a Google review right after checkout — when they're happiest.
+                Each client is only ever asked ONCE. Sends by text (uses 1 SMS), falls back to email if they
+                haven't opted in to texts. Default OFF.
+              </div>
+            </div>
+          </label>
+          {reviewBoosterEnabled && (
+            <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #86efac' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#166534', marginBottom: '4px' }}>
+                Your Google review link *
+              </label>
+              <input
+                type="url"
+                value={googleReviewUrl}
+                onChange={function (e) { setGoogleReviewUrl(e.target.value) }}
+                placeholder="https://g.page/r/XXXXXXXX/review"
+                style={{ width: '100%', padding: '10px 12px', border: '1px solid #86efac', borderRadius: '8px', boxSizing: 'border-box', fontSize: '13px' }}
+              />
+              <div style={{ fontSize: '11px', color: '#15803d', marginTop: '6px', lineHeight: 1.5 }}>
+                How to get it: open <strong>Google Business Profile</strong> → "Ask for reviews" → copy the short
+                link. It looks like <code>g.page/r/.../review</code>. Without this link, no requests are sent.
+              </div>
             </div>
           )}
         </div>

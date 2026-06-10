@@ -2294,6 +2294,8 @@ export default function Calendar() {
             setAppointments((prev) => prev.map((a) =>
                 a.id === selectedAppt.id ? { ...a, mobile_pickup_step: newStep } : a
             ))
+            // ⭐ Review Booster — mobile drop-off complete = the happy moment
+            if (newStep === 'completed') fireReviewRequest(selectedAppt.id)
         } catch (err) {
             setMobileActionStatus({ ok: false, text: '❌ Could not update status: ' + (err.message || 'unknown') })
         }
@@ -2466,6 +2468,24 @@ export default function Calendar() {
         const appt = appointments.find(a => a.id === apptId) || selectedAppt
         if (!appt) return
         await openPaymentPopup(appt)
+    }
+
+    // ─── ⭐ Review Booster ───────────────────────────────────────────────
+    // Fire-and-forget: ask the client for a Google review after checkout.
+    // The send-review-request edge function does ALL the deciding (booster
+    // enabled? link set? client already asked? SMS consent? quota?) — we
+    // just ping it with the appointment id. Must NEVER block a checkout.
+    const fireReviewRequest = (apptId) => {
+        if (!apptId) return
+        try {
+            supabase.functions.invoke('send-review-request', { body: { appointment_id: apptId } })
+                .then(({ data }) => {
+                    if (data && data.sent) {
+                        console.log('[review-booster] request sent via ' + data.channel)
+                    }
+                })
+                .catch(() => { /* silent — checkout already succeeded */ })
+        } catch (e) { /* never block checkout */ }
     }
 
     // Manually change appointment status from the detail popup
@@ -2709,6 +2729,9 @@ export default function Calendar() {
                 checked_out_by: user.id,
             }).eq('id', paymentAppt.id)
 
+            // ⭐ Review Booster — fire-and-forget after successful checkout
+            fireReviewRequest(paymentAppt.id)
+
             // Refresh + close
             await fetchData()
             if (selectedAppt && selectedAppt.id === paymentAppt.id) {
@@ -2871,6 +2894,9 @@ export default function Calendar() {
             checked_out_by: user.id
         }).eq('id', paymentAppt.id)
 
+        // ⭐ Review Booster — fire-and-forget after successful checkout
+        fireReviewRequest(paymentAppt.id)
+
         // 4. Update popup view if this appt is open
         if (selectedAppt && selectedAppt.id === paymentAppt.id) {
             setSelectedAppt({
@@ -2957,6 +2983,9 @@ export default function Calendar() {
             checked_out_at: now,
             checked_out_by: user.id
         }).eq('id', paymentAppt.id)
+
+        // ⭐ Review Booster — fire-and-forget after successful checkout
+        fireReviewRequest(paymentAppt.id)
 
         if (selectedAppt && selectedAppt.id === paymentAppt.id) {
             setSelectedAppt({
@@ -3236,6 +3265,8 @@ export default function Calendar() {
                 .update(updates)
                 .eq('id', apptId)
             if (error) throw error
+            // ⭐ Review Booster — manual "completed" counts as checkout too
+            if (newStatus === 'completed') fireReviewRequest(apptId)
             setSelectedAppt(prev => ({ ...prev, status: newStatus }))
             fetchData()
 
