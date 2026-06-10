@@ -272,9 +272,9 @@ export default function Promos() {
               placeholder='What do THEY get? e.g. "$5 off your next groom"' style={inp} />
           )}
 
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' }}>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '6px' }}>
             <div>
-              <label style={lbl}>Share code</label>
+              <label style={lbl}>Share code (optional — auto-created)</label>
               <input type="text" value={form.code} onChange={function (e) { setF({ code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') }) }}
                 placeholder={suggestCode(form.name)} style={{ ...inp, width: '160px', marginBottom: 0, fontWeight: 700, letterSpacing: '0.05em' }} />
             </div>
@@ -288,6 +288,12 @@ export default function Promos() {
               <input type="number" min="1" value={form.max_uses} onChange={function (e) { setF({ max_uses: e.target.value }) }}
                 placeholder="∞" style={{ ...inp, width: '100px', marginBottom: 0 }} />
             </div>
+          </div>
+          <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '14px', lineHeight: 1.5, background: '#f9fafb', border: '1px solid #f3f4f6', borderRadius: '8px', padding: '8px 12px' }}>
+            💡 <strong>Nobody ever types this code</strong> — it travels inside the share link automatically.
+            Leave it blank and we'll create one from the promo name. It's just how the promo shows up in
+            your appointment notes (e.g. <code>🎁 PROMO {suggestCode(form.name)}</code>) so you know which
+            promo brought a client in.
           </div>
 
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
