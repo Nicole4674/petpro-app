@@ -1935,9 +1935,12 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           }
           return true
         }
+        // Same-day cutoff (block mode) — never offer a window the booking
+        // tool would refuse seconds later.
+        var availCutoff = await loadCutoffRule(supabaseAdmin, groomerId)
         var openWindows: any[] = []
         for (var sm = availOpenMin; sm + availDuration <= availCloseMin; sm += 30) {
-          if (availFits(sm)) {
+          if (availFits(sm) && slotPassesCutoff(availCutoff, toolInput.date, sm)) {
             openWindows.push({
               start_time: minToHHMM(sm),
               end_time: minToHHMM(sm + availDuration),
@@ -2011,6 +2014,9 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           .gte('block_date', startISO)
           .lte('block_date', endISO)
 
+        // Same-day cutoff rule (block mode only) — loaded once for the walk
+        var finderCutoff = await loadCutoffRule(supabaseAdmin, groomerId)
+
         // Bucket by date for fast lookup
         var apptByDate: Record<string, Array<{ s: number, e: number }>> = {}
         for (var ap of (rangeAppts || [])) {
@@ -2072,6 +2078,9 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           for (var startMin = openMin; startMin + duration <= closeMin; startMin += 30) {
             if (!passesFilter(startMin)) continue
             if (!fits(startMin)) continue
+            // Same-day cutoff (block mode) — skip slots the booking tool
+            // would refuse, so Suds never offers then retracts.
+            if (!slotPassesCutoff(finderCutoff, dateISO, startMin)) continue
             if (startMin % 60 === 0) hourSlots.push(startMin)
             else halfSlots.push(startMin)
           }
@@ -2222,6 +2231,58 @@ function haversineMilesClient(lat1: number | null, lng1: number | null, lat2: nu
   var dLng = toRad(lng2 - lng1)
   var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2)
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+// ─── Same-day cutoff awareness for SUGGESTION tools ─────────────────────
+// Rule 7 (same-day cutoff) lives in the BOOKING tool — but offering a slot
+// the booking tool will then refuse makes Suds look like it's gaslighting
+// clients: "3:30 today works!" → "sorry, not taking bookings today." So
+// block-mode cutoffs now filter the OFFERS too. Approval-mode stays
+// offerable (those bookings go through, just flagged for the groomer).
+async function loadCutoffRule(admin: any, gId: string): Promise<any> {
+  try {
+    var { data: row } = await admin
+      .from('shop_settings')
+      .select('booking_rules')
+      .eq('groomer_id', gId)
+      .maybeSingle()
+    var cf = row && row.booking_rules && row.booking_rules.same_day_cutoff
+    if (cf && cf.enabled && cf.mode === 'block') return cf
+  } catch (e) { /* no rules → no filtering */ }
+  return null
+}
+
+// Shop-timezone "now" (Chicago — same clock Rule 7 uses)
+function chicagoNowParts(): { dateStr: string, hour: number, minOfDay: number } {
+  var parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(new Date())
+  var get = function (t: string) { var p = parts.find(function (x: any) { return x.type === t }); return p ? p.value : '0' }
+  var hr = parseInt(get('hour'), 10)
+  if (hr === 24) hr = 0
+  return {
+    dateStr: get('year') + '-' + get('month') + '-' + get('day'),
+    hour: hr,
+    minOfDay: hr * 60 + parseInt(get('minute'), 10),
+  }
+}
+
+// true = slot survives the cutoff and is safe to offer
+function slotPassesCutoff(cf: any, slotDateISO: string, slotStartMin: number): boolean {
+  if (!cf) return true
+  var now = chicagoNowParts()
+  // cutoff_hour: past HH:00 shop time → no more TODAY slots
+  if (cf.cutoff_hour && cf.cutoff_hour > 0 && slotDateISO === now.dateStr && now.hour >= cf.cutoff_hour) return false
+  // lead_hours: slot must be at least N hours in the future
+  if (cf.lead_hours && cf.lead_hours > 0) {
+    var sp = slotDateISO.split('-')
+    var np = now.dateStr.split('-')
+    var dayDiff = (Date.UTC(+sp[0], +sp[1] - 1, +sp[2]) - Date.UTC(+np[0], +np[1] - 1, +np[2])) / 86400000
+    var hoursUntil = dayDiff * 24 + slotStartMin / 60 - now.minOfDay / 60
+    if (hoursUntil < cf.lead_hours) return false
+  }
+  return true
 }
 
 // Helpers used by client_find_next_open_slots
