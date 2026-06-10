@@ -378,10 +378,10 @@ export default function Clients() {
           <p>{activeCount} active {inactiveCount > 0 && <span style={{ color: '#9ca3af' }}>· {inactiveCount} inactive</span>}</p>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Mass SMS — pro+ only. Basic tier sees the button with an
-              upgrade prompt instead of opening the modal. Big shop news
-              ("we have a new number!") needs real Twilio, not in-app msgs. */}
-          {subscriptionTier && subscriptionTier !== 'basic' ? (
+          {/* Mass SMS — ALL tiers. Basic now includes 500 SMS/month, so the
+              tier gate is gone; the monthly quota (enforced by send-sms +
+              shown in the modal's meter) is the only limit. */}
+          {subscriptionTier ? (
             <button
               onClick={openMassSms}
               className="btn-secondary"
@@ -396,22 +396,6 @@ export default function Clients() {
               }}
               title="Send an SMS to every consented client at once"
             >📱 Mass SMS</button>
-          ) : subscriptionTier === 'basic' ? (
-            <button
-              onClick={function () {
-                window.alert('Mass SMS requires a Pro plan or higher. Upgrade in Settings → Billing to unlock texting all clients at once.')
-              }}
-              style={{
-                background: '#f3f4f6',
-                color: '#6b7280',
-                border: '1px solid #e5e7eb',
-                padding: '10px 16px',
-                borderRadius: '8px',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-              title="Pro plan unlocks Mass SMS"
-            >🔒 Mass SMS (Pro+)</button>
           ) : null}
           <Link to="/clients/new" className="btn-primary">+ Add Client</Link>
         </div>

@@ -506,15 +506,15 @@ export default function Calendar() {
     const [newMessageText, setNewMessageText] = useState('')
     const [sendingMessage, setSendingMessage] = useState(false)
     const [sendMessageStatus, setSendMessageStatus] = useState(null) // 'success' | 'error' | null
-    // SMS-first composer state. mode toggles between 'sms' (primary for paid
-    // tiers) and 'inapp' (free fallback / basic tier only). smsErrorState
-    // captures specific failure modes so we can render the "Send free instead"
-    // recovery button next to OUT_OF_QUOTA errors (option C from the design).
+    // SMS-first composer state. mode toggles between 'sms' (primary for ALL
+    // tiers — Basic includes 500 SMS/mo now) and 'inapp' (free fallback).
+    // smsErrorState captures specific failure modes so we can render the
+    // "Send free instead" recovery button next to OUT_OF_QUOTA errors.
     const [messageMode, setMessageMode] = useState('sms') // 'sms' | 'inapp'
     const [sendingSms, setSendingSms] = useState(false)
     const [smsErrorState, setSmsErrorState] = useState(null) // { code, message } | null
-    // Tier gating: hasSmsAccess === false for $70 'basic' plan groomers.
-    // Anything pro+ gets the SMS-first UI in the appointment popup.
+    // Tier is loaded for the SMS quota meter + loading guard (null = still
+    // loading → composer stays in-app-only until we know the tier).
     const [subscriptionTier, setSubscriptionTier] = useState(null) // 'basic' | 'pro' | 'pro_plus' | 'growing' | 'enterprise' | null
 
     useEffect(() => {
@@ -532,8 +532,7 @@ export default function Calendar() {
         setSmsErrorState(null)
         setSendingSms(false)
         // Default the composer to SMS mode (the primary action) — user can
-        // toggle to in-app via the link below. Basic-tier groomers will see
-        // the composer rendered in in-app mode regardless of this state.
+        // toggle to free in-app via the link below.
         setMessageMode('sms')
         // Reset inline time edit so it starts collapsed on every open
         setEditingTime(false)
@@ -3347,11 +3346,10 @@ export default function Calendar() {
                         📣 Mass Notify
                     </button>
 
-                    {/* Mass SMS button — pro+ only. Basic tier doesn't see this
-                        button at all (they have Mass Notify above for free
-                        in-app blasts). Pro+ groomers also have access to Mass
-                        Notify when they're low on SMS credits. */}
-                    {subscriptionTier && subscriptionTier !== 'basic' && (
+                    {/* Mass SMS button — ALL tiers (Basic includes 500 SMS/mo
+                        now; the monthly quota is the only gate). Mass Notify
+                        above stays the free in-app fallback for everyone. */}
+                    {subscriptionTier && (
                         <button
                             onClick={() => {
                                 setShowMassSms(true)
@@ -6343,14 +6341,13 @@ export default function Calendar() {
                                 </button>
                             </div>
 
-                            {/* Send Message — tier-gated. Pro+ gets SMS-first composer
-                                with in-app fallback link; Basic ($70) gets the original
-                                in-app composer plus an upgrade nudge. */}
+                            {/* Send Message — SMS composer for ALL tiers (Basic now
+                                includes 500 SMS/mo; the monthly quota is the only
+                                gate). In-app stays the free fallback for everyone. */}
                             {(() => {
-                                // Derive flags from state. hasSmsAccess === true for any
-                                // tier ABOVE basic ($70). null = tier still loading; play
-                                // safe and render in-app-only until we know.
-                                const hasSmsAccess = subscriptionTier && subscriptionTier !== 'basic'
+                                // null = tier still loading; play safe and render
+                                // in-app-only until we know.
+                                const hasSmsAccess = !!subscriptionTier
                                 const phone = selectedAppt?.clients?.phone
                                 const smsConsent = selectedAppt?.clients?.sms_consent === true
                                 const canTextThisClient = !!phone && smsConsent
@@ -6562,25 +6559,6 @@ export default function Calendar() {
                                                         Switch to SMS instead
                                                     </button>
                                                 )}
-                                            </div>
-                                        ) : subscriptionTier === 'basic' ? (
-                                            <div style={{
-                                                marginTop: '10px',
-                                                padding: '8px 10px',
-                                                background: '#f5f3ff',
-                                                border: '1px dashed #c4b5fd',
-                                                borderRadius: '6px',
-                                                fontSize: '12px',
-                                                color: '#5b21b6',
-                                            }}>
-                                                💡 Want to text clients directly via SMS?{' '}
-                                                <Link
-                                                    to="/account"
-                                                    style={{ color: '#7c3aed', fontWeight: 700, textDecoration: 'underline' }}
-                                                    onClick={() => setSelectedAppt(null)}
-                                                >
-                                                    Upgrade to Pro →
-                                                </Link>
                                             </div>
                                         ) : null}
                                     </div>

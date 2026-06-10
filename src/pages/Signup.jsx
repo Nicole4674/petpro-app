@@ -52,6 +52,17 @@ export default function Signup() {
   const [turnstileRetry, setTurnstileRetry] = useState(0)
   const turnstileWidgetRef = useRef(null)
 
+  // Brave detects itself via navigator.brave — when the security check fails
+  // AND we know it's Brave, we can name the culprit instead of guessing.
+  const [isBrave, setIsBrave] = useState(false)
+  useEffect(() => {
+    try {
+      if (navigator.brave && typeof navigator.brave.isBrave === 'function') {
+        navigator.brave.isBrave().then((yes) => { if (yes) setIsBrave(true) })
+      }
+    } catch (e) { /* stay quiet */ }
+  }, [])
+
   // Render the Turnstile widget once the script has loaded. We poll briefly
   // because the script tag in index.html is `async defer` — it may not be
   // ready when this component mounts. Once the widget's invisible check
@@ -288,11 +299,23 @@ export default function Signup() {
               textAlign: 'left',
               lineHeight: 1.55,
             }}>
-              <strong>⚠️ Our security check couldn't load.</strong> This usually means
-              Brave, a VPN, an ad-blocker, or private/incognito mode is blocking it.
-              <br />
-              <strong>Fix:</strong> pause your VPN or Brave shields for this page, or open
-              this link in <strong>Chrome or Edge</strong> — then try again.
+              {isBrave ? (
+                <>
+                  <strong>⚠️ Brave is blocking our security check</strong> — that's why the
+                  button isn't working. Brave's shields stop Cloudflare from loading.
+                  <br />
+                  <strong>Fix:</strong> click the 🦁 lion icon in your address bar and turn
+                  shields OFF for this site — or open this page in <strong>Chrome or Edge</strong>.
+                </>
+              ) : (
+                <>
+                  <strong>⚠️ Our security check couldn't load.</strong> This usually means
+                  a VPN, an ad-blocker, or private/incognito mode is blocking it.
+                  <br />
+                  <strong>Fix:</strong> pause your VPN or ad-blocker for this page, or open
+                  this link in <strong>Chrome or Edge</strong> — then try again.
+                </>
+              )}
               <button
                 type="button"
                 onClick={() => setTurnstileRetry((n) => n + 1)}
