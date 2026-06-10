@@ -832,20 +832,37 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
         //      double-booking, which means unassigned appts go invisible)
         //   3. As an absolute last resort, leave unassigned
         var regularStaffId: string | null = null
+        // Only learn the "regular groomer" from appointments that actually
+        // HAPPENED (or are upcoming) — a cancelled/no-show booking from months
+        // ago shouldn't decide who grooms them today.
         var { data: lastAppt } = await supabaseAdmin
           .from('appointments')
           .select('staff_id')
           .eq('client_id', clientId)
           .eq('groomer_id', groomerId)
           .not('staff_id', 'is', null)
+          .not('status', 'in', '("cancelled","no_show","rescheduled")')
           .order('appointment_date', { ascending: false })
           .limit(1)
           .maybeSingle()
         if (lastAppt && lastAppt.staff_id) {
-          regularStaffId = lastAppt.staff_id
-          console.log('[BOOK] assigning to regular staff:', regularStaffId)
-        } else {
-          // No prior appointment → fall back to first ACTIVE staff member.
+          // GUARD: their regular groomer might have left the shop. An appt
+          // assigned to an INACTIVE staff member renders in NO calendar
+          // column — completely invisible — so verify they're still active.
+          var { data: staffStillActive } = await supabaseAdmin
+            .from('staff_members')
+            .select('id, status')
+            .eq('id', lastAppt.staff_id)
+            .maybeSingle()
+          if (staffStillActive && staffStillActive.status === 'active') {
+            regularStaffId = lastAppt.staff_id
+            console.log('[BOOK] assigning to regular staff:', regularStaffId)
+          } else {
+            console.log('[BOOK] regular staff is inactive/gone — falling back to first active staff')
+          }
+        }
+        if (!regularStaffId) {
+          // No usable prior staff → fall back to first ACTIVE staff member.
           // For solo shops this is always the owner. For multi-staff shops
           // this picks any active groomer; the groomer can reassign after.
           var { data: anyActiveStaff } = await supabaseAdmin
