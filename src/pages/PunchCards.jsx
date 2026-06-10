@@ -333,7 +333,7 @@ export default function PunchCards() {
                 style={{ ...inp, width: '110px', marginBottom: 0 }} />
             </div>
             <div>
-              <label style={lbl}>Price (paid up front)</label>
+              <label style={lbl}>Card price — what the client pays ONCE to buy it</label>
               <input type="number" min="0" step="0.01" value={form.price} onChange={function (e) { setF({ price: e.target.value }) }}
                 placeholder="150" style={{ ...inp, width: '130px', marginBottom: 0 }} />
             </div>
@@ -343,6 +343,30 @@ export default function PunchCards() {
                 placeholder="never" style={{ ...inp, width: '150px', marginBottom: 0 }} />
             </div>
           </div>
+
+          {/* Live deal math — shows what the card means in real dollars so
+              the groomer can sanity-check the price before saving. Uses the
+              priciest selected service as the comparison baseline. */}
+          {(function () {
+            const punches = parseInt(form.total_punches, 10) || 0
+            const price = parseFloat(form.price) || 0
+            const selSvcs = services.filter(function (s) { return form.service_ids.indexOf(s.id) !== -1 })
+            const maxSvc = selSvcs.reduce(function (best, s) { return (!best || parseFloat(s.price) > parseFloat(best.price)) ? s : best }, null)
+            if (!punches || !price || !maxSvc) return null
+            const regular = parseFloat(maxSvc.price) * punches
+            const perVisit = price / punches
+            const savings = regular - price
+            return (
+              <div style={{ marginBottom: '14px', padding: '8px 12px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px', fontSize: '12.5px', color: '#166534', lineHeight: 1.5 }}>
+                💡 The client pays <strong>${price.toFixed(2)} once</strong> = <strong>${perVisit.toFixed(2)} per visit</strong> instead
+                of ${parseFloat(maxSvc.price).toFixed(2)}{savings > 0
+                  ? <> — they save <strong>${savings.toFixed(2)}</strong> vs paying per visit, and you get the cash up front.</>
+                  : savings < 0
+                    ? <> — heads up: that's MORE than paying per visit (${regular.toFixed(2)}). Did you mean a lower price?</>
+                    : <> — same as paying per visit (no discount baked in).</>}
+              </div>
+            )
+          })()}
 
           <label style={lbl}>Description for the portal (optional)</label>
           <input type="text" value={form.description} onChange={function (e) { setF({ description: e.target.value }) }}
