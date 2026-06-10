@@ -3489,12 +3489,14 @@ export default function Calendar() {
                                     if (!user) return
                                     const { data: bal } = await supabase
                                         .from('groomer_sms_balance')
-                                        .select('monthly_sms_remaining, monthly_sms_total, founder_unlimited_sms')
+                                        .select('monthly_sms_remaining, monthly_sms_total, extra_sms_balance, founder_unlimited_sms')
                                         .eq('groomer_id', user.id)
                                         .maybeSingle()
                                     setMassSmsQuota({
-                                        remaining: bal?.monthly_sms_remaining ?? 0,
+                                        // remaining includes never-expire top-up extras
+                                        remaining: (bal?.monthly_sms_remaining ?? 0) + (bal?.extra_sms_balance ?? 0),
                                         total: bal?.monthly_sms_total ?? 0,
+                                        extra: bal?.extra_sms_balance ?? 0,
                                         founder: !!bal?.founder_unlimited_sms,
                                         loaded: true,
                                     })
@@ -4137,12 +4139,14 @@ export default function Calendar() {
                     try {
                         const { data: balAfter } = await supabase
                             .from('groomer_sms_balance')
-                            .select('monthly_sms_remaining, monthly_sms_total, founder_unlimited_sms')
+                            .select('monthly_sms_remaining, monthly_sms_total, extra_sms_balance, founder_unlimited_sms')
                             .eq('groomer_id', user.id)
                             .maybeSingle()
                         setMassSmsQuota({
-                            remaining: balAfter?.monthly_sms_remaining ?? 0,
+                            // remaining includes never-expire top-up extras
+                            remaining: (balAfter?.monthly_sms_remaining ?? 0) + (balAfter?.extra_sms_balance ?? 0),
                             total: balAfter?.monthly_sms_total ?? 0,
+                            extra: balAfter?.extra_sms_balance ?? 0,
                             founder: !!balAfter?.founder_unlimited_sms,
                             loaded: true,
                         })

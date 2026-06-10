@@ -65,7 +65,7 @@ serve(async (req) => {
           unit_amount: TOPUP_PRICE_CENTS,
           product_data: {
             name: "PetPro SMS Top-Up — " + TOPUP_SMS + " texts",
-            description: "One-time. Credits added to this month's balance instantly. No subscription, no recurring charge.",
+            description: "One-time charge. Texts never expire — used automatically after your monthly allowance runs out. No subscription, no recurring charge.",
           },
         },
         quantity: 1,

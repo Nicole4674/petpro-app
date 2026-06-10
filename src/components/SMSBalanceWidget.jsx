@@ -17,6 +17,7 @@ import { supabase } from '../lib/supabase'
 export default function SMSBalanceWidget() {
   var [loading, setLoading] = useState(true)
   var [balance, setBalance] = useState(null)
+  var [buyingTopup, setBuyingTopup] = useState(false)
 
   useEffect(function () {
     loadBalance()
@@ -30,13 +31,33 @@ export default function SMSBalanceWidget() {
 
       var { data } = await supabase
         .from('groomer_sms_balance')
-        .select('monthly_sms_remaining, monthly_sms_total, monthly_period_start, founder_unlimited_sms')
+        .select('monthly_sms_remaining, monthly_sms_total, monthly_period_start, extra_sms_balance, founder_unlimited_sms')
         .eq('groomer_id', user.id)
         .maybeSingle()
 
       setBalance(data || null)
     } catch (e) { /* non-critical */ }
     setLoading(false)
+  }
+
+  // 🔋 One-time top-up — mirrors the token "Add More" flow. Returns to
+  // /clients because that page hosts the confirm handler + success banner.
+  async function buyTopup() {
+    setBuyingTopup(true)
+    try {
+      var { data, error } = await supabase.functions.invoke('create-sms-topup-checkout', {
+        body: { return_url: window.location.origin + '/clients' },
+      })
+      if (error || !data || data.error || !data.url) {
+        window.alert((data && data.error) || (error && error.message) || 'Could not start checkout.')
+        setBuyingTopup(false)
+        return
+      }
+      window.location.href = data.url
+    } catch (e) {
+      window.alert(e.message || 'Could not start checkout.')
+      setBuyingTopup(false)
+    }
   }
 
   // ─── Loading state ─────────────────────────────────────────────────
@@ -90,6 +111,7 @@ export default function SMSBalanceWidget() {
   // ─── Compute display values for everyone else ──────────────────────
   var total = balance ? balance.monthly_sms_total : 0
   var remaining = balance ? balance.monthly_sms_remaining : 0
+  var extra = balance ? (balance.extra_sms_balance || 0) : 0
   var used = Math.max(0, total - remaining)
 
   // Reset date — first day of next month
@@ -117,10 +139,11 @@ export default function SMSBalanceWidget() {
           borderRadius: '10px',
         }}>
           <div style={{ fontSize: '13px', fontWeight: 700, color: '#92400e', marginBottom: '4px' }}>
-            SMS not included on this plan
+            No SMS allocation synced yet
           </div>
           <div style={{ fontSize: '12px', color: '#78350f', lineHeight: 1.5 }}>
-            Upgrade to <strong>Pro ($129)</strong> for 1,000 SMS/mo · <strong>Pro+ ($199)</strong> for 1,500 · <strong>Growing ($399)</strong> for 3,000.
+            Every plan includes texts: <strong>Basic</strong> 500/mo · <strong>Pro</strong> 2,000 · <strong>Pro+</strong> 3,000 · <strong>Growing</strong> 6,000.
+            If you're subscribed and seeing this, your plan may still be syncing — check back in a minute.
           </div>
         </div>
       </div>
@@ -174,8 +197,54 @@ export default function SMSBalanceWidget() {
         {used.toLocaleString()} sent this month ({pct}%)
       </div>
 
-      {/* Low-balance nudge — show when 80%+ used */}
-      {pct >= 80 && pct < 100 && (
+      {/* 🔋 Extra texts — never expire (mirrors the EXTRA TOKENS box) */}
+      {extra > 0 && (
+        <div style={{
+          marginTop: '10px',
+          padding: '10px 12px',
+          background: '#f0fdf4',
+          border: '1px solid #86efac',
+          borderRadius: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '8px',
+          flexWrap: 'wrap',
+        }}>
+          <div>
+            <div style={{ fontSize: '11px', fontWeight: 800, color: '#166534', letterSpacing: '0.04em' }}>
+              🔋 EXTRA TEXTS (NEVER EXPIRE)
+            </div>
+            <div style={{ fontSize: '20px', fontWeight: 800, color: '#166534' }}>{extra.toLocaleString()}</div>
+          </div>
+          <div style={{ fontSize: '11px', color: '#15803d', maxWidth: '180px', textAlign: 'right' }}>
+            Used automatically after your monthly texts run out. Top-ups roll over forever.
+          </div>
+        </div>
+      )}
+
+      {/* ➕ Buy more — one-time, mirrors "Add More Tokens" */}
+      <button
+        onClick={buyTopup}
+        disabled={buyingTopup}
+        style={{
+          marginTop: '10px',
+          width: '100%',
+          padding: '10px 14px',
+          background: pct >= 80 ? '#7c3aed' : '#fff',
+          color: pct >= 80 ? '#fff' : '#7c3aed',
+          border: '1px solid #7c3aed',
+          borderRadius: '8px',
+          fontWeight: 700,
+          fontSize: '13px',
+          cursor: buyingTopup ? 'wait' : 'pointer',
+        }}
+      >
+        {buyingTopup ? 'Opening secure checkout…' : '🔋 Add 500 texts — $10 (one-time, never expire)'}
+      </button>
+
+      {/* Low-balance nudge — show when 80%+ used and no extras banked */}
+      {pct >= 80 && pct < 100 && extra === 0 && (
         <div style={{
           marginTop: '10px',
           padding: '8px 12px',
@@ -185,12 +254,12 @@ export default function SMSBalanceWidget() {
           fontSize: '12px',
           color: '#92400e',
         }}>
-          ⚠️ Running low — consider upgrading your plan to avoid running out before {resetLabel}.
+          ⚠️ Running low — grab a top-up above (never expires) or upgrade your plan before {resetLabel}.
         </div>
       )}
 
-      {/* Out of quota — block warning */}
-      {pct >= 100 && (
+      {/* Out of monthly quota AND no extras — block warning */}
+      {pct >= 100 && extra === 0 && (
         <div style={{
           marginTop: '10px',
           padding: '10px 12px',
@@ -201,7 +270,7 @@ export default function SMSBalanceWidget() {
           color: '#991b1b',
           fontWeight: 600,
         }}>
-          🚫 Out of SMS for this month. Upgrade your plan or wait until {resetLabel}.
+          🚫 Out of SMS. Grab a top-up above, upgrade your plan, or wait until {resetLabel}.
         </div>
       )}
     </div>

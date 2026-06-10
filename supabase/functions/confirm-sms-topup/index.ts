@@ -50,10 +50,16 @@ serve(async (req) => {
     if (existing) {
       const { data: bal } = await adminClient
         .from("groomer_sms_balance")
-        .select("monthly_sms_remaining")
+        .select("monthly_sms_remaining, extra_sms_balance")
         .eq("groomer_id", user.id)
         .maybeSingle()
-      return jsonOk({ granted: true, already: true, sms_added: existing.sms_amount, remaining: bal?.monthly_sms_remaining ?? null })
+      return jsonOk({
+        granted: true,
+        already: true,
+        sms_added: existing.sms_amount,
+        extra_balance: bal?.extra_sms_balance ?? null,
+        remaining: (bal?.monthly_sms_remaining ?? 0) + (bal?.extra_sms_balance ?? 0),
+      })
     }
 
     // ─── Verify with Stripe (platform account — no stripeAccount option) ───
@@ -86,25 +92,35 @@ serve(async (req) => {
       // Unique violation = another request won the race — report success
       const { data: bal2 } = await adminClient
         .from("groomer_sms_balance")
-        .select("monthly_sms_remaining")
+        .select("monthly_sms_remaining, extra_sms_balance")
         .eq("groomer_id", user.id)
         .maybeSingle()
-      return jsonOk({ granted: true, already: true, sms_added: smsAmount, remaining: bal2?.monthly_sms_remaining ?? null })
+      return jsonOk({
+        granted: true,
+        already: true,
+        sms_added: smsAmount,
+        extra_balance: bal2?.extra_sms_balance ?? null,
+        remaining: (bal2?.monthly_sms_remaining ?? 0) + (bal2?.extra_sms_balance ?? 0),
+      })
     }
 
-    // ─── Grant the credits ───
+    // ─── Grant the credits to the NEVER-EXPIRE extras bucket ───
+    // (Matches the token model: monthly allowance spends first, extras
+    // after, and extras survive the monthly reset forever.)
     const { data: balRow } = await adminClient
       .from("groomer_sms_balance")
-      .select("monthly_sms_remaining, monthly_sms_total")
+      .select("monthly_sms_remaining, monthly_sms_total, extra_sms_balance")
       .eq("groomer_id", user.id)
       .maybeSingle()
 
-    let newRemaining = smsAmount
+    let newExtra = smsAmount
+    let monthlyRemaining = 0
     if (balRow) {
-      newRemaining = (balRow.monthly_sms_remaining || 0) + smsAmount
+      newExtra = (balRow.extra_sms_balance || 0) + smsAmount
+      monthlyRemaining = balRow.monthly_sms_remaining || 0
       await adminClient
         .from("groomer_sms_balance")
-        .update({ monthly_sms_remaining: newRemaining, updated_at: new Date().toISOString() })
+        .update({ extra_sms_balance: newExtra, updated_at: new Date().toISOString() })
         .eq("groomer_id", user.id)
     } else {
       // No balance row yet (subscription not synced) — create one so the
@@ -112,12 +128,18 @@ serve(async (req) => {
       await adminClient.from("groomer_sms_balance").insert({
         groomer_id: user.id,
         monthly_sms_total: 0,
-        monthly_sms_remaining: smsAmount,
+        monthly_sms_remaining: 0,
+        extra_sms_balance: smsAmount,
         monthly_period_start: new Date().toISOString().slice(0, 10),
       })
     }
 
-    return jsonOk({ granted: true, sms_added: smsAmount, remaining: newRemaining })
+    return jsonOk({
+      granted: true,
+      sms_added: smsAmount,
+      extra_balance: newExtra,
+      remaining: monthlyRemaining + newExtra,
+    })
   } catch (err: any) {
     console.error("[confirm-sms-topup] uncaught:", err)
     return jsonError(err.message || "Internal error", 500)

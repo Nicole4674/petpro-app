@@ -101,12 +101,14 @@ export default function Clients() {
       if (!user) return
       const [{ data: groomerRow }, { data: balRow }] = await Promise.all([
         supabase.from('groomers').select('subscription_tier').eq('id', user.id).maybeSingle(),
-        supabase.from('groomer_sms_balance').select('monthly_sms_remaining, monthly_sms_total, founder_unlimited_sms').eq('groomer_id', user.id).maybeSingle(),
+        supabase.from('groomer_sms_balance').select('monthly_sms_remaining, monthly_sms_total, extra_sms_balance, founder_unlimited_sms').eq('groomer_id', user.id).maybeSingle(),
       ])
       setSubscriptionTier(groomerRow?.subscription_tier || null)
       setMassSmsQuota({
-        remaining: balRow?.monthly_sms_remaining ?? 0,
+        // remaining = monthly + never-expire extras (what they can actually send)
+        remaining: (balRow?.monthly_sms_remaining ?? 0) + (balRow?.extra_sms_balance ?? 0),
         total: balRow?.monthly_sms_total ?? 0,
+        extra: balRow?.extra_sms_balance ?? 0,
         founder: !!balRow?.founder_unlimited_sms,
         loaded: true,
       })
@@ -466,12 +468,13 @@ export default function Clients() {
     try {
       const { data: balAfter } = await supabase
         .from('groomer_sms_balance')
-        .select('monthly_sms_remaining, monthly_sms_total, founder_unlimited_sms')
+        .select('monthly_sms_remaining, monthly_sms_total, extra_sms_balance, founder_unlimited_sms')
         .eq('groomer_id', user.id)
         .maybeSingle()
       setMassSmsQuota({
-        remaining: balAfter?.monthly_sms_remaining ?? 0,
+        remaining: (balAfter?.monthly_sms_remaining ?? 0) + (balAfter?.extra_sms_balance ?? 0),
         total: balAfter?.monthly_sms_total ?? 0,
+        extra: balAfter?.extra_sms_balance ?? 0,
         founder: !!balAfter?.founder_unlimited_sms,
         loaded: true,
       })
@@ -740,7 +743,9 @@ export default function Clients() {
                 <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'space-between', width: '100%' }}>
                   <span>
                     {overQuota ? '⚠️ ' : '💜 '}
-                    {smsRemaining}/{massSmsQuota.total} SMS left this month · sending to {selectedSmsCount}
+                    {Math.max(0, smsRemaining - (massSmsQuota.extra || 0))}/{massSmsQuota.total} this month
+                    {(massSmsQuota.extra || 0) > 0 && ' + ' + massSmsQuota.extra + ' extras (never expire)'}
+                    {' · sending to ' + selectedSmsCount}
                     {overQuota && ' (over by ' + (selectedSmsCount - smsRemaining) + ')'}
                   </span>
                   {/* 🔋 One-time top-up — no subscription trap. Loud when
