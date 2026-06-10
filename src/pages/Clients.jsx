@@ -29,6 +29,55 @@ export default function Clients() {
   // 📈 Blast history — last few blasts + how many recipients booked within
   // 7 days (and est. revenue). Loaded when the modal opens.
   const [massSmsHistory, setMassSmsHistory] = useState(null) // null = loading/none
+  // 🔋 SMS top-up — one-time $10 → +500 texts (PetPro platform Stripe)
+  const [smsTopupBuying, setSmsTopupBuying] = useState(false)
+  const [smsTopupToast, setSmsTopupToast] = useState('')
+
+  async function buySmsTopup() {
+    setSmsTopupBuying(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('create-sms-topup-checkout', {
+        body: { return_url: window.location.origin + '/clients' },
+      })
+      if (error || !data || data.error || !data.url) {
+        window.alert((data && data.error) || (error && error.message) || 'Could not start checkout.')
+        setSmsTopupBuying(false)
+        return
+      }
+      window.location.href = data.url
+    } catch (e) {
+      window.alert(e.message || 'Could not start checkout.')
+      setSmsTopupBuying(false)
+    }
+  }
+
+  // Stripe return: ?smstopup=1&session_id=... → verify + grant credits.
+  // confirm-sms-topup is idempotent, so refreshes can't double-grant.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('smstopup') === '1' && params.get('session_id')) {
+      ;(async () => {
+        try {
+          const { data } = await supabase.functions.invoke('confirm-sms-topup', {
+            body: { session_id: params.get('session_id') },
+          })
+          if (data && data.granted) {
+            setSmsTopupToast('🔋 +' + data.sms_added + ' texts added! You now have ' + (data.remaining ?? '?') + ' SMS this month.')
+            setMassSmsQuota((prev) => ({ ...prev, remaining: data.remaining ?? prev.remaining }))
+          } else if (data && data.reason) {
+            setSmsTopupToast('⏳ ' + data.reason)
+          } else if (data && data.error) {
+            setSmsTopupToast('⚠️ ' + data.error)
+          }
+        } catch (e) {
+          setSmsTopupToast('⚠️ Could not confirm your top-up — if you were charged, email nicole@trypetpro.com.')
+        }
+        window.history.replaceState({}, '', window.location.pathname)
+      })()
+    } else if (params.get('smstopup') === 'cancelled') {
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [])
   const [massSmsSending, setMassSmsSending] = useState(false)
   const [massSmsResults, setMassSmsResults] = useState(null) // { sent, failed, errors }
   const [massSmsQuota, setMassSmsQuota] = useState({ remaining: null, total: null, founder: false, loaded: false })
@@ -543,6 +592,18 @@ export default function Clients() {
         </div>
       </div>
 
+      {/* 🔋 SMS top-up result banner (Stripe redirect lands here) */}
+      {smsTopupToast && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
+          padding: '12px 14px', background: '#f0fdf4', border: '1px solid #86efac',
+          borderRadius: '10px', marginBottom: '12px', fontSize: '13px', color: '#166534', fontWeight: 600,
+        }}>
+          <span>{smsTopupToast}</span>
+          <button onClick={() => setSmsTopupToast('')} style={{ background: 'none', border: 'none', color: '#166534', fontSize: '18px', cursor: 'pointer', lineHeight: 1 }}>×</button>
+        </div>
+      )}
+
       <div className="search-bar" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
         <input
           type="text"
@@ -676,10 +737,33 @@ export default function Clients() {
               {massSmsQuota.founder ? (
                 <span>🎉 Founder unlimited — no quota</span>
               ) : (
-                <span>
-                  {overQuota ? '⚠️ ' : '💜 '}
-                  {smsRemaining}/{massSmsQuota.total} SMS left this month · sending to {selectedSmsCount}
-                  {overQuota && ' (over by ' + (selectedSmsCount - smsRemaining) + ')'}
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'space-between', width: '100%' }}>
+                  <span>
+                    {overQuota ? '⚠️ ' : '💜 '}
+                    {smsRemaining}/{massSmsQuota.total} SMS left this month · sending to {selectedSmsCount}
+                    {overQuota && ' (over by ' + (selectedSmsCount - smsRemaining) + ')'}
+                  </span>
+                  {/* 🔋 One-time top-up — no subscription trap. Loud when
+                      they're short, quiet otherwise. */}
+                  <button
+                    type="button"
+                    onClick={buySmsTopup}
+                    disabled={smsTopupBuying}
+                    style={{
+                      padding: '5px 10px',
+                      background: overQuota || smsRemaining < 100 ? '#7c3aed' : '#fff',
+                      color: overQuota || smsRemaining < 100 ? '#fff' : '#7c3aed',
+                      border: '1px solid #7c3aed',
+                      borderRadius: '999px',
+                      fontWeight: 700,
+                      fontSize: '12px',
+                      cursor: smsTopupBuying ? 'wait' : 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title="One-time purchase — adds 500 texts to this month's balance instantly. No subscription."
+                  >
+                    {smsTopupBuying ? 'Opening checkout…' : '🔋 +500 texts — $10'}
+                  </button>
                 </span>
               )}
             </div>
