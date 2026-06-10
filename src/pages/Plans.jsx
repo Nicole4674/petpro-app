@@ -9,7 +9,7 @@
 // Each "Start Free Trial" button routes to /signup?tier=<tier_slug>
 // so the tier is preselected when they sign up.
 // ====================================================================
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
@@ -241,6 +241,21 @@ export default function Plans() {
   var needSubscription = searchParams.get('need_subscription') === '1'
   var [openFaq, setOpenFaq] = useState(null)
 
+  // ─── Brave detection ─────────────────────────────────────────────
+  // Brave's shields block our Cloudflare security check, so "Start Free
+  // Trial" silently does NOTHING for Brave users — they click, nothing
+  // happens, they leave. Brave exposes navigator.brave.isBrave() so we
+  // can warn exactly those users with a loud banner. VPNs can't be
+  // detected client-side, so a subtle always-on note covers them.
+  var [isBrave, setIsBrave] = useState(false)
+  useEffect(function () {
+    try {
+      if (navigator.brave && typeof navigator.brave.isBrave === 'function') {
+        navigator.brave.isBrave().then(function (yes) { if (yes) setIsBrave(true) })
+      }
+    } catch (e) { /* detection failed — stay quiet */ }
+  }, [])
+
   async function handleStartTrial(tierSlug) {
     if (tierSlug === 'enterprise') {
       // Enterprise = quote only → route to contact
@@ -299,6 +314,27 @@ export default function Plans() {
           relevant once someone is actually signing up, and a warning banner
           on the pricing page undercut the confident first impression. */}
 
+      {/* ─── Brave-only warning ─── */}
+      {/* Shown ONLY when we detect Brave — for everyone else the page stays
+          clean. Without this, Brave users click Start Free Trial, nothing
+          happens (Cloudflare check blocked), and they leave confused. */}
+      {isBrave && (
+        <div style={{
+          background: '#fef2f2',
+          borderBottom: '2px solid #fca5a5',
+          padding: '14px 20px',
+          textAlign: 'center',
+          fontSize: '14px',
+          color: '#991b1b',
+          fontWeight: 700,
+          lineHeight: 1.5,
+        }}>
+          🦁 <strong>You're using Brave</strong> — its privacy shields block our secure checkout, so the
+          {' '}<strong>Start Free Trial button won't respond</strong>. Please open this page in{' '}
+          <strong>Chrome, Edge, or Safari</strong> to sign up. (Your trial and discount work the same there!)
+        </div>
+      )}
+
       {/* ─── Header ─── */}
       <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '60px 24px 30px', textAlign: 'center' }}>
         <h1 style={{ fontSize: '44px', margin: '0 0 12px', fontWeight: '800', letterSpacing: '-0.02em' }}>
@@ -323,6 +359,11 @@ export default function Plans() {
           color: '#065f46',
         }}>
           ✅ SMS, AI, mobile routing & boarding all included — no add-ons, no surprise fees.
+        </div>
+        {/* Subtle catch-all for VPN users (undetectable client-side) — keeps
+            the page confident while still explaining a silent button. */}
+        <div style={{ marginTop: '12px', fontSize: '12.5px', color: '#9ca3af' }}>
+          Using Brave or a VPN? Privacy shields can block our secure signup — if Start Free Trial doesn't respond, open this page in Chrome or Edge.
         </div>
       </div>
 
