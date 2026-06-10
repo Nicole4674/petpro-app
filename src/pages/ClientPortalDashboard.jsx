@@ -146,6 +146,76 @@ export default function ClientPortalDashboard() {
   // link ("send this to a friend"). ref=this client for referral credit.
   var [portalPromos, setPortalPromos] = useState([])
   var [copiedPromoId, setCopiedPromoId] = useState(null)
+  // 🎟️ Punch cards — cards this client OWNS (punch balance) + types they
+  // can BUY (one-time Stripe checkout on the groomer's account).
+  var [myPunchCards, setMyPunchCards] = useState([])
+  var [punchTypes, setPunchTypes] = useState([])
+  var [punchBuying, setPunchBuying] = useState(null)     // type id mid-checkout
+  var [punchToast, setPunchToast] = useState('')         // post-purchase message
+  var [punchRefreshNonce, setPunchRefreshNonce] = useState(0)
+
+  // Owned cards load whenever the client is known (and re-load after a
+  // confirmed purchase via punchRefreshNonce).
+  useEffect(function () {
+    if (!client) return
+    ;(async function () {
+      try {
+        var { data: owned } = await supabase
+          .from('punch_cards')
+          .select('id, name, punches_remaining, total_punches, expires_at, status')
+          .eq('client_id', client.id)
+          .order('created_at', { ascending: false })
+        setMyPunchCards((owned || []).filter(function (c) { return c.status === 'active' && c.punches_remaining > 0 }))
+      } catch (e) { /* table missing → section hides */ }
+    })()
+  }, [client, punchRefreshNonce])
+
+  // Stripe redirect return: ?punchcard=1&session_id=... → verify + issue.
+  // confirm-punch-card is IDEMPOTENT, so refreshes can't double-issue.
+  useEffect(function () {
+    var params = new URLSearchParams(window.location.search)
+    if (params.get('punchcard') === '1' && params.get('session_id')) {
+      ;(async function () {
+        try {
+          var { data } = await supabase.functions.invoke('confirm-punch-card', {
+            body: { session_id: params.get('session_id') },
+          })
+          if (data && data.issued) {
+            setPunchToast('🎟️ ' + ((data.card && data.card.name) || 'Your punch card') + ' is ready — ' +
+              ((data.card && data.card.punches_remaining) || '') + ' punches to use!')
+            setPunchRefreshNonce(function (n) { return n + 1 })
+          } else if (data && data.reason) {
+            setPunchToast('⏳ ' + data.reason)
+          } else if (data && data.error) {
+            setPunchToast('⚠️ ' + data.error)
+          }
+        } catch (e) {
+          setPunchToast('⚠️ Could not confirm your purchase — if you were charged, contact your groomer (they can issue it manually).')
+        }
+        window.history.replaceState({}, '', window.location.pathname)
+      })()
+    } else if (params.get('punchcard') === 'cancelled') {
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [])
+
+  async function buyPunchCard(t) {
+    setPunchBuying(t.id)
+    try {
+      var { data, error } = await supabase.functions.invoke('create-punch-card-checkout', {
+        body: { type_id: t.id, return_url: window.location.origin + '/portal' },
+      })
+      if (error || !data || data.error || !data.url) {
+        window.alert((data && data.error) || (error && error.message) || 'Could not start checkout — try again or ask your groomer.')
+        setPunchBuying(null)
+        return
+      }
+      window.location.href = data.url   // → Stripe hosted checkout
+    } catch (e) {
+      window.alert(e.message || 'Could not start checkout.')
+      setPunchBuying(null)
+    }
+  }
 
   // Which appointment IDs already have a pending waitlist entry (so we show
   // "On waitlist" instead of the Notify button)
@@ -255,6 +325,20 @@ export default function ClientPortalDashboard() {
         .select('*')
         .eq('groomer_id', clientData.groomer_id)
         .maybeSingle()
+
+      // 4b. 🎟️ Buyable punch card types (owned cards load in their own
+      // effect keyed on client + refresh nonce). Best-effort.
+      try {
+        var { data: buyableTypes } = await supabase
+          .from('punch_card_types')
+          .select('id, name, description, price, total_punches, expires_months')
+          .eq('groomer_id', clientData.groomer_id)
+          .eq('is_active', true)
+          .order('price', { ascending: true })
+        setPunchTypes(buyableTypes || [])
+      } catch (ptErr) {
+        console.warn('[ClientPortal] punch types load skipped:', ptErr)
+      }
 
       // 4a. 🎁 Load the groomer's active promos for the refer-a-friend card.
       // Best-effort — if the promos table doesn't exist yet the card hides.
@@ -1541,6 +1625,84 @@ export default function ClientPortalDashboard() {
                     </div>
                   )
                 })}
+              </div>
+            )}
+
+            {/* 🎟️ Punch cards — owned balances + buyable packages */}
+            {(punchToast || myPunchCards.length > 0 || punchTypes.length > 0) && (
+              <div className="cp-card">
+                <div className="cp-card-title-row">
+                  <h3 className="cp-card-title">🎟️ Punch Cards</h3>
+                </div>
+                {punchToast && (
+                  <div style={{ padding: '10px 12px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '10px', marginBottom: '10px', fontSize: '13px', color: '#166534', fontWeight: 600 }}>
+                    {punchToast}
+                  </div>
+                )}
+
+                {/* Cards they own — punch balance with progress bar */}
+                {myPunchCards.map(function (pc) {
+                  var pct = pc.total_punches > 0 ? (pc.punches_remaining / pc.total_punches) : 0
+                  return (
+                    <div key={pc.id} style={{ padding: '12px', border: '1px solid #f1f5f9', borderRadius: '10px', marginBottom: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: '#111827' }}>{pc.name}</div>
+                        <div style={{ fontWeight: 800, color: '#10b981', fontSize: '14px' }}>
+                          {pc.punches_remaining} of {pc.total_punches} left
+                        </div>
+                      </div>
+                      <div style={{ width: '100%', height: '8px', background: '#f3f4f6', borderRadius: '999px', overflow: 'hidden', marginTop: '8px' }}>
+                        <div style={{ width: (pct * 100) + '%', height: '100%', background: '#10b981' }}></div>
+                      </div>
+                      <div style={{ fontSize: '11.5px', color: '#9ca3af', marginTop: '6px' }}>
+                        {pc.expires_at ? 'Use by ' + pc.expires_at + ' · ' : ''}Punches apply automatically at checkout — just book like normal!
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {/* Types they can buy */}
+                {punchTypes.length > 0 && (
+                  <>
+                    {myPunchCards.length > 0 && (
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.4px', margin: '12px 0 6px' }}>
+                        Available packages
+                      </div>
+                    )}
+                    {punchTypes.map(function (t) {
+                      return (
+                        <div key={t.id} style={{ padding: '12px', border: '1px solid #f1f5f9', borderRadius: '10px', marginBottom: '8px' }}>
+                          <div style={{ fontSize: '14px', fontWeight: 700, color: '#111827' }}>{t.name}</div>
+                          <div style={{ fontSize: '12.5px', color: '#374151', marginTop: '2px' }}>
+                            <strong>${parseFloat(t.price).toFixed(2)}</strong> for {t.total_punches} visits
+                            {t.expires_months ? ' · valid ' + t.expires_months + ' months' : ' · never expires'}
+                          </div>
+                          {t.description && (
+                            <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>{t.description}</div>
+                          )}
+                          <button
+                            onClick={function () { buyPunchCard(t) }}
+                            disabled={!!punchBuying}
+                            style={{
+                              marginTop: '8px',
+                              width: '100%',
+                              padding: '10px 14px',
+                              background: punchBuying === t.id ? '#a7f3d0' : brandColor,
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: '8px',
+                              fontWeight: 700,
+                              fontSize: '13px',
+                              cursor: punchBuying ? 'wait' : 'pointer',
+                            }}
+                          >
+                            {punchBuying === t.id ? 'Opening secure checkout…' : '💳 Buy — $' + parseFloat(t.price).toFixed(2)}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </>
+                )}
               </div>
             )}
 
