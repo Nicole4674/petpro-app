@@ -22,6 +22,10 @@ export default function Clients() {
   const [showMassSms, setShowMassSms] = useState(false)
   const [massSmsMessage, setMassSmsMessage] = useState('')
   const [massSmsRecipients, setMassSmsRecipients] = useState({}) // { clientId: bool }
+  // 🎯 Quick segments — one-tap smart selections ("lapsed 8+ weeks", "in zone X").
+  // massSmsSegment = active chip key (highlight only); zonesList feeds zone chips.
+  const [massSmsSegment, setMassSmsSegment] = useState(null)
+  const [zonesList, setZonesList] = useState([])
   const [massSmsSending, setMassSmsSending] = useState(false)
   const [massSmsResults, setMassSmsResults] = useState(null) // { sent, failed, errors }
   const [massSmsQuota, setMassSmsQuota] = useState({ remaining: null, total: null, founder: false, loaded: false })
@@ -162,6 +166,19 @@ export default function Clients() {
     setMassSmsMessage('')
     setMassSmsResults(null)
     setMassSmsSearch('')
+    setMassSmsSegment(null)
+    // Load zones for the zone segment chips (mobile groomers). Fire-and-forget.
+    ;(async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+        const { data: z } = await supabase
+          .from('zones')
+          .select('id, name, zips')
+          .eq('groomer_id', user.id)
+        setZonesList(z || [])
+      } catch (e) { /* zone chips just won't show */ }
+    })()
     // Belt-and-suspenders — reset spinner in case a previous send threw
     // before reaching the final setMassSmsSending(false). Without this,
     // the Send button stays permanently greyed.
@@ -190,6 +207,68 @@ export default function Clients() {
       const phoneDigits = (c.phone || '').replace(/[^0-9]/g, '')
       if (qDigits.length >= 3 && phoneDigits.includes(qDigits)) return true
       return false
+    })
+  }
+
+  // ─── 🎯 Quick segment definitions ─────────────────────────────────────
+  // Each segment is a label + test(client) → bool, computed from clientMeta
+  // (already built for the page chips) + zones. Counts render on the chips;
+  // tapping one selects EXACTLY its members (everyone else unchecked).
+  const clientZipOf = (c) => {
+    // ZIP = LAST 5-digit group in the address (street numbers can be 5 digits)
+    const m = String(c.address || '').match(/\b(\d{5})(?:-\d{4})?\b/g)
+    return m && m.length > 0 ? m[m.length - 1].slice(0, 5) : null
+  }
+  const smsSegments = (() => {
+    const t = new Date(); t.setHours(0, 0, 0, 0)
+    const cut = new Date(t); cut.setDate(cut.getDate() - 56) // 8 weeks
+    const cutStr = cut.getFullYear() + '-' + String(cut.getMonth() + 1).padStart(2, '0') + '-' + String(cut.getDate()).padStart(2, '0')
+    const segs = [
+      {
+        key: 'lapsed',
+        label: '😴 Lapsed 8+ wks',
+        hint: 'Visited before, but not in 8+ weeks, and nothing booked — your win-back list',
+        test: (c) => { const m = clientMeta[c.id]; return !!(m && m.lastVisit && m.lastVisit <= cutStr && !m.hasUpcoming) },
+      },
+      {
+        key: 'noupcoming',
+        label: '📅 Nothing booked',
+        hint: 'No upcoming appointment on the calendar',
+        test: (c) => { const m = clientMeta[c.id]; return !m || !m.hasUpcoming },
+      },
+      {
+        key: 'vax',
+        label: '💉 Vax expiring',
+        hint: 'A pet\'s vaccination is expired or expires within 30 days',
+        test: (c) => { const m = clientMeta[c.id]; return !!(m && m.vaxAlert) },
+      },
+      {
+        key: 'balance',
+        label: '💰 Balance due',
+        hint: 'Owes money on a past appointment',
+        test: (c) => { const m = clientMeta[c.id]; return !!(m && m.balance > 0.01) },
+      },
+    ]
+    // One chip per service zone (mobile groomers) — matched by address ZIP
+    ;(zonesList || []).forEach((z) => {
+      if (!Array.isArray(z.zips) || z.zips.length === 0) return
+      segs.push({
+        key: 'zone-' + z.id,
+        label: '🗺️ ' + z.name,
+        hint: 'Clients whose address ZIP is in the ' + z.name + ' zone',
+        test: (c) => { const zip = clientZipOf(c); return !!(zip && z.zips.indexOf(zip) !== -1) },
+      })
+    })
+    return segs
+  })()
+  const applySmsSegment = (seg) => {
+    setMassSmsSegment(seg.key)
+    // Explicit true/false for EVERY eligible client — undefined counts as
+    // checked in this modal, so non-members must be set false explicitly.
+    setMassSmsRecipients(() => {
+      const next = {}
+      smsEligible.forEach((c) => { next[c.id] = !!seg.test(c) })
+      return next
     })
   }
 
@@ -616,6 +695,53 @@ export default function Clients() {
                               <span style={{ marginLeft: '6px', color: '#7c3aed', textTransform: 'none', letterSpacing: 'normal', fontWeight: 600 }}>
                                 · showing {visibleEligible.length} match{visibleEligible.length === 1 ? '' : 'es'}
                               </span>
+                            )}
+                          </div>
+
+                          {/* 🎯 Quick segments — one tap selects a smart group.
+                              Counts show how many eligible clients match. Chips
+                              with zero matches render dimmed + unclickable. */}
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px', alignItems: 'center' }}>
+                            {smsSegments.map(function (seg) {
+                              const count = smsEligible.filter(seg.test).length
+                              const active = massSmsSegment === seg.key
+                              return (
+                                <button
+                                  key={seg.key}
+                                  type="button"
+                                  disabled={massSmsSending || count === 0}
+                                  onClick={function () { applySmsSegment(seg) }}
+                                  title={count === 0 ? 'No clients match this right now' : seg.hint}
+                                  style={{
+                                    padding: '5px 10px',
+                                    borderRadius: '999px',
+                                    fontSize: '12px',
+                                    fontWeight: 600,
+                                    cursor: count === 0 ? 'default' : 'pointer',
+                                    opacity: count === 0 ? 0.4 : 1,
+                                    border: active ? '1px solid #7c3aed' : '1px solid #e5e7eb',
+                                    background: active ? '#7c3aed' : '#fff',
+                                    color: active ? '#fff' : '#374151',
+                                  }}
+                                >{seg.label} · {count}</button>
+                              )
+                            })}
+                            {massSmsSegment && (
+                              <button
+                                type="button"
+                                onClick={function () { setMassSmsSegment(null); setMassSmsRecipients({}) }}
+                                style={{
+                                  padding: '5px 10px',
+                                  borderRadius: '999px',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  border: '1px solid #e5e7eb',
+                                  background: '#f3f4f6',
+                                  color: '#6b7280',
+                                }}
+                                title="Reset — select everyone again"
+                              >↺ Everyone</button>
                             )}
                           </div>
 
