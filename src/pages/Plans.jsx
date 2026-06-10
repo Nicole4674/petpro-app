@@ -32,9 +32,10 @@ var TIERS = [
       'Multi-pet booking',
       'Recurring appointments',
       'Boarding & kennel management',
+      '🚐 Mobile grooming built in — routes, zones & GPS day planner',
       'Printable intake & check-in forms',
       { text: '500 AI actions / month', founder: true },  // ← FOUNDER DEAL: remove after first 100 signups
-      'No SMS — upgrade to Pro for texts',
+      '500 SMS / month — reminders & mobile texts 📱',
     ],
   },
   {
@@ -54,7 +55,7 @@ var TIERS = [
       'Online vaccine records + health info',
       'Clients request appointments (you approve)',
       { text: '800 AI actions / month', founder: true },  // ← FOUNDER DEAL: remove after first 100 signups
-      '1,000 SMS / month — reminders, alerts, replies 📱',
+      '2,000 SMS / month — reminders, alerts, replies 📱',
       '📞 Suds answers calls (coming soon)',
     ],
   },
@@ -73,8 +74,9 @@ var TIERS = [
       'Client self-booking AI',
       'Smart AI booking rules (breed / vaccine / allergy)',
       'Auto conflict & double-booking prevention',
+      '🚐 Smart mobile scheduling — zip, distance & area days',
       '1,000 AI actions / month',
-      '1,500 SMS / month 📱',
+      '3,000 SMS / month 📱',
       '📞 Suds answers calls (coming soon)',
     ],
   },
@@ -96,7 +98,7 @@ var TIERS = [
       'AI reads chat photos (tangles, skin issues)',
       'Auto-rebook reminder cycles',
       '3,000 AI actions / month',
-      '3,000 SMS / month 📱',
+      '6,000 SMS / month 📱',
       '📞 Suds answers calls (coming soon)',
     ],
   },
@@ -143,7 +145,7 @@ var COMPARISON_SECTIONS = [
       { feature: 'Boarding & kennel mgmt', included: ['✓', '✓', '✓', '✓', '✓'] },
       { feature: 'Payment tracking', included: ['✓', '✓', '✓', '✓', '✓'] },
       { feature: 'Outstanding balance tracker', included: ['✓', '✓', '✓', '✓', '✓'] },
-      { feature: 'SMS allocation / month', included: ['—', '1,000', '1,500', '3,000', 'Custom'] },
+      { feature: 'SMS allocation / month', included: ['500', '2,000', '3,000', '6,000', 'Custom'] },
       { feature: '📞 Suds answers calls', included: ['—', 'Coming soon', 'Coming soon', 'Coming soon', 'Coming soon'] },
       { feature: 'Recurring appointments', included: ['✓', '✓', '✓', '✓', '✓'] },
       { feature: 'Printable intake forms', included: ['✓', '✓', '✓', '✓', '✓'] },
@@ -157,6 +159,18 @@ var COMPARISON_SECTIONS = [
       { feature: 'In-app messaging', included: ['—', '✓', '✓', '✓', '✓'] },
       { feature: 'Online vaccine records', included: ['—', '✓', '✓', '✓', '✓'] },
       { feature: 'Health & emergency info', included: ['—', '✓', '✓', '✓', '✓'] },
+    ],
+  },
+  {
+    title: '🚐 Mobile Grooming',
+    rows: [
+      { feature: 'Route map & GPS day planner', included: ['✓', '✓', '✓', '✓', '✓'] },
+      { feature: 'Service zones (area days by zip)', included: ['✓', '✓', '✓', '✓', '✓'] },
+      { feature: 'Route optimizer (shortest drive)', included: ['✓', '✓', '✓', '✓', '✓'] },
+      { feature: 'Mobile pickup & drop-off flow (GPS + client texts)', included: ['✓', '✓', '✓', '✓', '✓'] },
+      { feature: 'Smart scheduling by zip & distance', included: ['✓*', '✓*', '✓', '✓', '✓'] },
+      { feature: '"When are you in my area?" — AI answers clients', included: ['✓*', '✓*', '✓', '✓', '✓'] },
+      { feature: 'Fill My Route — text nearby clients an opening', included: ['✓', '✓', '✓', '✓', '✓'] },
     ],
   },
   {
@@ -281,33 +295,9 @@ export default function Plans() {
         <strong>SUDS30</strong> at checkout.
       </div>
 
-      {/* ─── "Trouble signing up?" — prominent fallback for stuck users ─── */}
-      {/* Two paths: quick self-fix (try a different browser) handles ~80% of  */}
-      {/* signup issues. Discount path catches the real bugs we need to know   */}
-      {/* about — incentive prevents bail-out-in-silence which kills ad ROI.  */}
-      <div style={{
-        background: '#fffbeb',
-        borderBottom: '1px solid #fcd34d',
-        padding: '12px 20px',
-        textAlign: 'center',
-        fontSize: '14px',
-        color: '#78350f',
-        fontWeight: 600,
-        lineHeight: 1.5,
-      }}>
-        ⚠️ <strong>Trouble signing up?</strong> Try <strong>Chrome, Safari, or Edge</strong> first — private/incognito mode and Brave can block our security check. Still stuck? Email{' '}
-        <a
-          href="mailto:nicole@trypetpro.com?subject=Help%20signing%20up%20for%20PetPro"
-          style={{
-            color: '#7c2d12',
-            textDecoration: 'underline',
-            fontWeight: 800,
-          }}
-        >
-          nicole@trypetpro.com
-        </a>{' '}
-        — real bug reports get <strong>30% off your first 3 months</strong> as a thank-you.
-      </div>
+      {/* "Trouble signing up?" banner moved to the Signup page — it's only
+          relevant once someone is actually signing up, and a warning banner
+          on the pricing page undercut the confident first impression. */}
 
       {/* ─── Header ─── */}
       <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '60px 24px 30px', textAlign: 'center' }}>
@@ -315,8 +305,25 @@ export default function Plans() {
           Pick your PetPro plan
         </h1>
         <p style={{ fontSize: '18px', color: '#6b7280', margin: 0, maxWidth: '640px', marginLeft: 'auto', marginRight: 'auto' }}>
-          Built by a groomer, for groomers. 30-day free trial, cancel anytime. Upgrade or downgrade whenever.
+          Built by a groomer, for groomers. Free trial on every plan — cancel anytime, upgrade or downgrade whenever.
         </p>
+        {/* The "no add-ons" punch line — every competitor refugee has been
+            burned by a $100/mo SMS add-on. Say the quiet part out loud. */}
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '8px',
+          marginTop: '18px',
+          padding: '10px 18px',
+          background: '#ecfdf5',
+          border: '1px solid #6ee7b7',
+          borderRadius: '999px',
+          fontSize: '15px',
+          fontWeight: 700,
+          color: '#065f46',
+        }}>
+          ✅ SMS, AI, mobile routing & boarding all included — no add-ons, no surprise fees.
+        </div>
       </div>
 
       {/* ─── Tier Cards ─── */}
@@ -381,13 +388,16 @@ export default function Plans() {
                             var display = isFounder ? val.slice(0, -1) : val
                             var isCheck = display === '✓'
                             var isDash = display === '—'
+                            // Muted styling for not-yet-shipped features
+                            var isComingSoon = display === 'Coming soon'
                             return (
                               <td key={ci} style={{
                                 ...valueCellStyle,
                                 background: isFounder ? '#fef3c7' : 'transparent',
-                                color: isFounder ? '#b45309' : (isCheck ? '#10b981' : isDash ? '#d1d5db' : '#111827'),
-                                fontWeight: isCheck ? '700' : (isDash ? '400' : '600'),
-                                fontSize: isCheck || isDash ? '18px' : '13px',
+                                color: isFounder ? '#b45309' : (isCheck ? '#10b981' : isDash ? '#d1d5db' : isComingSoon ? '#9ca3af' : '#111827'),
+                                fontWeight: isCheck ? '700' : (isDash ? '400' : isComingSoon ? '400' : '600'),
+                                fontStyle: isComingSoon ? 'italic' : 'normal',
+                                fontSize: isCheck || isDash ? '18px' : isComingSoon ? '12px' : '13px',
                               }}>
                                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                                   {display}
@@ -627,12 +637,16 @@ function TierCard({ tier, onStartTrial }) {
         {tier.features.map(function (f, i) {
           var isFounder = typeof f === 'object' && f.founder
           var text = isFounder ? f.text : f
+          // "Coming soon" features render muted with an hourglass instead of a
+          // green check — honest at a glance, nobody feels sold vaporware.
+          var isComingSoon = typeof text === 'string' && text.toLowerCase().indexOf('coming soon') !== -1
           return (
             <div key={i} style={{
               display: 'flex',
               gap: '8px',
               fontSize: '13px',
-              color: '#374151',
+              color: isComingSoon ? '#9ca3af' : '#374151',
+              fontStyle: isComingSoon ? 'italic' : 'normal',
               marginBottom: '8px',
               lineHeight: '1.4',
               alignItems: 'center',
@@ -641,7 +655,7 @@ function TierCard({ tier, onStartTrial }) {
               borderRadius: isFounder ? '6px' : '0',
               border: isFounder ? '1px dashed #f59e0b' : 'none',
             }}>
-              <span style={{ color: isFounder ? '#f59e0b' : '#10b981', fontWeight: '700', flexShrink: 0 }}>✓</span>
+              <span style={{ color: isFounder ? '#f59e0b' : (isComingSoon ? '#9ca3af' : '#10b981'), fontWeight: '700', flexShrink: 0 }}>{isComingSoon ? '⏳' : '✓'}</span>
               <span style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
                 {text}
                 {isFounder && (

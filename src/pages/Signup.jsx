@@ -176,6 +176,31 @@ export default function Signup() {
       <div className="login-container">
         <h1>PetPro</h1>
         <p>Create Your Groomer Account</p>
+        {/* "Trouble signing up?" — moved here from the Plans page. Two paths:
+            quick self-fix (different browser) handles ~80% of signup issues;
+            the discount path catches real bugs — incentive prevents
+            bail-out-in-silence which kills ad ROI. */}
+        <div style={{
+          background: '#fffbeb',
+          border: '1px solid #fcd34d',
+          borderRadius: '10px',
+          padding: '10px 14px',
+          marginBottom: '14px',
+          textAlign: 'left',
+          fontSize: '12px',
+          color: '#78350f',
+          fontWeight: 600,
+          lineHeight: 1.5,
+        }}>
+          ⚠️ <strong>Trouble signing up?</strong> Try <strong>Chrome, Safari, or Edge</strong> — private/incognito mode and Brave can block our security check. Still stuck? Email{' '}
+          <a
+            href="mailto:nicole@trypetpro.com?subject=Help%20signing%20up%20for%20PetPro"
+            style={{ color: '#7c2d12', textDecoration: 'underline', fontWeight: 800 }}
+          >
+            nicole@trypetpro.com
+          </a>{' '}
+          — real bug reports get <strong>30% off your first 3 months</strong> as a thank-you.
+        </div>
         {refFromUrl && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: '10px',

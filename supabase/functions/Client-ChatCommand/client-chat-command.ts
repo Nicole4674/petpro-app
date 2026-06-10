@@ -2007,14 +2007,94 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
           cursor.setDate(cursor.getDate() + 1)
         }
 
+        // ── Mobile route awareness (zones + distance) ──────────────────
+        // For mobile shops: tag each slot with whether it's on this client's
+        // ZONE DAY (the day the groomer already runs their area) and how far
+        // the client is from the groomer's nearest stop that day. The AI is
+        // told to offer zone days / closer days FIRST — keeps routes tight.
+        // Free: straight-line math on cached lat/lng, no Maps API.
+        var routeNote = ''
+        try {
+          var { data: shopMob } = await supabaseAdmin
+            .from('shop_settings')
+            .select('is_mobile')
+            .eq('groomer_id', groomerId)
+            .maybeSingle()
+          if (shopMob && shopMob.is_mobile === true && results.length > 0) {
+            var { data: meRow } = await supabaseAdmin
+              .from('clients')
+              .select('address, latitude, longitude')
+              .eq('id', clientId)
+              .maybeSingle()
+            var meLat = meRow && meRow.latitude != null ? parseFloat(meRow.latitude) : null
+            var meLng = meRow && meRow.longitude != null ? parseFloat(meRow.longitude) : null
+
+            // Zone match — LAST 5-digit group in the address is the ZIP
+            // (first could be a street number like "12345 Main St").
+            var myZone: any = null
+            var meAddr = (meRow && meRow.address) ? String(meRow.address) : ''
+            var zipGroups = meAddr.match(/\b(\d{5})(?:-\d{4})?\b/g)
+            var meZip = zipGroups && zipGroups.length > 0 ? zipGroups[zipGroups.length - 1].slice(0, 5) : null
+            if (meZip) {
+              var { data: zoneRows } = await supabaseAdmin
+                .from('zones')
+                .select('name, days_of_week, zips')
+                .eq('groomer_id', groomerId)
+              myZone = (zoneRows || []).find(function (z: any) {
+                return Array.isArray(z.zips) && z.zips.indexOf(meZip) !== -1
+              }) || null
+            }
+            var zoneDayNums: number[] = (myZone && Array.isArray(myZone.days_of_week)) ? myZone.days_of_week : []
+
+            // Existing stops per date (with coords) for distance annotation
+            var stopsByDate: Record<string, Array<{ lat: number, lng: number }>> = {}
+            if (meLat != null && meLng != null) {
+              var { data: stopRows } = await supabaseAdmin
+                .from('appointments')
+                .select('appointment_date, clients:client_id(latitude, longitude)')
+                .eq('groomer_id', groomerId)
+                .gte('appointment_date', startISO)
+                .lte('appointment_date', endISO)
+                .neq('status', 'cancelled')
+              for (var sr of (stopRows || [])) {
+                var sc: any = (sr as any).clients
+                if (!sc || sc.latitude == null || sc.longitude == null) continue
+                if (!stopsByDate[sr.appointment_date]) stopsByDate[sr.appointment_date] = []
+                stopsByDate[sr.appointment_date].push({ lat: parseFloat(sc.latitude), lng: parseFloat(sc.longitude) })
+              }
+            }
+
+            for (var rs of results) {
+              var rsDow = new Date(rs.date + 'T12:00:00').getDay()
+              if (zoneDayNums.length > 0) rs.zone_day = zoneDayNums.indexOf(rsDow) !== -1
+              var dayStops = stopsByDate[rs.date] || []
+              rs.stops_that_day = dayStops.length
+              if (meLat != null && meLng != null && dayStops.length > 0) {
+                var best = Infinity
+                for (var dst of dayStops) {
+                  var mi = haversineMilesClient(meLat, meLng, dst.lat, dst.lng)
+                  if (mi != null && mi < best) best = mi
+                }
+                if (best !== Infinity) rs.miles_from_nearest_stop = Math.round(best * 10) / 10
+              }
+            }
+
+            routeNote = ' MOBILE GROOMER: prefer offering slots where zone_day=true' +
+              (myZone ? ' (this client is in the "' + myZone.name + '" area)' : '') +
+              ' and/or miles_from_nearest_stop is small (groomer is already nearby that day — less driving). Mention it naturally, e.g. "I\'m already grooming in your area that day!" Days with no stops yet are fine too. Avoid leading with days that are 10+ miles from that day\'s stops if closer options exist.'
+          }
+        } catch (zoneErr) {
+          console.warn('[client-chat] mobile zone annotation failed (non-fatal):', zoneErr)
+        }
+
         return {
           success: true,
           duration_minutes: duration,
           slots: results,
           slot_count: results.length,
-          note: results.length > 0
+          note: (results.length > 0
             ? 'Slots are grouped by day — multiple times may appear for the same day. GROUP THEM BY DATE in your reply and offer 2-3 times per day so the client sees the real spread. Example: "Monday I have 9am, 11am, or 2pm — any work? Tuesday I have 10am or 3pm." Never offer only the first slot of a day as if it were the only option for that day. Never invent a time not in this list.'
-            : 'No open slots found in the next 14 days that fit ' + duration + ' minutes. Tell the client honestly that the next 2 weeks are fully booked and offer to put them on the waitlist or have the groomer reach out.',
+            : 'No open slots found in the next 14 days that fit ' + duration + ' minutes. Tell the client honestly that the next 2 weeks are fully booked and offer to put them on the waitlist or have the groomer reach out.') + routeNote,
         }
       }
 
@@ -2025,6 +2105,18 @@ async function executeTool(toolName: string, toolInput: any, ctx: any) {
     console.error('Tool error (' + toolName + '):', err)
     return { success: false, error: String(err && err.message ? err.message : err) }
   }
+}
+
+// Straight-line distance in miles (haversine) — free proximity signal for
+// mobile route batching. Mirrors the helper in petpro-smart-book.
+function haversineMilesClient(lat1: number | null, lng1: number | null, lat2: number | null, lng2: number | null): number | null {
+  if (lat1 == null || lng1 == null || lat2 == null || lng2 == null) return null
+  var toRad = function (x: number) { return x * Math.PI / 180 }
+  var R = 3958.8
+  var dLat = toRad(lat2 - lat1)
+  var dLng = toRad(lng2 - lng1)
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2)
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
 // Helpers used by client_find_next_open_slots
@@ -2344,6 +2436,63 @@ Deno.serve(async function(req) {
       .maybeSingle()
     var businessHours: any = (shopHoursRow && shopHoursRow.business_hours) || DEFAULT_BIZ_HOURS
 
+    // ─── Mobile area info (zones) ────────────────────────────────────────
+    // "When will you be in my area?" is the #1 mobile-client question.
+    // Pre-compute this client's zone so Suds answers it instantly instead of
+    // deflecting to the groomer. Non-fatal if zones/address are missing.
+    var clientZoneCtx = ''
+    try {
+      var { data: mobRow } = await supabaseAdmin
+        .from('shop_settings')
+        .select('is_mobile')
+        .eq('groomer_id', groomerId)
+        .maybeSingle()
+      if (mobRow && mobRow.is_mobile === true) {
+        var { data: meAddrRow } = await supabaseAdmin
+          .from('clients')
+          .select('address')
+          .eq('id', clientId)
+          .maybeSingle()
+        var ctxAddr = (meAddrRow && meAddrRow.address) ? String(meAddrRow.address) : ''
+        // ZIP = LAST 5-digit group (street numbers can be 5 digits too)
+        var ctxZips = ctxAddr.match(/\b(\d{5})(?:-\d{4})?\b/g)
+        var ctxZip = ctxZips && ctxZips.length > 0 ? ctxZips[ctxZips.length - 1].slice(0, 5) : null
+        var { data: ctxZones } = await supabaseAdmin
+          .from('zones')
+          .select('name, days_of_week, zips')
+          .eq('groomer_id', groomerId)
+        var CTX_DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+        var ctxZone: any = null
+        if (ctxZip) {
+          ctxZone = (ctxZones || []).find(function (z: any) {
+            return Array.isArray(z.zips) && z.zips.indexOf(ctxZip) !== -1
+          }) || null
+        }
+        if (ctxZone && Array.isArray(ctxZone.days_of_week) && ctxZone.days_of_week.length > 0) {
+          var ctxDays = ctxZone.days_of_week.map(function (d: number) { return CTX_DOW[d] }).filter(Boolean).join(' and ')
+          clientZoneCtx = 'MOBILE AREA INFO: This is a MOBILE grooming shop. This client\'s neighborhood is in the groomer\'s "' + ctxZone.name + '" service area, which the groomer typically runs on ' + ctxDays + '. If they ask "when will you be in my area" / "when do you come near me": tell them ' + ctxDays + ' directly, then offer to find openings on those days (call client_find_next_open_slots and lead with zone_day=true slots). Do NOT deflect this question to the groomer — you have the answer.'
+        } else if (ctxZip) {
+          clientZoneCtx = 'MOBILE AREA INFO: This is a MOBILE grooming shop, but this client\'s zip (' + ctxZip + ') isn\'t mapped to a service area yet. If they ask when the groomer is in their area: call client_find_next_open_slots and lead with slots that have a small miles_from_nearest_stop — those are days the groomer is already nearby. Only suggest messaging the groomer if nothing useful comes back.'
+        }
+        // Full area-day list — so "next time you're in Conroe?" works even
+        // when the named area isn't the client's own zone (booking for a
+        // relative, second home, etc.). Names + days only.
+        var ctxAllZoneLines = (ctxZones || [])
+          .filter(function (z: any) { return Array.isArray(z.days_of_week) && z.days_of_week.length > 0 })
+          .map(function (z: any) {
+            var zZips = (Array.isArray(z.zips) && z.zips.length > 0) ? ' — zips ' + z.zips.join(', ') : ''
+            return z.name + ' (' + z.days_of_week.map(function (d: number) { return CTX_DOW[d] }).filter(Boolean).join('/') + ')' + zZips
+          })
+        if (ctxAllZoneLines.length > 0) {
+          clientZoneCtx = (clientZoneCtx ? clientZoneCtx + '\n' : '') +
+            'ALL SERVICE AREAS (days + zips): ' + ctxAllZoneLines.join(' | ') + '. ' +
+            'The ZIP is what matters — area names are just labels. If the client asks about a named area OR a specific zip ("do you come to 77433?"), match it above and answer with those days, then offer openings on the next of those days. If their zip isn\'t listed, say you\'ll check with the groomer about adding their area — don\'t guess days. The address used at booking decides the final area.'
+        }
+      }
+    } catch (zCtxErr) {
+      console.warn('[client-chat] zone context failed (non-fatal):', zCtxErr)
+    }
+
     // ===========================================================
     // PRE-CHECK: Evaluate each pet against booking rules BEFORE
     // chat starts, so Claude can refuse blocked pets immediately
@@ -2381,6 +2530,7 @@ Deno.serve(async function(req) {
     var contextParts: string[] = []
     contextParts.push('CLIENT: ' + clientRow.first_name + ' ' + clientRow.last_name)
     contextParts.push('SHOP: ' + shopName)
+    if (clientZoneCtx) contextParts.push(clientZoneCtx)
     contextParts.push('TODAY: ' + todayLabel + ' (date: ' + todayStr + ', Central Time)')
     contextParts.push('')
     contextParts.push('=== DATE REFERENCE (USE THIS EXACTLY — DO NOT GUESS DATES) ===')
@@ -2566,6 +2716,7 @@ Deno.serve(async function(req) {
       'HOW CLIENTS ACTUALLY SPEAK (parse loosely, react warmly):',
       '- Clients are casual, often grammatically loose. Don\'t make them feel dumb. Translate their words into tool params:',
       '  • "when is your next availability" / "what do you have open" / "got anything soon" / "any openings" → call client_find_next_open_slots immediately. They want options, not 20 questions.',
+      '  • "when will you be in my area" / "when are you near me" / "when do you come to my neighborhood" / "how do I know when the groomer is in my area" → THIS IS A BOOKING QUESTION YOU CAN ANSWER. Check MOBILE AREA INFO in context: answer with their area days if listed, then call client_find_next_open_slots and offer the zone_day=true (or smallest miles_from_nearest_stop) slots first — e.g. "I\'m usually in your area Tuesdays and Thursdays! I\'ve got next Tuesday at 10am or Thursday at 1pm open — want one?" NEVER deflect this question to the groomer or the Messages tab.',
       '  • "can i book for [pet name]" / "appt for shoes" / "I need to book Bella" → check MY PETS for that name (case-insensitive, partial match OK). If it matches, proceed. If multiple pets match, ask which.',
       '  • "I can only do after 4pm" / "after work" / "evenings" → pass earliest_start_hour=16 (or 17 for "after work")',
       '  • "I can only do mornings" / "before noon" / "early" → pass latest_start_hour=11 or prefer_morning=true',

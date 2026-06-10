@@ -590,6 +590,19 @@ var toolDefinitions = [
     },
   },
   {
+    name: 'check_client_route_distance',
+    description: 'MOBILE GROOMING — check how far a client is from the already-booked stops on each upcoming day, plus whether each day is their service-zone "area day". Use when deciding WHICH DAY to book/suggest for a mobile visit or pickup so the route stays tight (less driving, less gas). Returns per-day: number of booked stops, straight-line miles from this client to the nearest stop, and zone_day true/false. Prefer days with small miles or zone_day=true. Days with zero stops are open days — fine for starting a new area.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'The client to measure distances for' },
+        start_date: { type: 'string', description: 'OPTIONAL — first date to check, YYYY-MM-DD. Defaults to today.' },
+        days_ahead: { type: 'number', description: 'OPTIONAL — how many days to check (default 14, max 30)' },
+      },
+      required: ['client_id'],
+    },
+  },
+  {
     name: 'check_boarding_availability',
     description: 'Check which kennels are free for a date range. ALWAYS call this BEFORE create_boarding_reservation when the owner wants to book a boarding stay. Returns available kennels and occupied kennels. If kennel_id is passed, returns just yes/no for that specific kennel.',
     input_schema: {
@@ -2610,6 +2623,107 @@ async function executeTool(toolName, toolInput, groomerId, supabaseAdmin) {
         return { success: true }
       }
 
+      case 'check_client_route_distance': {
+        if (!toolInput.client_id) return { success: false, error: 'client_id required' }
+        // Straight-line miles between two coords (haversine). Free — no Maps API.
+        var hvMiles = function (lat1: number, lng1: number, lat2: number, lng2: number): number {
+          var toRad = function (x: number) { return x * Math.PI / 180 }
+          var R = 3958.8
+          var dLat = toRad(lat2 - lat1)
+          var dLng = toRad(lng2 - lng1)
+          var aa = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2)
+          return R * 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa))
+        }
+
+        var { data: rdClient } = await supabaseAdmin
+          .from('clients')
+          .select('first_name, last_name, address, latitude, longitude')
+          .eq('id', toolInput.client_id)
+          .eq('groomer_id', groomerId)
+          .maybeSingle()
+        if (!rdClient) return { success: false, error: 'Client not found' }
+        var rdLat = rdClient.latitude != null ? parseFloat(rdClient.latitude) : null
+        var rdLng = rdClient.longitude != null ? parseFloat(rdClient.longitude) : null
+        if (rdLat == null || rdLng == null) {
+          return {
+            success: false,
+            error: 'This client has no map coordinates yet (address not geocoded). Distances unavailable — fall back to matching their ZIP to a service zone from the SERVICE ZONES context instead.',
+          }
+        }
+
+        // Date range
+        var rdStart = (toolInput.start_date && /^\d{4}-\d{2}-\d{2}$/.test(toolInput.start_date))
+          ? toolInput.start_date
+          : new Date().toISOString().slice(0, 10)
+        var rdDays = Math.max(1, Math.min(30, parseInt(toolInput.days_ahead, 10) || 14))
+        var rdEndObj = new Date(rdStart + 'T12:00:00')
+        rdEndObj.setDate(rdEndObj.getDate() + rdDays - 1)
+        var rdEnd = rdEndObj.toISOString().slice(0, 10)
+
+        // Zone match — ZIP is the LAST 5-digit group (street numbers can be 5 digits)
+        var rdZone: any = null
+        var rdAddr = rdClient.address ? String(rdClient.address) : ''
+        var rdZips = rdAddr.match(/\b(\d{5})(?:-\d{4})?\b/g)
+        var rdZip = rdZips && rdZips.length > 0 ? rdZips[rdZips.length - 1].slice(0, 5) : null
+        if (rdZip) {
+          var { data: rdZoneRows } = await supabaseAdmin
+            .from('zones')
+            .select('name, days_of_week, zips')
+            .eq('groomer_id', groomerId)
+          rdZone = (rdZoneRows || []).find(function (z: any) {
+            return Array.isArray(z.zips) && z.zips.indexOf(rdZip) !== -1
+          }) || null
+        }
+        var rdZoneDays: number[] = (rdZone && Array.isArray(rdZone.days_of_week)) ? rdZone.days_of_week : []
+
+        // Booked stops per day (with cached coords)
+        var { data: rdAppts } = await supabaseAdmin
+          .from('appointments')
+          .select('appointment_date, clients:client_id(latitude, longitude)')
+          .eq('groomer_id', groomerId)
+          .gte('appointment_date', rdStart)
+          .lte('appointment_date', rdEnd)
+          .neq('status', 'cancelled')
+        var rdStopsByDate: Record<string, Array<{ lat: number, lng: number }>> = {}
+        for (var ra of (rdAppts || [])) {
+          var rac: any = (ra as any).clients
+          if (!rac || rac.latitude == null || rac.longitude == null) continue
+          if (!rdStopsByDate[ra.appointment_date]) rdStopsByDate[ra.appointment_date] = []
+          rdStopsByDate[ra.appointment_date].push({ lat: parseFloat(rac.latitude), lng: parseFloat(rac.longitude) })
+        }
+
+        // Per-day report
+        var rdDaysOut: any[] = []
+        var rdCursor = new Date(rdStart + 'T12:00:00')
+        var RD_DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+        for (var rdI = 0; rdI < rdDays; rdI++) {
+          var rdDateISO = rdCursor.toISOString().slice(0, 10)
+          var rdStops = rdStopsByDate[rdDateISO] || []
+          var rdBest: number | null = null
+          for (var rdS of rdStops) {
+            var rdMi = hvMiles(rdLat, rdLng, rdS.lat, rdS.lng)
+            if (rdBest == null || rdMi < rdBest) rdBest = rdMi
+          }
+          rdDaysOut.push({
+            date: rdDateISO,
+            weekday: RD_DOW[rdCursor.getDay()],
+            booked_stops: rdStops.length,
+            miles_from_nearest_stop: rdBest != null ? Math.round(rdBest * 10) / 10 : null,
+            zone_day: rdZoneDays.length > 0 ? rdZoneDays.indexOf(rdCursor.getDay()) !== -1 : null,
+          })
+          rdCursor.setDate(rdCursor.getDate() + 1)
+        }
+
+        return {
+          success: true,
+          client: (rdClient.first_name || '') + ' ' + (rdClient.last_name || ''),
+          client_zip: rdZip,
+          zone: rdZone ? { name: rdZone.name, days: rdZoneDays.map(function (d: number) { return RD_DOW[d] }) } : null,
+          days: rdDaysOut,
+          note: 'Distances are straight-line miles to the NEAREST booked stop that day (drive distance is a bit longer). Prefer days with small miles or zone_day=true. booked_stops=0 means an open day — fine for starting a fresh area. Still check actual time availability before promising a slot.',
+        }
+      }
+
       case 'list_staff_shifts': {
         if (!toolInput.start_date || !toolInput.end_date) {
           return { success: false, error: 'start_date and end_date required' }
@@ -3544,6 +3658,36 @@ Deno.serve(async (req) => {
       // No shop_settings row — that's fine, groomer Suds will show defaults
     }
 
+    // ===== Service Zones (mobile groomers) =====
+    // Pull the shop's zones so Suds can steer bookings to "area days" — e.g.
+    // a client whose zip is in the "North side" zone (Tue/Thu) should be
+    // offered Tuesday or Thursday first, keeping the mobile route tight.
+    var zonesContextText = ''
+    try {
+      var { data: zoneCtxRows } = await supabaseAdmin
+        .from('zones')
+        .select('name, days_of_week, zips')
+        .eq('groomer_id', body.groomer_id)
+      if (zoneCtxRows && zoneCtxRows.length > 0) {
+        var DOW_CTX = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+        var zoneLines = zoneCtxRows.map(function (z: any) {
+          var dayTxt = (Array.isArray(z.days_of_week) && z.days_of_week.length > 0)
+            ? z.days_of_week.map(function (d: number) { return DOW_CTX[d] }).filter(Boolean).join('/')
+            : 'no days set'
+          var zipTxt = (Array.isArray(z.zips) && z.zips.length > 0) ? z.zips.join(', ') : 'no zips'
+          return '  • "' + z.name + '" — runs ' + dayTxt + ' — zips: ' + zipTxt
+        })
+        zonesContextText = 'SERVICE ZONES (mobile area days — IMPORTANT for booking):\n' +
+          zoneLines.join('\n') + '\n' +
+          '- When booking or suggesting days for a client: match the ZIP at the END of their address to a zone above and STRONGLY prefer that zone\'s days — that\'s when the groomer is already working that area (less driving, tighter route).\n' +
+          '- Only offer other days if the zone days don\'t work for the client, and mention the zone day was preferred (e.g. "I\'m normally in your area Tuesdays").\n' +
+          '- Careful: a street number can be 5 digits — the ZIP is the LAST 5-digit number in the address, not the first.\n' +
+          '- For REAL distances (not just zip match): call check_client_route_distance with the client_id — it returns, for each upcoming day, how many stops are booked and how many miles this client is from the nearest one, plus zone_day true/false. Use it whenever the owner asks "when should I fit them in" / "what day works best" for a mobile client.'
+      }
+    } catch (e) {
+      // zones table missing or empty — fine, skip zone steering
+    }
+
     // ===== Pull AI Personalization Settings =====
     var personalization = null
     try {
@@ -3759,6 +3903,9 @@ Deno.serve(async (req) => {
     } else {
       contextParts.push('No shop settings yet. Use update_shop_settings when the owner wants to configure puppy age thresholds, hours, or slot size.')
     }
+
+    // ─── Service zones (mobile area days) — steer bookings to tight routes ──
+    if (zonesContextText) contextParts.push(zonesContextText)
 
     // ==========================================
     // GUARDRAILS — BUSINESS MODE vs ADMIN MODE

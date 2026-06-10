@@ -298,6 +298,29 @@ serve(async (req) => {
 
     const { data: blocks } = await blockQuery
 
+    // ─── 7b. Staff shift schedule (multi-groomer shops) ──────────────────────
+    // If the picked groomer has shifts in staff_schedules for this range, then
+    // ONLY days with a shift are workable (no shift = day off), and slots are
+    // narrowed to the shift window. Solo shops that don't use the Staff
+    // Schedule page have zero rows here → falls through to office hours only.
+    let staffShiftsByDate: Record<string, Array<{ start: string; end: string }>> | null = null
+    if (preferred_staff_id) {
+      const { data: shiftRows } = await adminClient
+        .from("staff_schedules")
+        .select("shift_date, start_time, end_time")
+        .eq("groomer_id", groomerId)
+        .eq("staff_id", preferred_staff_id)
+        .gte("shift_date", startDate)
+        .lte("shift_date", endDate)
+      if (shiftRows && shiftRows.length > 0) {
+        staffShiftsByDate = {}
+        for (const r of shiftRows) {
+          if (!staffShiftsByDate[r.shift_date]) staffShiftsByDate[r.shift_date] = []
+          staffShiftsByDate[r.shift_date].push({ start: r.start_time, end: r.end_time })
+        }
+      }
+    }
+
     // ─── 8. Compute free slots for each day in range ─────────────────────────
     const allFreeSlots: Array<{ date: string; start: string; end: string; durationMinutes: number; dayLabel: string }> = []
 
@@ -319,6 +342,23 @@ serve(async (req) => {
         if (!cfg || cfg.is_open === false) continue
         if (cfg.open) dayOpen = cfg.open
         if (cfg.close) dayClose = cfg.close
+      }
+
+      // Staff shifts (multi-groomer shops): no shift this date = groomer's day
+      // off → skip entirely. With a shift, narrow hours to the shift window
+      // (intersected with shop hours). Time strings compare lexicographically
+      // fine for HH:MM / HH:MM:SS.
+      if (staffShiftsByDate) {
+        const shifts = staffShiftsByDate[dateStr]
+        if (!shifts || shifts.length === 0) continue
+        let shiftStart = "23:59"
+        let shiftEnd = "00:00"
+        for (const sh of shifts) {
+          if (sh.start && sh.start < shiftStart) shiftStart = sh.start
+          if (sh.end && sh.end > shiftEnd) shiftEnd = sh.end
+        }
+        if (shiftStart > dayOpen) dayOpen = shiftStart
+        if (shiftEnd < dayClose) dayClose = shiftEnd
       }
 
       // Collect busy ranges for this day
