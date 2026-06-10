@@ -117,7 +117,10 @@ export default function SMSBalanceWidget() {
   // Reset date — first day of next month
   var resetLabel = '—'
   if (balance && balance.monthly_period_start) {
-    var ps = new Date(balance.monthly_period_start)
+    // 'T00:00:00' forces LOCAL-time parsing — bare 'YYYY-MM-DD' parses as UTC
+    // midnight, which in US timezones is the previous evening, making the
+    // reset label show a month early ("Resets Jun 1" in mid-June).
+    var ps = new Date(balance.monthly_period_start + 'T00:00:00')
     var nextMonth = new Date(ps.getFullYear(), ps.getMonth() + 1, 1)
     var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
     resetLabel = months[nextMonth.getMonth()] + ' ' + nextMonth.getDate()
