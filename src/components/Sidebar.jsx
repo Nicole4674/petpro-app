@@ -313,6 +313,15 @@ export default function Sidebar({ onToggle }) {
                 🎁 Promos
               </div>
               )}
+              {/* Punch cards — prepaid packages, auto-suggest at checkout */}
+              {canAccess('clients.view_list') && (
+              <div
+                className={'sidebar-subitem' + (isActive('/punch-cards') ? ' sidebar-subitem-active' : '')}
+                onClick={function() { goTo('/punch-cards') }}
+              >
+                🎟️ Punch Cards
+              </div>
+              )}
               {canAccess('pricing.view') && (
               <div
                 className={'sidebar-subitem' + (isActive('/pricing') ? ' sidebar-subitem-active' : '')}

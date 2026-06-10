@@ -55,6 +55,7 @@ import StaffMe from './pages/StaffMe'
 import Route2 from './pages/Route'  // imported as Route2 to avoid clash with react-router-dom Route
 import Zones from './pages/Zones'
 import Promos from './pages/Promos'
+import PunchCards from './pages/PunchCards'
 import PetProAI from './pages/PetProAI'
 import Expenses from './pages/Expenses'
 import Onboarding from './pages/Onboarding'
@@ -228,6 +229,8 @@ function App() {
                     <Route path="/zones" element={gate(session, <Zones />)} />
                     {/* Promos & referral links — clients share, friends sign up */}
                     <Route path="/promos" element={gate(session, <Promos />)} />
+                    {/* Punch cards — prepaid service packages */}
+                    <Route path="/punch-cards" element={gate(session, <PunchCards />)} />
                     {/* PetPro AI — full conversational chat with lifted guardrails */}
                     <Route path="/petpro-ai" element={gate(session, <PetProAI />)} />
                     {/* Expenses — track tax-deductible business expenses */}

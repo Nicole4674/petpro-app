@@ -462,6 +462,13 @@ export default function Calendar() {
     const [discountReason, setDiscountReason] = useState('')
     const [paymentNotes, setPaymentNotes] = useState('')
     const [recordingPayment, setRecordingPayment] = useState(false)
+    // ─── 🎟️ Punch cards at checkout ────────────────────────────────────
+    // paymentPunchCards = this client's active cards that cover a service on
+    // THIS appointment ("Use punch 3 of 6?"). appliedPunch = the one the
+    // groomer tapped — its service price gets added to the discount, and the
+    // punch is decremented when checkout completes.
+    const [paymentPunchCards, setPaymentPunchCards] = useState([])
+    const [appliedPunch, setAppliedPunch] = useState(null) // { cardId, cardName, serviceName, amount, remaining, total }
     // ─── Retail items attached to the appointment (Phase 4 v2) ────────────
     // Persist to DB as a "parked" sale linked via appointment_id. Items get
     // added at drop-off / mid-appointment and roll into the Take Payment bill
@@ -2470,6 +2477,42 @@ export default function Calendar() {
         await openPaymentPopup(appt)
     }
 
+    // ─── 🎟️ Punch redemption ────────────────────────────────────────────
+    // Called after a successful checkout when the groomer applied a punch:
+    // decrements the card (flips to used_up at 0) + writes a use record.
+    // Best-effort — never blocks the checkout that already happened.
+    const redeemAppliedPunch = async (apptId) => {
+        if (!appliedPunch) return
+        try {
+            const { data: { user } } = await supabase.auth.getUser()
+            if (!user) return
+            const { data: cardRow } = await supabase
+                .from('punch_cards')
+                .select('punches_remaining, total_punches')
+                .eq('id', appliedPunch.cardId)
+                .maybeSingle()
+            if (!cardRow || cardRow.punches_remaining <= 0) { setAppliedPunch(null); return }
+            const newRemaining = cardRow.punches_remaining - 1
+            await supabase
+                .from('punch_cards')
+                .update({
+                    punches_remaining: newRemaining,
+                    status: newRemaining <= 0 ? 'used_up' : 'active',
+                })
+                .eq('id', appliedPunch.cardId)
+            await supabase.from('punch_card_uses').insert({
+                punch_card_id: appliedPunch.cardId,
+                appointment_id: apptId || null,
+                groomer_id: user.id,
+                service_name: appliedPunch.serviceName || null,
+            })
+        } catch (e) {
+            console.warn('[punch-cards] redeem failed (non-fatal):', e)
+        } finally {
+            setAppliedPunch(null)
+        }
+    }
+
     // ─── ⭐ Review Booster ───────────────────────────────────────────────
     // Fire-and-forget: ask the client for a Google review after checkout.
     // The send-review-request edge function does ALL the deciding (booster
@@ -2520,6 +2563,52 @@ export default function Calendar() {
             .order('created_at', { ascending: true })
 
         setExistingPayments(payments || [])
+
+        // ─── 🎟️ Punch cards — does this client own an active card that
+        // covers a service on THIS appointment? If so, the popup suggests
+        // "Use punch X of Y". Best-effort: table missing → section hides.
+        setAppliedPunch(null)
+        setPaymentPunchCards([])
+        try {
+            // Collect this appointment's services (+ their prices for the discount)
+            const apptServices = []
+            if (appt.appointment_pets && appt.appointment_pets.length > 0) {
+                appt.appointment_pets.forEach(function (ap) {
+                    if (!ap.service_id) return
+                    apptServices.push({
+                        id: ap.service_id,
+                        name: (ap.services && ap.services.service_name) || 'service',
+                        price: parseFloat(ap.quoted_price != null ? ap.quoted_price : ((ap.services && ap.services.price) || 0)) || 0,
+                    })
+                })
+            } else if (appt.service_id) {
+                apptServices.push({
+                    id: appt.service_id,
+                    name: (appt.services && appt.services.service_name) || 'service',
+                    price: parseFloat(appt.quoted_price != null ? appt.quoted_price : ((appt.services && appt.services.price) || 0)) || 0,
+                })
+            }
+            if (apptServices.length > 0 && appt.client_id) {
+                const todayIso = new Date().toISOString().slice(0, 10)
+                const { data: cards } = await supabase
+                    .from('punch_cards')
+                    .select('id, name, service_ids, punches_remaining, total_punches, expires_at, status')
+                    .eq('client_id', appt.client_id)
+                    .eq('status', 'active')
+                    .gt('punches_remaining', 0)
+                const usable = []
+                ;(cards || []).forEach(function (card) {
+                    if (card.expires_at && card.expires_at < todayIso) return
+                    const match = apptServices.find(function (s) {
+                        return (card.service_ids || []).indexOf(s.id) !== -1
+                    })
+                    if (match) usable.push({ card: card, match: match })
+                })
+                setPaymentPunchCards(usable)
+            }
+        } catch (punchErr) {
+            console.warn('[punch-cards] load at checkout skipped:', punchErr)
+        }
 
         // ─── Load attached retail (Phase 4 v2) ───────────────────────
         // In case Take Payment is opened without first opening the
@@ -2729,6 +2818,8 @@ export default function Calendar() {
                 checked_out_by: user.id,
             }).eq('id', paymentAppt.id)
 
+            // 🎟️ Punch card — decrement if one was applied
+            await redeemAppliedPunch(paymentAppt.id)
             // ⭐ Review Booster — fire-and-forget after successful checkout
             fireReviewRequest(paymentAppt.id)
 
@@ -2894,6 +2985,8 @@ export default function Calendar() {
             checked_out_by: user.id
         }).eq('id', paymentAppt.id)
 
+        // 🎟️ Punch card — decrement if one was applied
+        await redeemAppliedPunch(paymentAppt.id)
         // ⭐ Review Booster — fire-and-forget after successful checkout
         fireReviewRequest(paymentAppt.id)
 
@@ -2984,6 +3077,8 @@ export default function Calendar() {
             checked_out_by: user.id
         }).eq('id', paymentAppt.id)
 
+        // 🎟️ Punch card — decrement if one was applied
+        await redeemAppliedPunch(paymentAppt.id)
         // ⭐ Review Booster — fire-and-forget after successful checkout
         fireReviewRequest(paymentAppt.id)
 
@@ -7137,6 +7232,70 @@ export default function Calendar() {
                                             {retailItems.length > 0 ? '🛒 Edit Retail Items (' + retailItems.length + ')' : '🛒 + Add Retail to Bill'}
                                         </button>
                                     </div>
+
+                                    {/* 🎟️ Punch card suggestion — one tap covers the service */}
+                                    {paymentPunchCards.length > 0 && paymentPunchCards.map(function (u) {
+                                        const isApplied = appliedPunch && appliedPunch.cardId === u.card.id
+                                        return (
+                                            <div key={u.card.id} style={{
+                                                margin: '8px 0',
+                                                padding: '10px 12px',
+                                                background: isApplied ? '#dcfce7' : '#f0fdf4',
+                                                border: '1px solid ' + (isApplied ? '#16a34a' : '#86efac'),
+                                                borderRadius: '10px',
+                                            }}>
+                                                <div style={{ fontSize: '13px', fontWeight: 700, color: '#166534' }}>
+                                                    🎟️ {u.card.name} — {u.card.punches_remaining} of {u.card.total_punches} punches left
+                                                </div>
+                                                <div style={{ fontSize: '12px', color: '#15803d', marginTop: '2px' }}>
+                                                    Covers {u.match.name} (−${u.match.price.toFixed(2)})
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    disabled={recordingPayment || (appliedPunch && !isApplied)}
+                                                    onClick={function () {
+                                                        if (isApplied) {
+                                                            // Un-apply: remove the punch amount from the discount
+                                                            const cur = parseFloat(discountAmount || 0)
+                                                            const next = Math.max(0, cur - appliedPunch.amount)
+                                                            setDiscountAmount(next > 0 ? next.toFixed(2) : '')
+                                                            if ((discountReason || '').indexOf('Punch card') !== -1) setDiscountReason('')
+                                                            setAppliedPunch(null)
+                                                        } else {
+                                                            // Apply: punch covers this service's price as a discount
+                                                            const cur = parseFloat(discountAmount || 0)
+                                                            setDiscountAmount((cur + u.match.price).toFixed(2))
+                                                            setDiscountReason('🎟️ Punch card: ' + u.card.name)
+                                                            setAppliedPunch({
+                                                                cardId: u.card.id,
+                                                                cardName: u.card.name,
+                                                                serviceName: u.match.name,
+                                                                amount: u.match.price,
+                                                                remaining: u.card.punches_remaining,
+                                                                total: u.card.total_punches,
+                                                            })
+                                                        }
+                                                    }}
+                                                    style={{
+                                                        marginTop: '8px',
+                                                        width: '100%',
+                                                        padding: '9px 12px',
+                                                        background: isApplied ? '#16a34a' : '#fff',
+                                                        color: isApplied ? '#fff' : '#166534',
+                                                        border: '1px solid #16a34a',
+                                                        borderRadius: '8px',
+                                                        fontWeight: 700,
+                                                        fontSize: '13px',
+                                                        cursor: 'pointer',
+                                                    }}
+                                                >
+                                                    {isApplied
+                                                        ? '✓ Punch applied — ' + (u.card.punches_remaining - 1) + ' will remain (tap to undo)'
+                                                        : 'Use 1 punch for ' + u.match.name}
+                                                </button>
+                                            </div>
+                                        )
+                                    })}
 
                                     {/* Discount field — editable */}
                                     <div className="payment-receipt-row payment-receipt-discount">
