@@ -25,6 +25,12 @@ import { supabase } from '../lib/supabase'
 //   • client_reference_id passed = the groomer's user ID (for the webhook)
 //   • metadata.pack_size matching the tokens count below
 // =====================================================================
+// Payment Links created in the Stripe dashboard. A deployed webhook (lives in
+// the Supabase dashboard — verified working via the May 3 $1 test purchase,
+// which logged + granted automatically) credits the tokens after payment.
+// DO NOT REPLACE — proven in production. A code-built alternative exists in
+// supabase/functions/create-token-topup-checkout + confirm-token-topup
+// (dormant, not deployed) if this flow ever needs rebuilding.
 const TOPUP_PACKS = [
   { tokens: 250,  priceLabel: '$24.99', label: '250 tokens · $24.99',  paymentLink: 'https://buy.stripe.com/dRm14p5N32CKboj6hB7ok05' },
   { tokens: 500,  priceLabel: '$44.99', label: '500 tokens · $44.99 ⭐ best value', paymentLink: 'https://buy.stripe.com/6oUdRb5N3b9g4ZVbBV7ok06' },
