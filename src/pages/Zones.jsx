@@ -2,7 +2,161 @@
 // A zone is a named area (by ZIP) served on certain days of the week.
 // Booking hooks (Phase 2b) use these to batch clients geographically.
 import { useState, useEffect } from 'react'
+import { MapContainer, TileLayer, Circle, Tooltip, useMap } from 'react-leaflet'
+import 'leaflet/dist/leaflet.css'
 import { supabase } from '../lib/supabase'
+
+// ─────────────────────────────────────────────────────────────────────
+// 🗺️ Zone Map — SEE your coverage instead of reading zip lists.
+// Each zip geocodes to its center point (Google Geocoding REST — same API
+// RouteMap uses — with results cached in localStorage forever, so each zip
+// costs ONE geocode call ever). Rendered as colored Leaflet circles in the
+// zone's color. Read-only v1 — drawing tools maybe later.
+// ─────────────────────────────────────────────────────────────────────
+var ZIP_CACHE_KEY = 'petpro_zip_coords_v1'
+
+function loadZipCache() {
+  try { return JSON.parse(localStorage.getItem(ZIP_CACHE_KEY) || '{}') } catch (e) { return {} }
+}
+
+function saveZipCache(cache) {
+  try { localStorage.setItem(ZIP_CACHE_KEY, JSON.stringify(cache)) } catch (e) { /* full/blocked — fine */ }
+}
+
+// Geocode one US zip → { lat, lng } or null. Google first (reliable),
+// OpenStreetMap Nominatim as the free fallback.
+async function geocodeZip(zip) {
+  var key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
+  if (key) {
+    try {
+      var url = 'https://maps.googleapis.com/maps/api/geocode/json' +
+        '?components=postal_code:' + encodeURIComponent(zip) + '|country:US' +
+        '&key=' + encodeURIComponent(key)
+      var res = await fetch(url)
+      var data = await res.json()
+      if (data.status === 'OK' && data.results && data.results[0]) {
+        var loc = data.results[0].geometry.location
+        return { lat: loc.lat, lng: loc.lng }
+      }
+    } catch (e) { /* fall through to Nominatim */ }
+  }
+  try {
+    var nUrl = 'https://nominatim.openstreetmap.org/search?format=json&country=us&postalcode=' +
+      encodeURIComponent(zip) + '&limit=1'
+    var nRes = await fetch(nUrl)
+    var nData = await nRes.json()
+    if (nData && nData[0]) {
+      return { lat: parseFloat(nData[0].lat), lng: parseFloat(nData[0].lon) }
+    }
+  } catch (e) { /* unresolvable zip */ }
+  return null
+}
+
+// Auto-fit the map to show every circle whenever coords change
+function FitToZips({ points }) {
+  var map = useMap()
+  useEffect(function () {
+    if (!points || points.length === 0) return
+    if (points.length === 1) {
+      map.setView([points[0].lat, points[0].lng], 11)
+    } else {
+      map.fitBounds(points.map(function (p) { return [p.lat, p.lng] }), { padding: [30, 30] })
+    }
+  }, [points, map])
+  return null
+}
+
+function ZoneMap({ zones }) {
+  // points = [{ zip, lat, lng, color, zoneName }]
+  var [points, setPoints] = useState([])
+  var [resolving, setResolving] = useState(false)
+
+  useEffect(function () {
+    var cancelled = false
+    ;(async function () {
+      // Build the zip → zone map (first zone wins if a zip is in two zones)
+      var zipMeta = {}
+      ;(zones || []).forEach(function (z) {
+        ;(z.zips || []).forEach(function (zip) {
+          if (!zipMeta[zip]) zipMeta[zip] = { color: z.color || '#7c3aed', zoneName: z.name }
+        })
+      })
+      var zips = Object.keys(zipMeta)
+      if (zips.length === 0) { setPoints([]); return }
+
+      setResolving(true)
+      var cache = loadZipCache()
+      var resolved = []
+      var cacheChanged = false
+      for (var zip of zips) {
+        var coord = cache[zip]
+        if (coord === undefined) {
+          coord = await geocodeZip(zip)
+          cache[zip] = coord   // cache nulls too so bad zips don't re-fetch forever
+          cacheChanged = true
+        }
+        if (coord) {
+          resolved.push({ zip: zip, lat: coord.lat, lng: coord.lng, color: zipMeta[zip].color, zoneName: zipMeta[zip].zoneName })
+        }
+        if (cancelled) return
+      }
+      if (cacheChanged) saveZipCache(cache)
+      if (!cancelled) {
+        setPoints(resolved)
+        setResolving(false)
+      }
+    })()
+    return function () { cancelled = true }
+  }, [zones])
+
+  if ((zones || []).every(function (z) { return !z.zips || z.zips.length === 0 })) return null
+
+  return (
+    <div style={{ marginTop: '14px', marginBottom: '4px' }}>
+      <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', overflow: 'hidden', position: 'relative' }}>
+        <MapContainer
+          center={[39.5, -98.35]}
+          zoom={4}
+          style={{ height: '340px', width: '100%' }}
+          scrollWheelZoom={false}
+        >
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          {points.map(function (p) {
+            return (
+              <Circle
+                key={p.zip}
+                center={[p.lat, p.lng]}
+                radius={4000}
+                pathOptions={{ color: p.color, fillColor: p.color, fillOpacity: 0.25, weight: 2 }}
+              >
+                <Tooltip direction="top" sticky>
+                  <strong>{p.zoneName}</strong> · {p.zip}
+                </Tooltip>
+              </Circle>
+            )
+          })}
+          <FitToZips points={points} />
+        </MapContainer>
+        {resolving && (
+          <div style={{
+            position: 'absolute', top: '10px', right: '10px', zIndex: 1000,
+            background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px',
+            padding: '6px 12px', fontSize: '12px', color: '#6b7280', fontWeight: 600,
+            boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
+          }}>
+            📍 Mapping your zips…
+          </div>
+        )}
+      </div>
+      <div style={{ fontSize: '11.5px', color: '#9ca3af', marginTop: '6px' }}>
+        Each circle is one zip, colored by its zone. Hover a circle to see which zone it belongs to.
+      </div>
+    </div>
+  )
+}
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const COLORS = ['#7c3aed', '#2563eb', '#16a34a', '#dc2626', '#f59e0b', '#ec4899', '#0891b2', '#65a30d']
@@ -109,6 +263,9 @@ export default function Zones() {
         </div>
         <button className="btn-primary" onClick={openNew}>+ Add Zone</button>
       </div>
+
+      {/* 🗺️ Visual coverage map — circles per zip, colored by zone */}
+      {zones.length > 0 && <ZoneMap zones={zones} />}
 
       {zones.length === 0 && !showForm ? (
         <div className="empty-state">

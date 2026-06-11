@@ -118,6 +118,11 @@ serve(async (req) => {
         expires_at: expiresAt,
         status: "active",
         stripe_session_id: sessionId,
+        // Saved so the Connect webhook can auto-pause this card if the
+        // charge gets refunded (charge.refunded → match on payment_intent)
+        stripe_payment_intent_id: typeof session.payment_intent === "string"
+          ? session.payment_intent
+          : (session.payment_intent as any)?.id ?? null,
       })
       .select("id, name, punches_remaining, total_punches")
       .single()

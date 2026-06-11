@@ -65,6 +65,22 @@ both passes, SMS top-ups with never-expire extras).
 
 ---
 
+## 💰 TIER GATING DECISION (Nicole, Jun 11)
+Daycare + Training are gated to **Pro+ ($199) and Growing ($399)** from day
+one (gate at birth — way easier than retrofitting after launch).
+- Basic ($70) + Pro ($129): grooming, mobile, boarding, retail (unchanged)
+- Pro+ ($199) + Growing ($399): everything above PLUS daycare + training
+
+**COMBO FLOWS (the whole point — services chain together):**
+1. Board-and-train: boarding stay + training sessions + daycare package +
+   grooming at the end of the stay
+2. Boarding dog adds daycare days during the stay + bath/groom at pickup
+3. Daycare-package dog gets a bath after daycare
+→ Design requirement: daycare + training must attach to boarding stays and
+  chain into grooming appointments (shared dog, shared invoice/checkout).
+→ Plans page gets updated AFTER the weekend build (daycare/training rows in
+  the comparison table showing — for Basic/Pro, ✓ for Pro+/Growing).
+
 ## 🐶 SATURDAY Jun 13 — Daycare Module
 
 - Rides the boarding rails (~70% reuse: check-in/out, capacity, kennel/run
@@ -73,6 +89,16 @@ both passes, SMS top-ups with never-expire extras).
   capacity model (headcount vs runs), recurring daycare schedules
   (every Mon/Wed/Fri), report cards per daycare day?
 - Sidebar already has the "DAYCARE — SOON" placeholder.
+- **PUNCH CARDS ARE THE DAYCARE PACKAGE MECHANISM** (Nicole, from her old
+  job: "$500 for 2 weeks of daycare — prepay, drop off, reception stamps the
+  card; when low, ASK if they'd like another"). Requirements:
+  1. Punch card types extend to cover daycare days (a punch = one daycare day)
+  2. Daycare CHECK-IN is the stamp — checking the dog in auto-suggests using
+     a punch (same green box pattern as grooming checkout)
+  3. LOW-BALANCE PROMPT at check-in: "Bella has 2 daycare days left — want to
+     offer Maria another card?" — the human upsell moment, surfaced not auto
+  4. Nothing automatic — reception/groomer always confirms the punch + the
+     re-up offer, matching how real front desks work
 
 ## 🎓 SUNDAY Jun 14 — Dog Training Module
 
