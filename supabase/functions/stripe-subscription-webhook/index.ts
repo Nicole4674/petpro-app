@@ -1,6 +1,11 @@
 // =============================================================================
 // stripe-subscription-webhook — Listen for subscription events from Stripe
 // =============================================================================
+// ⚠️ SYNCED WITH THE DEPLOYED VERSION on Jun 11, 2026 (Nicole pasted the
+// dashboard copy; charge.refunded handling was merged in at the same time).
+// If you edit this file, deploy it with:
+//   supabase functions deploy stripe-subscription-webhook
+//
 // Stripe POSTs to this endpoint whenever something happens to a subscription
 // that PetPro didn't directly initiate — auto-renewals, failed payments,
 // cancellations made in Stripe Dashboard, etc.
@@ -10,27 +15,34 @@
 //
 // Because subscriptions live on the GROOMER's connected Stripe account
 // (Connect direct charges), we configure this as a CONNECT webhook in Stripe
-// Dashboard. Events come in with an `account` field telling us which
-// connected account they came from.
+// Dashboard ("PetPro Subscription Events" destination). Events come in with
+// an `account` field telling us which connected account they came from.
 //
 // Events handled:
 //   invoice.payment_succeeded      → renewal worked, roll period dates forward
 //   invoice.payment_failed         → mark sub as past_due
 //   customer.subscription.updated  → sync status + period dates + cancel flag
 //   customer.subscription.deleted  → mark sub as canceled
+//   charge.refunded                → 🎟️ punch card purchase refunded →
+//                                    auto-pause the card (added Jun 11 2026)
 //
 // Required env vars:
-//   STRIPE_SECRET_KEY          — your platform Stripe key
-//   STRIPE_SUBSCRIPTION_WEBHOOK_SECRET      — the signing secret from Stripe Dashboard for THIS endpoint
+//   STRIPE_SECRET_KEY — your platform Stripe key
+//   STRIPE_SUBSCRIPTION_WEBHOOK_SECRET — signing secret for THIS endpoint
+//     (falls back to STRIPE_WEBHOOK_SECRET, which the previously-deployed
+//      version used. Each Stripe endpoint has its OWN whsec_, and the
+//      platform stripe-webhook also reads STRIPE_WEBHOOK_SECRET — so setting
+//      the dedicated var avoids the two endpoints fighting over one secret.)
 //   SUPABASE_URL               — auto
 //   SUPABASE_SERVICE_ROLE_KEY  — auto
 //
 // One-time setup (after deploying):
-//   1. Stripe Dashboard → Developers → Webhooks → "Add endpoint"
+//   1. Stripe Dashboard → Developers → Webhooks → "PetPro Subscription Events"
 //   2. Endpoint URL: https://<project-ref>.supabase.co/functions/v1/stripe-subscription-webhook
 //   3. Listen to: "Events on Connected accounts" (CRITICAL — not "Your account")
-//   4. Pick events: the 4 listed above
-//   5. Copy "Signing secret" → save as STRIPE_SUBSCRIPTION_WEBHOOK_SECRET in Supabase
+//   4. Events: the 4 subscription events above + charge.refunded
+//   5. Reveal this endpoint's "Signing secret" (whsec_...) → save it in
+//      Supabase → Edge Functions → Secrets as STRIPE_SUBSCRIPTION_WEBHOOK_SECRET
 // =============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
@@ -46,9 +58,12 @@ serve(async (req) => {
   }
 
   const stripeKey = Deno.env.get("STRIPE_SECRET_KEY")
-  const webhookSecret = Deno.env.get("STRIPE_SUBSCRIPTION_WEBHOOK_SECRET")
+  // Dedicated secret for this endpoint, falling back to the shared var the
+  // previously-deployed version used (preserves current behavior exactly).
+  const webhookSecret = Deno.env.get("STRIPE_SUBSCRIPTION_WEBHOOK_SECRET") ||
+    Deno.env.get("STRIPE_WEBHOOK_SECRET")
   if (!stripeKey || !webhookSecret) {
-    console.error("[sub-webhook] Missing STRIPE_SECRET_KEY or STRIPE_SUBSCRIPTION_WEBHOOK_SECRET")
+    console.error("[sub-webhook] Missing STRIPE_SECRET_KEY or webhook secret")
     return new Response("Server not configured", { status: 500 })
   }
 
@@ -134,6 +149,40 @@ serve(async (req) => {
           })
           .eq("stripe_subscription_id", sub.id)
         console.log(`[sub-webhook] Canceled ${sub.id}`)
+        break
+      }
+
+      case "charge.refunded": {
+        // 🎟️ Punch card refund → auto-pause the card so refunded punches
+        // can't keep being redeemed at checkout. Matched on the payment
+        // intent saved by confirm-punch-card at purchase time. Most refunds
+        // are regular groom payments with no matching card — those fall
+        // through silently. In-person card sales (cash/Zelle) have no Stripe
+        // payment, so their refunds stay manual (Pause button on the
+        // Punch Cards page).
+        const charge = event.data.object as Stripe.Charge
+        const paymentIntentId = typeof charge.payment_intent === "string"
+          ? charge.payment_intent
+          : (charge.payment_intent as any)?.id ?? null
+        if (!paymentIntentId) break
+
+        const { data: refundedCards, error: refundErr } = await adminClient
+          .from("punch_cards")
+          .update({ status: "refunded" })
+          .eq("stripe_payment_intent_id", paymentIntentId)
+          .neq("status", "refunded")
+          .select("id, name, client_id, punches_remaining")
+        if (refundErr) {
+          console.error("[sub-webhook] punch card refund-pause failed:", refundErr)
+          break
+        }
+        if (refundedCards && refundedCards.length > 0) {
+          refundedCards.forEach((c: any) => {
+            console.log(`[sub-webhook] 🎟️ Punch card ${c.id} ("${c.name}") auto-paused after refund — ${c.punches_remaining} unused punches voided`)
+          })
+        } else {
+          console.log(`[sub-webhook] charge.refunded ${paymentIntentId} matched no punch cards (normal for groom-payment refunds)`)
+        }
         break
       }
 

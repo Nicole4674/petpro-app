@@ -13,21 +13,21 @@
 //   • capability.updated — fires when a specific capability flips
 //     (card_payments, transfers). Same DB updates — we stay redundant
 //     so we never miss a state change.
-//   • charge.refunded — punch card purchase refunded → auto-pause the card
-//     (status 'refunded') so the client can't keep using free punches.
-//     Matched via punch_cards.stripe_payment_intent_id. Non-punch refunds
-//     (regular groom payments) simply don't match and are ignored.
+// ⚠️ NOTE (Jun 11 2026): per the live Stripe dashboard, NO endpoint currently
+// points at this function — Connect onboarding status syncs via the
+// stripe-connect-refresh polling flow instead, and Connect events go to
+// stripe-subscription-webhook. Punch card refund handling (charge.refunded)
+// lives in stripe-subscription-webhook, the function that actually receives
+// Connected-account events.
 //
-// Setup (one-time, in Stripe Dashboard):
+// Setup (one-time, in Stripe Dashboard — only if this function ever gets wired):
 //   1. Stripe Sandbox → Developers → Webhooks
 //   2. Click "+ Add an event destination" → "Connected accounts"
 //      (NOT the regular "Your account" tab — Connect events come from
 //      a separate destination type)
 //   3. Endpoint URL:
 //      https://<your-project>.supabase.co/functions/v1/stripe-connect-webhook
-//   4. Events to send: account.updated, capability.updated, charge.refunded
-//      (charge.refunded added Jun 11 2026 — if it's missing from the
-//      endpoint's event list, edit the endpoint and add it)
+//   4. Events to send: account.updated, capability.updated
 //   5. After saving, Stripe shows a "Signing secret" (starts with whsec_).
 //      Copy it.
 //   6. In Supabase → Edge Functions → Secrets, add a new secret:
@@ -168,34 +168,6 @@ serve(async (req: Request) => {
           console.log(`[stripe-connect-webhook] Capability update synced for ${accountId}`)
         } catch (fetchErr) {
           console.error('[stripe-connect-webhook] Capability sync failed:', fetchErr)
-        }
-        break
-      }
-
-      case 'charge.refunded': {
-        // 🎟️ Punch card refund → auto-pause the card so refunded punches
-        // can't keep being redeemed. Most refunds are regular groom payments
-        // with no matching card — those fall through silently.
-        const charge = event.data.object as Stripe.Charge
-        const paymentIntentId = typeof charge.payment_intent === 'string'
-          ? charge.payment_intent
-          : (charge.payment_intent as any)?.id ?? null
-        if (!paymentIntentId) break
-
-        const { data: refundedCards, error: refundErr } = await supabase
-          .from('punch_cards')
-          .update({ status: 'refunded' })
-          .eq('stripe_payment_intent_id', paymentIntentId)
-          .neq('status', 'refunded')
-          .select('id, name, client_id, punches_remaining')
-        if (refundErr) {
-          console.error('[stripe-connect-webhook] punch card refund-pause failed:', refundErr)
-          break
-        }
-        if (refundedCards && refundedCards.length > 0) {
-          refundedCards.forEach((c: any) => {
-            console.log(`[stripe-connect-webhook] 🎟️ Punch card ${c.id} ("${c.name}") auto-paused after refund — ${c.punches_remaining} unused punches voided`)
-          })
         }
         break
       }
