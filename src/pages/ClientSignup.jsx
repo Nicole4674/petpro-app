@@ -18,8 +18,15 @@ export default function ClientSignup() {
   // 🎁 Promo / referral params (optional). promo = the share code,
   // ref = the existing client who shared the link. Stored on the new
   // client row so Suds can auto-apply the reward at their first booking.
-  var promoCode = (searchParams.get('promo') || '').toUpperCase().replace(/[^A-Z0-9]/g, '') || null
+  var urlPromo = (searchParams.get('promo') || '').toUpperCase().replace(/[^A-Z0-9]/g, '') || null
   var refClientId = searchParams.get('ref') || null
+  // promoCode is STATE so clients who arrived WITHOUT a link ("mention
+  // SPRING24!" on Facebook) can type a code manually. Manual codes are
+  // accepted as-is and validated server-side at booking — an invalid code
+  // simply never applies, so there's nothing to exploit by guessing.
+  var [promoCode, setPromoCode] = useState(urlPromo)
+  var [showCodeBox, setShowCodeBox] = useState(false)
+  var [codeInput, setCodeInput] = useState('')
   // Promo details loaded for the gift banner (validated server-side at booking)
   var [promoInfo, setPromoInfo] = useState(null)
 
@@ -70,13 +77,13 @@ export default function ClientSignup() {
       // 🎁 Load promo details for the gift banner. Best-effort — if RLS
       // blocks anonymous reads, the banner shows a generic gift message and
       // the real reward still gets validated + applied at booking.
-      if (promoCode) {
+      if (urlPromo) {
         try {
           var { data: promoRow } = await supabase
             .from('promos')
             .select('name, new_client_reward, is_active, expires_at')
             .eq('groomer_id', groomerId)
-            .eq('code', promoCode)
+            .eq('code', urlPromo)
             .maybeSingle()
           if (promoRow && promoRow.is_active !== false) setPromoInfo(promoRow)
         } catch (e) { /* generic banner fallback */ }
@@ -327,9 +334,54 @@ export default function ClientSignup() {
               <span style={{ fontSize: '13px', color: '#166534', lineHeight: 1.45 }}>
                 {promoInfo
                   ? <>A friend sent you a welcome gift: <strong>{promoInfo.new_client_reward}</strong> It'll be applied when you book!</>
-                  : <>A friend sent you a welcome gift — it'll be applied automatically when you book your first appointment!</>}
+                  : urlPromo
+                    ? <>A friend sent you a welcome gift — it'll be applied automatically when you book your first appointment!</>
+                    : <>Code <strong>{promoCode}</strong> added! If it's a valid offer, your reward applies automatically when you book.{' '}
+                        <button type="button" onClick={function () { setPromoCode(null); setCodeInput(''); setShowCodeBox(true) }}
+                          style={{ background: 'none', border: 'none', color: '#166534', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: '12px' }}>
+                          change
+                        </button></>}
               </span>
             </div>
+          )}
+
+          {/* 🎁 "Have a code?" — for clients who HEARD a code (Facebook post,
+              word of mouth) instead of clicking a share link. Accepted as
+              typed; the booking step validates it server-side, so a typo or
+              made-up code simply never applies. */}
+          {!promoCode && (
+            !showCodeBox ? (
+              <div style={{ marginBottom: '14px', textAlign: 'right' }}>
+                <button
+                  type="button"
+                  onClick={function () { setShowCodeBox(true) }}
+                  style={{ background: 'none', border: 'none', color: '#7c3aed', fontSize: '13px', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+                >
+                  🎁 Have a promo code?
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+                <input
+                  type="text"
+                  value={codeInput}
+                  onChange={function (e) { setCodeInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '')) }}
+                  placeholder="PROMO CODE"
+                  maxLength={20}
+                  style={{ flex: 1, padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', fontWeight: 700, letterSpacing: '0.05em', boxSizing: 'border-box' }}
+                />
+                <button
+                  type="button"
+                  onClick={function () {
+                    if (codeInput.trim()) { setPromoCode(codeInput.trim()) }
+                    else { setShowCodeBox(false) }
+                  }}
+                  style={{ padding: '10px 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                >
+                  {codeInput.trim() ? 'Apply' : 'Cancel'}
+                </button>
+              </div>
+            )
           )}
           {error && (
             <div style={{

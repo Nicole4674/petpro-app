@@ -545,6 +545,9 @@ export default function Calendar() {
         setEditingTime(false)
         setPendingStartTime('')
         setPendingEndTime('')
+        // Reset the manual review-request toast per appointment
+        setReviewReqStatus(null)
+        setReviewReqBusy(false)
     }, [selectedAppt?.id])
 
     // Handle "Book Again", "Reschedule", and "View" URL params from client profile
@@ -2222,6 +2225,43 @@ export default function Calendar() {
     //     and patches local state so the popup re-renders instantly.
     const [mobileActionStatus, setMobileActionStatus] = useState(null) // { ok, text }
     const [mobileActionBusy, setMobileActionBusy] = useState(false)
+
+    // ─── ⭐ Manual review request ────────────────────────────────────────
+    // For clients the auto-booster skipped (no consent back then, booster
+    // was off, etc.). Same edge function as the automatic path — all the
+    // guards (once-ever, link set, consent) live server-side; we just
+    // translate its skip reasons into friendly groomer-speak.
+    const [reviewReqBusy, setReviewReqBusy] = useState(false)
+    const [reviewReqStatus, setReviewReqStatus] = useState(null) // { ok, text }
+    async function sendManualReviewRequest() {
+        if (!selectedAppt || reviewReqBusy) return
+        setReviewReqBusy(true)
+        setReviewReqStatus(null)
+        try {
+            const { data, error } = await supabase.functions.invoke('send-review-request', {
+                body: { appointment_id: selectedAppt.id },
+            })
+            if (error) throw error
+            if (data && data.sent) {
+                setReviewReqStatus({ ok: true, text: '✅ Review request sent via ' + (data.channel === 'sms' ? 'text' : 'email') + '!' })
+            } else {
+                const reasons = {
+                    review_booster_disabled: 'Turn on Review Booster in Shop Settings first.',
+                    no_review_url: 'Add your Google review link in Shop Settings → Review Booster.',
+                    already_requested: 'This client was already asked once — we never ask twice.',
+                    no_contact_method: 'No SMS consent and no email on file for this client.',
+                    appointment_or_client_not_found: 'Could not find this client.',
+                    email_send_failed: 'Email failed to send — try again in a moment.',
+                    no_resend_key: 'Email sending is not configured yet.',
+                }
+                setReviewReqStatus({ ok: false, text: '⚠️ ' + (reasons[data && data.skipped] || (data && data.error) || 'Could not send — try again.') })
+            }
+        } catch (err) {
+            setReviewReqStatus({ ok: false, text: '⚠️ ' + (err.message || 'Could not send — try again.') })
+        } finally {
+            setReviewReqBusy(false)
+        }
+    }
 
     async function sendArrivalSms(templateKey) {
         if (!selectedAppt) return false
@@ -6694,6 +6734,43 @@ export default function Calendar() {
                                     </div>
                                 )
                             })()}
+
+                            {/* ⭐ Manual review request — for clients the auto-booster
+                                skipped. Server enforces once-ever, so this can't spam. */}
+                            <div style={{ marginBottom: '14px' }}>
+                                <button
+                                    onClick={sendManualReviewRequest}
+                                    disabled={reviewReqBusy}
+                                    style={{
+                                        width: '100%',
+                                        padding: '10px 14px',
+                                        background: '#fff',
+                                        color: '#b45309',
+                                        border: '1px solid #fcd34d',
+                                        borderRadius: '8px',
+                                        fontWeight: 700,
+                                        fontSize: '13px',
+                                        cursor: reviewReqBusy ? 'wait' : 'pointer',
+                                        opacity: reviewReqBusy ? 0.7 : 1,
+                                    }}
+                                    title="Text (or email) this client your Google review link — each client is only ever asked once"
+                                >
+                                    {reviewReqBusy ? 'Sending…' : '⭐ Request Google review'}
+                                </button>
+                                {reviewReqStatus && (
+                                    <div style={{
+                                        marginTop: '6px',
+                                        padding: '8px 12px',
+                                        background: reviewReqStatus.ok ? '#f0fdf4' : '#fef2f2',
+                                        border: '1px solid ' + (reviewReqStatus.ok ? '#86efac' : '#fecaca'),
+                                        borderRadius: '8px',
+                                        color: reviewReqStatus.ok ? '#166534' : '#991b1b',
+                                        fontSize: '12px',
+                                    }}>
+                                        {reviewReqStatus.text}
+                                    </div>
+                                )}
+                            </div>
 
                             {/* Flags */}
                             {selectedAppt.has_flags && selectedAppt.flag_details && (
