@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "petpro-mobile",
+    "name": "PetPro",
     "slug": "petpro-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -10,11 +10,11 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.pamperedlittlepaws.petpro",
+      "versionCode": 1,
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#5b21b6",
+        "foregroundImage": "./assets/adaptive-icon.png"
       }
     },
     "web": {
@@ -23,6 +23,11 @@
     "plugins": [
       "@react-native-community/datetimepicker",
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "3846f34a-9b6c-4ef7-a30f-5bbbc83c6d8b"
+      }
+    }
   }
 }

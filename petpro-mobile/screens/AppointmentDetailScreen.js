@@ -640,6 +640,16 @@ export default function AppointmentDetailScreen({ navigation, route, session }) 
     } catch (e) { setErr(e.message || 'Could not check in.'); } finally { setSaving(false); }
   }
 
+  async function checkOut() {
+    setSaving(true); setErr('');
+    try {
+      const { error } = await supabase.from('appointments')
+        .update({ checked_out_at: new Date().toISOString() }).eq('id', apptId);
+      if (error) throw error;
+      await load();
+    } catch (e) { setErr(e.message || 'Could not check out.'); } finally { setSaving(false); }
+  }
+
   const client = a && a.clients;
   const ss = a ? statusStyle(effectiveStatus(a)) : null;
   const breakdown = a ? buildBreakdown(a) : [];
@@ -1107,16 +1117,28 @@ export default function AppointmentDetailScreen({ navigation, route, session }) 
             </Pressable>
           ) : null}
 
-          {/* Check in */}
-          {a.checked_in_at ? (
-            <View style={styles.checkedIn}>
-              <Ionicons name="checkmark-circle" size={18} color="#166534" />
-              <Text style={styles.checkedInText}>Checked in at {fmtTime(new Date(a.checked_in_at).toTimeString().slice(0, 8))}</Text>
-            </View>
-          ) : (
+          {/* Check in / Check out */}
+          {!a.checked_in_at ? (
             <Pressable style={[styles.checkInBtn, saving && { opacity: 0.6 }]} onPress={checkIn} disabled={saving}>
               {saving ? <ActivityIndicator color="#fff" /> : <><Ionicons name="log-in-outline" size={18} color="#fff" /><Text style={styles.checkInText}>Check In</Text></>}
             </Pressable>
+          ) : (
+            <>
+              <View style={styles.checkedIn}>
+                <Ionicons name="checkmark-circle" size={18} color="#166534" />
+                <Text style={styles.checkedInText}>Checked in at {fmtTime(new Date(a.checked_in_at).toTimeString().slice(0, 8))}</Text>
+              </View>
+              {a.checked_out_at ? (
+                <View style={styles.checkedOut}>
+                  <Ionicons name="exit-outline" size={18} color={colors.primaryDark} />
+                  <Text style={styles.checkedOutText}>Checked out at {fmtTime(new Date(a.checked_out_at).toTimeString().slice(0, 8))}</Text>
+                </View>
+              ) : (
+                <Pressable style={[styles.checkOutBtn, saving && { opacity: 0.6 }]} onPress={checkOut} disabled={saving}>
+                  {saving ? <ActivityIndicator color="#fff" /> : <><Ionicons name="exit-outline" size={18} color="#fff" /><Text style={styles.checkInText}>Check Out</Text></>}
+                </Pressable>
+              )}
+            </>
           )}
 
           {/* Report card */}
@@ -1308,6 +1330,9 @@ const styles = StyleSheet.create({
   confirmText: { color: '#fff', fontSize: 16, fontWeight: '800' },
   checkInBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.green, borderRadius: 12, paddingVertical: 15, marginBottom: 14 },
   checkInText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  checkOutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 15, marginBottom: 14 },
+  checkedOut: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.primaryLight, borderRadius: 12, paddingVertical: 13, marginBottom: 14 },
+  checkedOutText: { color: colors.primaryDark, fontSize: 15, fontWeight: '800' },
   checkedIn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#dcfce7', borderRadius: 12, paddingVertical: 14, marginBottom: 14, borderWidth: 1, borderColor: '#86efac' },
   checkedInText: { color: '#166534', fontSize: 15, fontWeight: '800' },
   reportBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.primaryLight, borderRadius: 12, paddingVertical: 14, marginBottom: 14 },

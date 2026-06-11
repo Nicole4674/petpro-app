@@ -1,5 +1,20 @@
 # PetPro Build Plan — June 11–14, 2026
 
+## 📌 STATUS + CHAT LANES (updated Jun 11 evening)
+- ✅ Google Play org account APPROVED (same-day!) — "PetPro Software" /
+  Pamperedlittlepaws LLC, Create App unlocked. Remaining: create app shell,
+  store listing, Data Safety form, content rating, demo reviewer login,
+  upload signed .aab when the mobile app build is finished.
+- 🖥️ THIS chat (web): website bugs + finishing the Google Play Store listing
+  & submission together.
+- 📱 SEPARATE chat (app): finishing the groomer mobile app (petpro-mobile),
+  adding daycare + training after the weekend web build, REMOVING in-app
+  subscription upgrade/downgrade (Google Play billing policy — replace with
+  "manage your plan on the web" note; keep all Stripe payments for physical
+  services: grooms, boarding, punch cards — those are exempt).
+- All six Jun-11 polish items: SHIPPED. Token purchase system: verified
+  working via dashboard-deployed stripe-webhook (now backed up in repo).
+
 Written at the end of the Jun 10 mega-session (big five money-makers all shipped:
 Review Booster, SMS segments + blast tracking, promo/referral links, punch cards
 both passes, SMS top-ups with never-expire extras).

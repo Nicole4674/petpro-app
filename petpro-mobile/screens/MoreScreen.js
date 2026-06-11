@@ -1,16 +1,25 @@
-import { StyleSheet, Text, View, Pressable } from 'react-native';
+import { StyleSheet, Text, View, Pressable, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../lib/theme';
 import GradientHeader from '../components/GradientHeader';
+import { openWeb } from '../lib/webLink';
 
 export default function MoreScreen({ session, onSignOut, navigation }) {
   const items = [
     { label: 'Ask Suds', icon: 'sparkles-outline', screen: 'Suds' },
     { label: 'Analytics', icon: 'bar-chart-outline', screen: 'Analytics' },
+    { label: 'Flagged Bookings', icon: 'flag-outline', screen: 'FlaggedBookings' },
+    { label: 'Balances', icon: 'cash-outline', screen: 'Balances' },
+    { label: 'Waitlist', icon: 'list-outline', screen: 'Waitlist' },
     { label: 'Boarding', icon: 'bed-outline', screen: 'Boarding' },
     { label: 'Retail', icon: 'cart-outline', screen: 'Retail' },
+    { label: 'Punch Cards', icon: 'ticket-outline', screen: 'PunchCards' },
+    { label: 'Promos', icon: 'gift-outline', screen: 'Promos' },
+    { label: 'Service Zones', icon: 'map-outline', screen: 'Zones' },
     { label: 'Staff', icon: 'people-outline', screen: 'Staff' },
     { label: 'Payroll', icon: 'cash-outline', screen: 'Payroll' },
+    { label: 'Expenses', icon: 'wallet-outline', screen: 'Expenses' },
+    { label: 'Import / Export Clients', icon: 'swap-horizontal-outline', url: '/import' },
     { label: 'Agreements', icon: 'document-text-outline', screen: 'Agreements' },
     { label: 'Chat / Suds Settings', icon: 'sparkles-outline', screen: 'ChatSettings' },
     { label: 'Billing & Plan', icon: 'card-outline', screen: 'Billing' },
@@ -23,16 +32,16 @@ export default function MoreScreen({ session, onSignOut, navigation }) {
         <Text style={styles.title}>More</Text>
       </GradientHeader>
 
-      <View style={styles.body}>
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {items.map((it) => (
           <Pressable
             key={it.label}
             style={({ pressed }) => [styles.item, pressed && { opacity: 0.6 }]}
-            onPress={() => navigation.navigate(it.screen)}
+            onPress={() => (it.url ? openWeb(it.url) : navigation.navigate(it.screen))}
           >
             <View style={styles.iconWrap}><Ionicons name={it.icon} size={20} color={colors.primary} /></View>
             <Text style={styles.itemText}>{it.label}</Text>
-            <Ionicons name="chevron-forward" size={20} color={colors.textFaint} />
+            <Ionicons name={it.url ? 'open-outline' : 'chevron-forward'} size={20} color={colors.textFaint} />
           </Pressable>
         ))}
 
@@ -44,7 +53,7 @@ export default function MoreScreen({ session, onSignOut, navigation }) {
             <Text style={styles.signoutText}>Sign out</Text>
           </Pressable>
         </View>
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -53,7 +62,7 @@ const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bg },
   header: { backgroundColor: colors.primaryDark, paddingTop: 64, paddingBottom: 20, paddingHorizontal: 24 },
   title: { color: '#fff', fontSize: 26, fontWeight: '800' },
-  body: { padding: 20 },
+  body: { padding: 20, paddingBottom: 40 },
   item: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: colors.card, borderRadius: 14, paddingVertical: 15, paddingHorizontal: 16, marginBottom: 10, borderWidth: 1, borderColor: colors.border },
   iconWrap: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
   itemText: { flex: 1, fontSize: 16, fontWeight: '700', color: colors.text },

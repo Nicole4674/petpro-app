@@ -9072,24 +9072,59 @@ function AddAppointmentModal({ date, time, clients, pets, services, staffMembers
         ;(async function () {
             var now = new Date()
             var todayIso = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0')
-            var { data } = await supabase
-                .from('appointments')
-                .select('pet_id, appointment_date, final_price, quoted_price, services:service_id(service_name)')
+            // PER-PET price lives in appointment_pets (one row per dog per visit).
+            // The appointment row's final/quoted price is the WHOLE bill — on a
+            // 2-dog visit that's the $115 family total, not this dog's own $65.
+            // Junction rows are the truth; appointment-level price is only a
+            // fallback for old single-dog rows that predate the junction table.
+            var { data: junctionRows } = await supabase
+                .from('appointment_pets')
+                .select('pet_id, quoted_price, service_id, services:service_id(service_name), appointments!inner(appointment_date, status)')
                 .in('pet_id', ids)
-                .lte('appointment_date', todayIso)
-                .not('status', 'in', '(cancelled,no_show,rescheduled)')
-                .order('appointment_date', { ascending: false })
+                .lte('appointments.appointment_date', todayIso)
+                .not('appointments.status', 'in', '(cancelled,no_show,rescheduled)')
             if (cancelled) return
             var map = {}
-            ;(data || []).forEach(function (a) {
-                if (a.pet_id && !map[a.pet_id]) {
-                    map[a.pet_id] = {
-                        service_name: a.services ? a.services.service_name : null,
-                        price: (a.final_price != null ? a.final_price : a.quoted_price),
-                        date: a.appointment_date,
+            ;(junctionRows || [])
+                .slice()
+                .sort(function (a, b) {
+                    // newest appointment first (YYYY-MM-DD strings compare safely)
+                    var da = (a.appointments && a.appointments.appointment_date) || ''
+                    var db = (b.appointments && b.appointments.appointment_date) || ''
+                    return db < da ? -1 : db > da ? 1 : 0
+                })
+                .forEach(function (ap) {
+                    if (ap.pet_id && !map[ap.pet_id]) {
+                        map[ap.pet_id] = {
+                            service_name: ap.services ? ap.services.service_name : null,
+                            price: ap.quoted_price,
+                            date: ap.appointments ? ap.appointments.appointment_date : null,
+                        }
                     }
-                }
-            })
+                })
+            // Legacy fallback: pets with no junction rows yet — those are old
+            // single-dog appointments, where the appointment-level price IS
+            // the dog's own price.
+            var missing = ids.filter(function (id) { return !map[id] })
+            if (missing.length > 0) {
+                var { data: legacy } = await supabase
+                    .from('appointments')
+                    .select('pet_id, appointment_date, final_price, quoted_price, services:service_id(service_name)')
+                    .in('pet_id', missing)
+                    .lte('appointment_date', todayIso)
+                    .not('status', 'in', '(cancelled,no_show,rescheduled)')
+                    .order('appointment_date', { ascending: false })
+                if (cancelled) return
+                ;(legacy || []).forEach(function (a) {
+                    if (a.pet_id && !map[a.pet_id]) {
+                        map[a.pet_id] = {
+                            service_name: a.services ? a.services.service_name : null,
+                            price: (a.final_price != null ? a.final_price : a.quoted_price),
+                            date: a.appointment_date,
+                        }
+                    }
+                })
+            }
             setLastApptByPet(map)
         })()
         return function () { cancelled = true }
@@ -10412,15 +10447,24 @@ function AddPetToBookingModal({ filteredPets, services, petsAlreadyAdded, onClos
     const [price, setPrice] = useState('')
     const [error, setError] = useState(null)
     const [lastAppt, setLastAppt] = useState(null) // selected pet's most recent service + price
+    // When "Use this" picks the last service, it also carries the last PAID price —
+    // this ref hands that price to the auto-fill effect below so it doesn't get
+    // overwritten by the service's catalog price.
+    const useThisPriceRef = useRef(null)
 
     // Pets that haven't been added yet
     var availablePets = filteredPets.filter(function (p) {
         return !petsAlreadyAdded.some(function (added) { return added.pet_id === p.id })
     })
 
-    // When service changes, auto-fill price
+    // When service changes, auto-fill price (unless "Use this" just set a last-paid price)
     useEffect(function () {
         if (serviceId) {
+            if (useThisPriceRef.current != null) {
+                setPrice(String(useThisPriceRef.current))
+                useThisPriceRef.current = null
+                return
+            }
             var service = services.find(function (s) { return s.id === serviceId })
             if (service) {
                 setPrice(service.price || '')
@@ -10429,13 +10473,43 @@ function AddPetToBookingModal({ filteredPets, services, petsAlreadyAdded, onClos
     }, [serviceId])
 
     // When a pet is picked, look up their most recent service + price (their "last time").
+    // PER-PET price comes from appointment_pets — the appointment row's price is the
+    // WHOLE bill (on a 2-dog visit that's the $115 family total, not this dog's $65).
+    // Appointment-level price is only a fallback for old single-dog rows that predate
+    // the junction table. Normalized shape: { service_id, service_name, price, date }.
     useEffect(function () {
         if (!petId) { setLastAppt(null); return }
         var cancelled = false
         ;(async function () {
             var now = new Date()
             var todayIso = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0')
-            var { data } = await supabase
+            var { data: junctionRows } = await supabase
+                .from('appointment_pets')
+                .select('quoted_price, service_id, services:service_id(service_name), appointments!inner(appointment_date, status)')
+                .eq('pet_id', petId)
+                .lte('appointments.appointment_date', todayIso)
+                .not('appointments.status', 'in', '(cancelled,no_show,rescheduled)')
+            if (cancelled) return
+            var newest = null
+            ;(junctionRows || []).forEach(function (ap) {
+                var d = (ap.appointments && ap.appointments.appointment_date) || ''
+                if (!newest || d > newest._date) {
+                    newest = {
+                        service_id: ap.service_id,
+                        service_name: ap.services ? ap.services.service_name : null,
+                        price: ap.quoted_price,
+                        date: d || null,
+                        _date: d,
+                    }
+                }
+            })
+            if (newest) {
+                if (!cancelled) setLastAppt(newest)
+                return
+            }
+            // Legacy fallback — old single-dog appointment with no junction row,
+            // where the appointment-level price IS the dog's own price.
+            var { data: legacy } = await supabase
                 .from('appointments')
                 .select('appointment_date, final_price, quoted_price, service_id, services:service_id(service_name)')
                 .eq('pet_id', petId)
@@ -10444,7 +10518,13 @@ function AddPetToBookingModal({ filteredPets, services, petsAlreadyAdded, onClos
                 .order('appointment_date', { ascending: false })
                 .limit(1)
                 .maybeSingle()
-            if (!cancelled) setLastAppt(data || null)
+            if (cancelled) return
+            setLastAppt(legacy ? {
+                service_id: legacy.service_id,
+                service_name: legacy.services ? legacy.services.service_name : null,
+                price: (legacy.final_price != null ? legacy.final_price : legacy.quoted_price),
+                date: legacy.appointment_date,
+            } : null)
         })()
         return function () { cancelled = true }
     }, [petId])
@@ -10493,14 +10573,29 @@ function AddPetToBookingModal({ filteredPets, services, petsAlreadyAdded, onClos
                     {lastAppt && (
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', fontSize: '13px', color: '#5b21b6', background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '8px', padding: '8px 10px', marginBottom: '12px' }}>
                             <span>
-                                🔁 Last time: {lastAppt.services ? lastAppt.services.service_name : 'service'}
-                                {(lastAppt.final_price != null ? lastAppt.final_price : lastAppt.quoted_price) != null ? ' — $' + parseFloat(lastAppt.final_price != null ? lastAppt.final_price : lastAppt.quoted_price).toFixed(2) : ''}
-                                {lastAppt.appointment_date ? ' (' + new Date(lastAppt.appointment_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ')' : ''}
+                                🔁 Last time: {lastAppt.service_name || 'service'}
+                                {lastAppt.price != null ? ' — $' + parseFloat(lastAppt.price).toFixed(2) : ''}
+                                {lastAppt.date ? ' (' + new Date(lastAppt.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ')' : ''}
                             </span>
                             {lastAppt.service_id && (
                                 <button
                                     type="button"
-                                    onClick={function () { setServiceId(lastAppt.service_id) }}
+                                    onClick={function () {
+                                        // Fill BOTH the service and this dog's own last price.
+                                        if (lastAppt.price != null) {
+                                            if (lastAppt.service_id !== serviceId) {
+                                                // Service is about to change → the auto-fill
+                                                // effect will fire; hand it the last-paid price
+                                                // so it doesn't overwrite with the catalog price.
+                                                useThisPriceRef.current = lastAppt.price
+                                            } else {
+                                                // Same service already picked → effect won't
+                                                // fire, set the price directly.
+                                                setPrice(String(lastAppt.price))
+                                            }
+                                        }
+                                        setServiceId(lastAppt.service_id)
+                                    }}
                                     style={{ background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
                                 >Use this</button>
                             )}

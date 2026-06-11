@@ -12,6 +12,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { supabase } from './lib/supabase';
+import { openWeb } from './lib/webLink';
 import HomeScreen from './screens/HomeScreen';
 import ScheduleScreen from './screens/ScheduleScreen';
 import ClientsScreen from './screens/ClientsScreen';
@@ -43,6 +44,13 @@ import AnalyticsScreen from './screens/AnalyticsScreen';
 import PayrollScreen from './screens/PayrollScreen';
 import AgreementsScreen from './screens/AgreementsScreen';
 import ReceiptScreen from './screens/ReceiptScreen';
+import PunchCardsScreen from './screens/PunchCardsScreen';
+import PromosScreen from './screens/PromosScreen';
+import ExpensesScreen from './screens/ExpensesScreen';
+import ZonesScreen from './screens/ZonesScreen';
+import FlaggedBookingsScreen from './screens/FlaggedBookingsScreen';
+import BalancesScreen from './screens/BalancesScreen';
+import WaitlistScreen from './screens/WaitlistScreen';
 import MessagesScreen from './screens/MessagesScreen';
 import ThreadScreen from './screens/ThreadScreen';
 
@@ -121,6 +129,27 @@ function MoreStack({ session, onSignOut }) {
       </MoreStackNav.Screen>
       <MoreStackNav.Screen name="Agreements">
         {(props) => <AgreementsScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="PunchCards">
+        {(props) => <PunchCardsScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="Promos">
+        {(props) => <PromosScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="Expenses">
+        {(props) => <ExpensesScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="Zones">
+        {(props) => <ZonesScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="FlaggedBookings">
+        {(props) => <FlaggedBookingsScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="Balances">
+        {(props) => <BalancesScreen {...props} session={session} />}
+      </MoreStackNav.Screen>
+      <MoreStackNav.Screen name="Waitlist">
+        {(props) => <WaitlistScreen {...props} session={session} />}
       </MoreStackNav.Screen>
       <MoreStackNav.Screen name="Receipt">
         {(props) => <ReceiptScreen {...props} session={session} />}
@@ -268,8 +297,10 @@ export default function App() {
   const [checking, setChecking] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [authView, setAuthView] = useState('welcome'); // 'welcome' | 'login'
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -308,8 +339,13 @@ export default function App() {
 
           <TextInput style={styles.input} placeholder="Email" placeholderTextColor="#a78bfa"
             autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
-          <TextInput style={styles.input} placeholder="Password" placeholderTextColor="#a78bfa"
-            secureTextEntry value={password} onChangeText={setPassword} />
+          <View style={styles.passwordRow}>
+            <TextInput style={styles.passwordInput} placeholder="Password" placeholderTextColor="#a78bfa"
+              secureTextEntry={!showPassword} value={password} onChangeText={setPassword} autoCapitalize="none" />
+            <Pressable onPress={() => setShowPassword((v) => !v)} hitSlop={10} style={styles.eyeBtn}>
+              <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color="#7c3aed" />
+            </Pressable>
+          </View>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -330,6 +366,9 @@ const styles = StyleSheet.create({
   title: { fontSize: 36, fontWeight: '800', color: '#fff' },
   tagline: { fontSize: 15, color: '#ddd6fe', marginTop: 6, marginBottom: 28, textAlign: 'center' },
   input: { width: '100%', maxWidth: 360, backgroundColor: '#fff', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16, fontSize: 16, color: '#1f2937', marginBottom: 12 },
+  passwordRow: { width: '100%', maxWidth: 360, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, marginBottom: 12, paddingRight: 12 },
+  passwordInput: { flex: 1, paddingVertical: 14, paddingLeft: 16, paddingRight: 8, fontSize: 16, color: '#1f2937' },
+  eyeBtn: { padding: 4 },
   button: { width: '100%', maxWidth: 360, backgroundColor: '#fff', borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginTop: 8 },
   buttonText: { color: '#5b21b6', fontSize: 16, fontWeight: '800' },
   error: { color: '#fecaca', fontSize: 14, marginBottom: 8, textAlign: 'center' },
