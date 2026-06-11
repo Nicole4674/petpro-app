@@ -133,6 +133,13 @@ one (gate at birth — way easier than retrofitting after launch).
 - Real-world promo link test (first genuinely-referred client proves the chain)
 
 ## 🅿️ Parked for later (deliberate)
+- CARD-FREE TRIAL (smooths the Play Store funnel): app signup starts the
+  14-day trial instantly — NO card, NO website visit; groomer is using
+  PetPro the same hour. Website asks for the card only when the trial
+  ends. SubscriptionGate already supports it (status='trialing' +
+  trial_ends_at); needs a backend path that sets those at signup without
+  Stripe. Replaces the "type trypetpro.com to pay first" step for new
+  app users. Park until after Play launch.
 - Referrer auto-rewards (apply credit at their next checkout automatically)
 - Multi-business / Enterprise (next year)
 - Abandoned-booking recovery + embeddable booking widget

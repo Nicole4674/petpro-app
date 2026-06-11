@@ -331,8 +331,24 @@ export default function App() {
           <MainTabs session={session} onSignOut={signOut} />
           <StatusBar style="light" />
         </NavigationContainer>
+      ) : authView === 'welcome' ? (
+        <View style={styles.container}>
+          <Text style={styles.logo}>🐾</Text>
+          <Text style={styles.title}>PetPro</Text>
+          <Text style={styles.tagline}>Grooming & boarding, run from your pocket.</Text>
+
+          <Pressable style={styles.button} onPress={() => { setError(''); setAuthView('login'); }}>
+            <Text style={styles.buttonText}>Log In</Text>
+          </Pressable>
+
+          <Text style={styles.welcomeHint}>New to PetPro? Create your account and choose a plan at{'\n'}petpro-app.vercel.app — then log in here.</Text>
+          <StatusBar style="light" />
+        </View>
       ) : (
         <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Pressable style={styles.backLink} onPress={() => { setError(''); setAuthView('welcome'); }}>
+            <Ionicons name="chevron-back" size={18} color="#ddd6fe" /><Text style={styles.backLinkText}>Back</Text>
+          </Pressable>
           <Text style={styles.logo}>🐾</Text>
           <Text style={styles.title}>PetPro</Text>
           <Text style={styles.tagline}>Sign in to your shop</Text>
@@ -352,6 +368,7 @@ export default function App() {
           <Pressable style={[styles.button, loading && { opacity: 0.6 }]} onPress={signIn} disabled={loading}>
             {loading ? <ActivityIndicator color="#5b21b6" /> : <Text style={styles.buttonText}>Sign In</Text>}
           </Pressable>
+          <Text style={styles.createLinkText}>New to PetPro? Sign up at petpro-app.vercel.app</Text>
           <StatusBar style="light" />
         </KeyboardAvoidingView>
       )}
@@ -371,5 +388,12 @@ const styles = StyleSheet.create({
   eyeBtn: { padding: 4 },
   button: { width: '100%', maxWidth: 360, backgroundColor: '#fff', borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginTop: 8 },
   buttonText: { color: '#5b21b6', fontSize: 16, fontWeight: '800' },
+  buttonOutline: { width: '100%', maxWidth: 360, borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginTop: 12, borderWidth: 2, borderColor: '#ffffff' },
+  buttonOutlineText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  welcomeHint: { color: '#c4b5fd', fontSize: 13, textAlign: 'center', marginTop: 22, maxWidth: 320, lineHeight: 19 },
+  backLink: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', position: 'absolute', top: 56, left: 20 },
+  backLinkText: { color: '#ddd6fe', fontSize: 15, fontWeight: '600' },
+  createLink: { marginTop: 18, paddingVertical: 8 },
+  createLinkText: { color: '#ddd6fe', fontSize: 14, fontWeight: '700' },
   error: { color: '#fecaca', fontSize: 14, marginBottom: 8, textAlign: 'center' },
 });
