@@ -671,8 +671,24 @@ export default function ImportClients() {
           {/* AI MIGRATION (Suds) — hero card */}
           <div className="import-card" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', border: 'none' }}>
             <h2 style={{ color: 'white', marginTop: 0 }}>🤖 Start AI Migration (Recommended)</h2>
+            {/* FREE badge — migration never touches the groomer's AI actions
+                (server-enforced import-only mode in chat-command). The single
+                biggest objection at signup is "will moving in burn my trial?" */}
+            <div style={{
+              display: 'inline-block',
+              padding: '4px 12px',
+              background: 'rgba(255,255,255,0.25)',
+              border: '1px solid rgba(255,255,255,0.5)',
+              borderRadius: '999px',
+              fontSize: '13px',
+              fontWeight: 800,
+              marginBottom: '10px',
+              letterSpacing: '0.02em',
+            }}>
+              ✨ 100% FREE — uses NONE of your AI actions
+            </div>
             <p style={{ color: 'rgba(255,255,255,0.95)' }}>
-              Let Suds walk you through migrating from <strong>any software</strong> — Moe Go, Gingr, Pawfinity,
+              Let Suds walk you through migrating from <strong>any software</strong> — MoeGo, Gingr, Pawfinity,
               even paper notebooks. Just take photos or screenshots of your client list, pets, vax certs, or
               anything else, and Suds will read them, pull the data, and import it for you. No spreadsheets needed.
             </p>
@@ -680,6 +696,7 @@ export default function ImportClients() {
               <li>Works with screenshots, photos, PDFs, or CSVs</li>
               <li>Suds reads it for you — no manual typing</li>
               <li>Preview everything before anything saves</li>
+              <li>Completely free — your AI allowance doesn't start spending until you do</li>
               <li>Friendly, patient, and will never judge your paper notebook 💜</li>
             </ul>
             <button

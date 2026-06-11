@@ -6275,7 +6275,7 @@ Deno.serve(async (req) => {
         '- If they seem overwhelmed, slow down. Offer to take a break. Say "no rush".',
         '',
         'OPENING BEHAVIOR (your very first migration mode reply):',
-        '- Greet them warmly. Example: "Hey! I\'m going to help you move your shop over — this is the easy part, promise. Quick question to start: what software (or system) are you coming from? Moe Go, Gingr, Pawfinity, paper notebook, spreadsheet — whatever it is, I can work with it."',
+        '- Greet them warmly. Example: "Hey! I\'m going to help you move your shop over — this is the easy part, promise. And heads up: migration is completely FREE — it doesn\'t use any of your AI actions. Quick question to start: what software (or system) are you coming from? MoeGo, Gingr, Pawfinity, paper notebook, spreadsheet — whatever it is, I can work with it."',
         '- Do NOT dump a list of options. Ask the open question, listen to their answer.',
         '',
         'WHAT YOU CAN ACCEPT (the groomer can give you ANY of these):',
@@ -6294,7 +6294,7 @@ Deno.serve(async (req) => {
         '',
         'IMPORT WORKFLOW (step by step):',
         '1. First, ask what software they\'re coming from.',
-        '2. Based on their answer, suggest the easiest format: "Got it! The fastest way is if you can export a CSV from Moe Go — want me to walk you through that? Or if it\'s easier, just screenshot your client list and drop it in here."',
+        '2. Based on their answer, suggest the easiest format: "Got it! The fastest way is if you can export a CSV from MoeGo — want me to walk you through that? Or if it\'s easier, just screenshot your client list and drop it in here."',
         '3. Once they send data (screenshot / paste / CSV / typed), read it, preview it back, get approval.',
         '4. Import using add_client, add_pet, add_vaccination tools. Use search_clients first to avoid duplicates.',
         '5. After each batch, celebrate + ask what\'s next: "Nailed it — 15 clients in 🎉. Want to keep going with more clients, or switch to importing their pets?"',
@@ -6308,7 +6308,7 @@ Deno.serve(async (req) => {
         '- Past appointment history is LOWEST priority — usually skip it. Fresh start is cleaner.',
         '',
         'SOFTWARE-SPECIFIC TIPS:',
-        '- Moe Go: has a CSV export under Settings → Data Export. Send them to /import page if they have a CSV.',
+        '- MoeGo: has a CSV export under Settings → Data Export. Send them to /import page if they have a CSV.',
         '- Gingr: export reports as PDF or Excel. You can read either.',
         '- Pawfinity: has a client list export — CSV works best.',
         '- Paper notebook / rolodex: take photos page by page. You\'ll read them.',
@@ -6317,7 +6317,9 @@ Deno.serve(async (req) => {
         'RULES FOR THIS MODE:',
         '- NEVER invent data. If a field is missing, leave it blank. Missing is better than wrong.',
         '- ALWAYS confirm before importing. Show a preview, get a yes, then run the tools.',
-        '- Use the EXISTING tools (add_client, add_pet, add_vaccination, edit_client, edit_pet) — you have full access.',
+        '- MIGRATION IS FREE: nothing you do in this mode uses the groomer\'s AI actions. Mention it once early — it removes the "am I burning my trial?" worry.',
+        '- Your toolset here is IMPORT-ONLY: search_clients, get_client_details, add_client, edit_client, add_pet, edit_pet, add_vaccination, edit_vaccination, list_vaccinations. Booking, messaging, SMS, reports and everything else are DISABLED in this mode.',
+        '- If they ask to book an appointment, text a client, or anything non-import, redirect warmly: "Let\'s finish moving your shop in first — booking lives in the main chat! Say \'business mode\' and I\'ll switch over." Do NOT attempt the action here.',
         '- If duplicates might exist, run search_clients first and ask: "Amy Treadwell is already in here — want me to update her info, or skip?"',
         '- If the groomer asks to switch back to normal Claude, respond warmly: "Got it! I\'m back to your regular assistant. Say \'help me migrate\' anytime to come back here."',
         '',
@@ -6326,7 +6328,7 @@ Deno.serve(async (req) => {
         '- Never leave them feeling like they failed. Migration is hard — celebrate progress.',
         '',
         '=========================================',
-        '(End of Migration Mode preamble. The normal PetPro AI system prompt and all tools follow below — you have full access to them.)',
+        '(End of Migration Mode preamble. The normal PetPro AI system prompt follows for background knowledge, but remember: in this mode only the IMPORT tools listed above are available to you.)',
         '=========================================',
         '',
       ].join('\n')
@@ -6365,10 +6367,31 @@ Deno.serve(async (req) => {
       messages.push({ role: 'user', content: body.message })
     }
 
+    // ════════════ Migration Mode tool whitelist (SERVER-ENFORCED) ════════════
+    // Migration is FREE (no token burn, below) — which is only safe because
+    // this flag ALSO strips the toolset down to import-only. Free actions that
+    // can only be spent handing us their client list = onboarding, not a
+    // loophole. The flag selects the toolset HERE, server-side — a tampered
+    // frontend can claim migration_mode all it wants, it just loses booking.
+    var MIGRATION_TOOL_NAMES = [
+      'search_clients', 'get_client_details',
+      'add_client', 'edit_client',
+      'add_pet', 'edit_pet',
+      'add_vaccination', 'edit_vaccination', 'list_vaccinations',
+    ]
+    var activeToolDefinitions = toolDefinitions
+    if (body.migration_mode === true) {
+      activeToolDefinitions = toolDefinitions.filter(function (t) {
+        return MIGRATION_TOOL_NAMES.indexOf(t.name) !== -1
+      })
+    }
+
     // ════════════ PetPro Token PRE-CHECK ════════════
     // Before calling Anthropic at all, make sure the groomer has tokens.
-    // Skip in admin_mode (free for owner/admin testing).
-    if (!body.admin_mode) {
+    // Skip in admin_mode (free for owner/admin testing) and in MIGRATION MODE
+    // (free white-glove onboarding — the cost of acquiring a subscriber; the
+    // restricted toolset above is what makes free safe).
+    if (!body.admin_mode && body.migration_mode !== true) {
       var { data: balRow } = await supabaseAdmin
         .from('groomer_token_balance')
         .select('monthly_tokens_remaining, topup_tokens_remaining, monthly_period_start, monthly_tokens_total')
@@ -6441,10 +6464,12 @@ Deno.serve(async (req) => {
               cache_control: { type: 'ephemeral' }
             }
           ],
-          // Tools are also large + repeated — cache them too
-          tools: toolDefinitions.map(function (t, i) {
+          // Tools are also large + repeated — cache them too.
+          // activeToolDefinitions = full set normally, import-only whitelist
+          // in migration mode (server-enforced above).
+          tools: activeToolDefinitions.map(function (t, i) {
             // Mark only the LAST tool with cache_control to cache the whole tools block
-            if (i === toolDefinitions.length - 1) {
+            if (i === activeToolDefinitions.length - 1) {
               return Object.assign({}, t, { cache_control: { type: 'ephemeral' } })
             }
             return t
@@ -6476,6 +6501,16 @@ Deno.serve(async (req) => {
         var toolResults = []
         for (var toolBlock of toolUseBlocks) {
           console.log('Executing tool:', toolBlock.name, JSON.stringify(toolBlock.input))
+          // Belt-and-suspenders: even though migration mode only SENDS the
+          // whitelist to Claude, refuse any non-whitelisted call here too.
+          if (body.migration_mode === true && MIGRATION_TOOL_NAMES.indexOf(toolBlock.name) === -1) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolBlock.id,
+              content: JSON.stringify({ success: false, error: 'This tool is disabled in migration mode. Tell the groomer booking/messaging lives in the main chat ("business mode").' }),
+            })
+            continue
+          }
           var result = await executeTool(toolBlock.name, toolBlock.input, body.groomer_id, supabaseAdmin)
           console.log('Tool result:', JSON.stringify(result).substring(0, 200))
           toolResults.push({
@@ -6500,12 +6535,33 @@ Deno.serve(async (req) => {
 
     // ════════════ PetPro Token DEDUCT ════════════
     // 1 message exchange = 1 PetPro token. Deduct now that we have a successful reply.
-    // Skip in admin_mode (free for owner/admin testing).
+    // Skip in admin_mode (free for owner/admin testing) and MIGRATION MODE
+    // (free onboarding). Migration usage is COUNTED separately (not billed)
+    // so abnormal volume is visible — see groomers.migration_actions_used.
     var balanceAfter = null
-    if (!body.admin_mode) {
+    if (!body.admin_mode && body.migration_mode !== true) {
       var { data: deductResult } = await supabaseAdmin
         .rpc('deduct_petpro_token', { p_groomer_id: body.groomer_id })
       balanceAfter = deductResult
+    } else if (body.migration_mode === true) {
+      // Telemetry only — non-atomic increment is fine for a usage counter.
+      try {
+        var { data: gRow } = await supabaseAdmin
+          .from('groomers')
+          .select('migration_actions_used')
+          .eq('id', body.groomer_id)
+          .maybeSingle()
+        var migUsed = ((gRow && gRow.migration_actions_used) || 0) + 1
+        await supabaseAdmin
+          .from('groomers')
+          .update({ migration_actions_used: migUsed })
+          .eq('id', body.groomer_id)
+        if (migUsed === 2000) {
+          console.warn('[migration] groomer ' + body.groomer_id + ' crossed 2,000 free migration actions — likely a big legit shop, but worth eyes')
+        }
+      } catch (migErr) {
+        console.warn('[migration] usage counter failed (non-fatal):', migErr)
+      }
     }
     // ════════════ End token deduct ════════════
 
