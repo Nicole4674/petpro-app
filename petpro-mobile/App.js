@@ -13,6 +13,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { supabase } from './lib/supabase';
 import { openWeb } from './lib/webLink';
+import SubscriptionGate from './components/SubscriptionGate';
+import SignupScreen from './screens/SignupScreen';
 import HomeScreen from './screens/HomeScreen';
 import ScheduleScreen from './screens/ScheduleScreen';
 import ClientsScreen from './screens/ClientsScreen';
@@ -326,9 +328,13 @@ export default function App() {
     <SafeAreaProvider>
       {!fontsLoaded || checking ? (
         <View style={styles.center}><ActivityIndicator color="#fff" size="large" /></View>
+      ) : authView === 'signup' ? (
+        <SignupScreen onComplete={() => setAuthView('welcome')} onCancel={() => setAuthView('welcome')} />
       ) : session ? (
         <NavigationContainer>
-          <MainTabs session={session} onSignOut={signOut} />
+          <SubscriptionGate session={session} onSignOut={signOut}>
+            <MainTabs session={session} onSignOut={signOut} />
+          </SubscriptionGate>
           <StatusBar style="light" />
         </NavigationContainer>
       ) : authView === 'welcome' ? (
@@ -337,11 +343,14 @@ export default function App() {
           <Text style={styles.title}>PetPro</Text>
           <Text style={styles.tagline}>Grooming & boarding, run from your pocket.</Text>
 
-          <Pressable style={styles.button} onPress={() => { setError(''); setAuthView('login'); }}>
-            <Text style={styles.buttonText}>Log In</Text>
+          <Pressable style={styles.button} onPress={() => { setError(''); setAuthView('signup'); }}>
+            <Text style={styles.buttonText}>Start Free Trial</Text>
+          </Pressable>
+          <Pressable style={styles.buttonOutline} onPress={() => { setError(''); setAuthView('login'); }}>
+            <Text style={styles.buttonOutlineText}>Log In</Text>
           </Pressable>
 
-          <Text style={styles.welcomeHint}>New to PetPro? Create your account and choose a plan at{'\n'}petpro-app.vercel.app — then log in here.</Text>
+          <Text style={styles.welcomeHint}>14 days free — no card needed. Already with PetPro? Log in.</Text>
           <StatusBar style="light" />
         </View>
       ) : (
@@ -368,7 +377,9 @@ export default function App() {
           <Pressable style={[styles.button, loading && { opacity: 0.6 }]} onPress={signIn} disabled={loading}>
             {loading ? <ActivityIndicator color="#5b21b6" /> : <Text style={styles.buttonText}>Sign In</Text>}
           </Pressable>
-          <Text style={styles.createLinkText}>New to PetPro? Sign up at petpro-app.vercel.app</Text>
+          <Pressable style={styles.createLink} onPress={() => { setError(''); setAuthView('signup'); }}>
+            <Text style={styles.createLinkText}>New to PetPro? Start your free trial →</Text>
+          </Pressable>
           <StatusBar style="light" />
         </KeyboardAvoidingView>
       )}

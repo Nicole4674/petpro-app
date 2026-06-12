@@ -132,6 +132,20 @@ var PAYMENT_LINKS = {
   growing:  'https://buy.stripe.com/9B614pdfv1yGcsn6hB7ok00',
 }
 
+// ─── NO-TRIAL twins (tier slug → URL) ─────────────────────────────
+// Shown ONLY to accounts that already used a trial — e.g. app signups
+// whose card-free trial expired, or returning canceled accounts. Same
+// products + prices, just NO free-trial period (Twilio + Claude cost
+// real money; one trial per account, ever). Charged on day one.
+// For reference, the regular links above carry: Basic 30-day trial,
+// Pro 30-day, Pro+ 14-day, Growing 14-day.
+var NO_TRIAL_PAYMENT_LINKS = {
+  basic:    'https://buy.stripe.com/bJeeVfdfv9189gb49t7ok08',
+  pro:      'https://buy.stripe.com/bJe14p0sJb9g78321l7ok09',
+  pro_plus: 'https://buy.stripe.com/28EfZj3EV918fEz5dx7ok0a',
+  growing:  'https://buy.stripe.com/28EdRb4IZgtA783eO77ok0b',
+}
+
 // ─── Comparison table rows ────────────────────────────────────────
 // Tier order for the table columns: Basic, Pro, Pro+, Growing, Enterprise
 // Each row's `included` array matches that order. "✓" = yes, "—" = no, string = custom value
@@ -268,6 +282,20 @@ export default function Plans() {
     var { data: { session } } = await supabase.auth.getSession()
     if (session && session.user) {
       var paymentUrl = PAYMENT_LINKS[tierSlug]
+      // One trial per account, EVER: if this account already used a trial
+      // (app card-free trial expired, canceled sub, etc.) send them to the
+      // NO-TRIAL twin link so trials can't stack. Brand-new web signups
+      // never hit this — they have no groomer history yet.
+      try {
+        var { data: gRow } = await supabase
+          .from('groomers')
+          .select('trial_ends_at, subscription_status')
+          .eq('id', session.user.id)
+          .maybeSingle()
+        if (gRow && (gRow.trial_ends_at || gRow.subscription_status)) {
+          paymentUrl = NO_TRIAL_PAYMENT_LINKS[tierSlug] || paymentUrl
+        }
+      } catch (e) { /* lookup failed — fall back to the regular link */ }
       if (!paymentUrl) {
         navigate('/signup?tier=' + tierSlug)
         return

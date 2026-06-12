@@ -103,16 +103,10 @@ export default function BillingScreen({ session, navigation }) {
             ) : <Text style={styles.muted}>No token balance yet.</Text>}
           </View>
 
-          {/* Manage on the web */}
+          {/* Manage on the web — plain text only (Google Play policy: no billing link-out) */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Manage Your Plan</Text>
-            <Text style={styles.muted}>
-              To change your plan, buy more tokens, or update your payment details, please visit PetPro on the web and sign in.
-            </Text>
-            <Pressable style={styles.signinBtn} onPress={() => Linking.openURL(WEB_SIGNIN)}>
-              <Ionicons name="open-outline" size={16} color="#fff" />
-              <Text style={styles.signinText}>Visit PetPro on the web</Text>
-            </Pressable>
+            <Text style={styles.muted}>Manage your plan at trypetpro.com.</Text>
           </View>
         </ScrollView>
       )}
