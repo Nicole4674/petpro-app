@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { colors, shadow } from '../lib/theme';
 import GradientHeader from '../components/GradientHeader';
 import { openWeb, portalSignupLink } from '../lib/webLink';
+import { APP_TRIAL_KEY } from '../lib/appConfig';
 
 export default function SettingsScreen({ session, navigation }) {
   const [loading, setLoading] = useState(true);
@@ -13,7 +14,43 @@ export default function SettingsScreen({ session, navigation }) {
   const [savingPay, setSavingPay] = useState(false);
   const [marking, setMarking] = useState(false);
   const [markedCount, setMarkedCount] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [err, setErr] = useState('');
+
+  function confirmDeleteAccount() {
+    Alert.alert(
+      'Delete your account?',
+      'This permanently deletes your PetPro account and shop data. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => {
+          Alert.alert(
+            'Are you absolutely sure?',
+            'Your account, clients, pets, appointments and all shop data will be permanently removed.',
+            [
+              { text: 'Keep my account', style: 'cancel' },
+              { text: 'Yes, delete everything', style: 'destructive', onPress: deleteAccount },
+            ]
+          );
+        } },
+      ]
+    );
+  }
+
+  async function deleteAccount() {
+    setDeleting(true); setErr('');
+    try {
+      const { error } = await supabase.functions.invoke('delete-groomer-account', {
+        body: {},
+        headers: { 'x-petpro-app-key': APP_TRIAL_KEY },
+      });
+      if (error) throw error;
+      await supabase.auth.signOut();
+    } catch (e) {
+      setErr(e.message || 'Could not delete your account. Please try again or email nicole@trypetpro.com.');
+      setDeleting(false);
+    }
+  }
 
   useEffect(() => { load(); }, []);
 
@@ -143,12 +180,32 @@ export default function SettingsScreen({ session, navigation }) {
             <View style={styles.line}><Ionicons name="person-outline" size={16} color={colors.textMute} /><Text style={styles.lineText}>{session?.user?.email}</Text></View>
           </View>
 
+          {/* Legal */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Legal</Text>
+            <Pressable style={styles.linkRow} onPress={() => openWeb('/privacy')}>
+              <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} /><Text style={styles.linkText}>Privacy Policy</Text><Ionicons name="open-outline" size={18} color={colors.textFaint} />
+            </Pressable>
+            <Pressable style={styles.linkRow} onPress={() => openWeb('/terms')}>
+              <Ionicons name="document-text-outline" size={18} color={colors.primary} /><Text style={styles.linkText}>Terms of Service</Text><Ionicons name="open-outline" size={18} color={colors.textFaint} />
+            </Pressable>
+          </View>
+
           {/* Open on web */}
           <Pressable style={styles.webBtn} onPress={() => openWeb('/settings/shop')}>
             <Ionicons name="open-outline" size={16} color={colors.primaryDark} />
             <Text style={styles.webText}>Open full settings on web</Text>
           </Pressable>
           <Text style={styles.note}>The website has more settings (hours, advanced options) than the app.</Text>
+
+          {/* Danger zone — account deletion (Google Play requirement) */}
+          <View style={styles.dangerCard}>
+            <Text style={styles.dangerTitle}>Delete Account</Text>
+            <Text style={styles.dangerHint}>Permanently delete your PetPro account and all shop data. This cannot be undone.</Text>
+            <Pressable style={[styles.deleteBtn, deleting && { opacity: 0.6 }]} onPress={confirmDeleteAccount} disabled={deleting}>
+              {deleting ? <ActivityIndicator color="#fff" /> : <><Ionicons name="trash-outline" size={16} color="#fff" /><Text style={styles.deleteText}>Delete my account</Text></>}
+            </Pressable>
+          </View>
         </ScrollView>
       )}
     </View>
@@ -182,5 +239,10 @@ const styles = StyleSheet.create({
   webBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.primaryLight, borderRadius: 12, paddingVertical: 14, marginTop: 4 },
   webText: { color: colors.primaryDark, fontWeight: '800', fontSize: 15 },
   note: { textAlign: 'center', color: colors.textFaint, fontSize: 12, marginTop: 10, lineHeight: 17 },
+  dangerCard: { backgroundColor: '#fef2f2', borderRadius: 16, padding: 16, marginTop: 20, borderWidth: 1, borderColor: '#fecaca' },
+  dangerTitle: { fontSize: 13, fontWeight: '800', color: '#b91c1c', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  dangerHint: { fontSize: 13, color: '#7f1d1d', lineHeight: 19, marginBottom: 12 },
+  deleteBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#dc2626', borderRadius: 12, paddingVertical: 13 },
+  deleteText: { color: '#fff', fontWeight: '800', fontSize: 15 },
   err: { color: '#b91c1c', textAlign: 'center', marginBottom: 12 },
 });

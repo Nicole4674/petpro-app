@@ -57,6 +57,13 @@ export default function Account() {
   var [error, setError] = useState('')
   var [groomer, setGroomer] = useState(null)
 
+  // ── Danger Zone state ──
+  // Two-step delete: open the confirm panel, then type DELETE exactly.
+  var [deleteOpen, setDeleteOpen] = useState(false)
+  var [deleteText, setDeleteText] = useState('')
+  var [deleteBusy, setDeleteBusy] = useState(false)
+  var [deleteError, setDeleteError] = useState('')
+
   useEffect(function () {
     loadAccount()
   }, [])
@@ -103,6 +110,34 @@ export default function Account() {
 
   function handleManage() {
     window.open(STRIPE_PORTAL_URL, '_blank', 'noopener,noreferrer')
+  }
+
+  // ── Permanently delete the account ──
+  // Calls the delete-account edge function: cancels the Stripe subscription,
+  // wipes all shop data (clients, pets, appointments, everything), removes
+  // client/staff logins, then deletes this login. There is no undo.
+  async function handleDeleteAccount() {
+    if (deleteText !== 'DELETE') {
+      setDeleteError('Type DELETE (all caps) to confirm.')
+      return
+    }
+    setDeleteBusy(true)
+    setDeleteError('')
+    try {
+      var { data, error: fnErr } = await supabase.functions.invoke('delete-account', {
+        body: { confirm: 'DELETE' },
+      })
+      if (fnErr) throw new Error(fnErr.message || 'Delete failed')
+      if (data && data.error) throw new Error(data.error)
+      // Account is gone — sign out locally and leave
+      await supabase.auth.signOut()
+      alert('Your account and all data have been deleted. We\'re sorry to see you go. 🐾')
+      window.location.href = '/login'
+    } catch (e) {
+      console.error('[Account] delete error:', e)
+      setDeleteError(e.message || 'Something went wrong — your account was NOT deleted. Email nicole@trypetpro.com for help.')
+      setDeleteBusy(false)
+    }
   }
 
   // ── Render ───────────────────────────────────────────────────────
@@ -354,6 +389,131 @@ export default function Account() {
               >
                 ✉️ nicole@trypetpro.com
               </a>
+            </div>
+
+            {/* ═══════════ DANGER ZONE — delete account ═══════════ */}
+            {/* Also satisfies Google Play's account-deletion requirement — */}
+            {/* the Play Data Safety form links to this page. */}
+            <div style={{
+              background: '#fff',
+              border: '1px solid #fecaca',
+              borderRadius: '16px',
+              padding: '24px',
+              marginTop: '20px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+            }}>
+              <div style={{
+                textTransform: 'uppercase',
+                fontSize: '11px',
+                fontWeight: 700,
+                color: '#dc2626',
+                letterSpacing: '0.5px',
+                marginBottom: '12px'
+              }}>
+                ⚠️ Danger Zone
+              </div>
+
+              {!deleteOpen ? (
+                <>
+                  <div style={{ color: '#4b5563', fontSize: '14px', lineHeight: '1.6', marginBottom: '12px' }}>
+                    Permanently delete your PetPro account. This cancels your subscription and erases your entire shop — clients, pets, appointments, messages, everything. <strong>This cannot be undone.</strong>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={function () { setDeleteOpen(true); setDeleteText(''); setDeleteError('') }}
+                    style={{
+                      padding: '10px 18px',
+                      background: '#fff',
+                      color: '#dc2626',
+                      border: '1px solid #fca5a5',
+                      borderRadius: '10px',
+                      fontWeight: 600,
+                      fontSize: '14px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Delete my account…
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{
+                    background: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    color: '#991b1b',
+                    padding: '14px',
+                    borderRadius: '10px',
+                    fontSize: '13px',
+                    lineHeight: '1.6',
+                    marginBottom: '14px'
+                  }}>
+                    <strong>Last warning.</strong> Deleting your account will immediately:
+                    cancel your subscription (no further charges), erase all clients, pets,
+                    appointments, boarding records, messages, punch cards, and staff accounts,
+                    and remove your clients' portal logins. <strong>Nothing can be recovered afterward.</strong>
+                    <br /><br />
+                    If you're just unhappy with something, email nicole@trypetpro.com first — we read everything.
+                  </div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>
+                    Type <span style={{ fontFamily: 'monospace', color: '#dc2626' }}>DELETE</span> to confirm:
+                  </label>
+                  <input
+                    type="text"
+                    value={deleteText}
+                    onChange={function (e) { setDeleteText(e.target.value) }}
+                    placeholder="DELETE"
+                    autoComplete="off"
+                    style={{
+                      padding: '10px 12px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      width: '200px',
+                      marginBottom: '12px',
+                      display: 'block'
+                    }}
+                  />
+                  {deleteError && (
+                    <div style={{ color: '#dc2626', fontSize: '13px', marginBottom: '10px' }}>{deleteError}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      disabled={deleteBusy || deleteText !== 'DELETE'}
+                      onClick={handleDeleteAccount}
+                      style={{
+                        padding: '10px 18px',
+                        background: deleteText === 'DELETE' && !deleteBusy ? '#dc2626' : '#fca5a5',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '10px',
+                        fontWeight: 700,
+                        fontSize: '14px',
+                        cursor: deleteText === 'DELETE' && !deleteBusy ? 'pointer' : 'not-allowed'
+                      }}
+                    >
+                      {deleteBusy ? 'Deleting everything…' : 'Permanently delete my account'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={deleteBusy}
+                      onClick={function () { setDeleteOpen(false); setDeleteText(''); setDeleteError('') }}
+                      style={{
+                        padding: '10px 18px',
+                        background: '#fff',
+                        color: '#374151',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '10px',
+                        fontWeight: 600,
+                        fontSize: '14px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Never mind — keep my account
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </>
         )}
